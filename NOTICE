@@ -1,0 +1,12 @@
+PulseForge
+Copyright 2026 PulseForge contributors
+
+PulseForge is an independent C++ rhythm-game engine implementation informed by public documentation, public interoperability references and observable content formats.
+
+Reference projects studied for interoperability include FunkinCrew/funkin, ShadowMario/FNF-PsychEngine, Psych-Slice/P-Slice, DendyGG/H-Slice, HaxePixel/H-Slice, JordanSantiagoYT/FNF-JS-Engine and acc0untz0138/DenpaEx.
+
+Those projects are not part of the PulseForge core. Their source code, media and other assets are not relicensed by this repository.
+
+Third-party components used by PulseForge retain their respective upstream licenses and notice requirements. See the third-party documentation shipped with the corresponding source or release.
+
+"Friday Night Funkin'" and its logo are trademarks of The Funkin' Crew Inc. PulseForge is not official and is not affiliated with The Funkin' Crew Inc.
