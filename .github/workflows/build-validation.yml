@@ -1,0 +1,167 @@
+name: PulseForge cross-platform build validation
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_REF: import/pulseforge-0.9.7-oss
+
+jobs:
+  windows-x64:
+    if: ${{ github.event.issue.title == '[build-validation] PulseForge 0.9.7' }}
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 1
+
+      - name: Configure Windows MSVC x64
+        shell: pwsh
+        run: cmake --preset windows-msvc
+
+      - name: Build Windows Release
+        shell: pwsh
+        run: cmake --build --preset windows-release
+
+      - name: Inspect Windows binaries
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path out/build/msvc -Recurse -File |
+            Where-Object { $_.Extension -in '.exe','.dll','.lib' } |
+            Select-Object FullName,Length
+
+  linux-x86_64:
+    if: ${{ github.event.issue.title == '[build-validation] PulseForge 0.9.7' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 1
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
+
+      - name: Configure Linux Release
+        shell: bash
+        run: cmake --preset linux-release
+
+      - name: Build Linux Release
+        shell: bash
+        run: cmake --build --preset linux-release
+
+      - name: Inspect Linux binaries
+        shell: bash
+        run: |
+          find out/build/linux-release -maxdepth 4 -type f -perm -111 -print -exec file {} \; || true
+
+  macos:
+    if: ${{ github.event.issue.title == '[build-validation] PulseForge 0.9.7' }}
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 1
+
+      - name: Ensure CMake and Ninja
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v cmake >/dev/null || brew install cmake
+          command -v ninja >/dev/null || brew install ninja
+          cmake --version
+          ninja --version
+
+      - name: Configure macOS Release
+        shell: bash
+        env:
+          CMAKE_OSX_ARCHITECTURES: ${{ matrix.arch }}
+        run: cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES}"
+
+      - name: Build macOS Release
+        shell: bash
+        run: cmake --build --preset macos-release
+
+      - name: Inspect macOS binaries
+        shell: bash
+        run: |
+          find out/build/macos-release -maxdepth 4 -type f -perm -111 -print -exec file {} \; || true
+
+  android-arm64:
+    if: ${{ github.event.issue.title == '[build-validation] PulseForge 0.9.7' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK, NDK and CMake
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager \
+            'platforms;android-35' \
+            'build-tools;35.0.0' \
+            'ndk;28.2.13676358' \
+            'cmake;3.31.6'
+
+      - name: Build unsigned Android Release APK
+        shell: bash
+        env:
+          PULSEFORGE_ANDROID_BUILD_ROOT: ${{ runner.temp }}/pulseforge-android
+        run: |
+          set -euo pipefail
+          chmod +x platform/android/gradlew
+          cd platform/android
+          ./gradlew --no-daemon --stacktrace assembleRelease
+
+      - name: Inspect Android APK and native library
+        shell: bash
+        run: |
+          set -euo pipefail
+          find platform/android/app/build -type f \( -name '*.apk' -o -name 'libpulseforge.so' \) -print -exec ls -lh {} \; || true
+          find "$RUNNER_TEMP/pulseforge-android" -type f \( -name '*.apk' -o -name 'libpulseforge.so' \) -print -exec ls -lh {} \; || true
