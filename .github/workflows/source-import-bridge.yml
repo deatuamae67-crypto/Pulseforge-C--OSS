@@ -9,9 +9,9 @@ permissions:
 
 jobs:
   import-source:
-    if: ${{ github.event.issue.title == '[source-import] PulseForge 0.9.7' }}
+    if: ${{ github.event.issue.title == '[source-import-fast] PulseForge 0.9.7' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout import branch
         uses: actions/checkout@v4
@@ -19,48 +19,62 @@ jobs:
           ref: import/pulseforge-0.9.7-oss
           fetch-depth: 0
 
-      - name: Download public DevCore snapshot
+      - name: Download source folders from DevCore
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check --no-cache-dir 'gdown>=5.2,<6'
-          rm -rf /tmp/pulseforge-devcore
-          mkdir -p /tmp/pulseforge-devcore
-          gdown --folder --remaining-ok \
-            'https://drive.google.com/drive/folders/1MwUzOo9kJbSRD0bB_5tZuURHQ2fIqhBo' \
-            -O /tmp/pulseforge-devcore
+          rm -rf /tmp/pf-source
+          mkdir -p /tmp/pf-source/{include,src,android,tools}
 
-      - name: Locate and stage source tree
+          gdown --folder --remaining-ok \
+            'https://drive.google.com/drive/folders/1bGtwum34lRz9jyeYdxWMu8wdjC0NHPJr' \
+            -O /tmp/pf-source/include
+          gdown --folder --remaining-ok \
+            'https://drive.google.com/drive/folders/1AZ0jiUc1m0jOoqoUncTJePog4mtUYLMn' \
+            -O /tmp/pf-source/src
+          gdown --folder --remaining-ok \
+            'https://drive.google.com/drive/folders/17cXFrFe_QgA9t7hPDGgvPHnzF_bqW_L2' \
+            -O /tmp/pf-source/android
+          gdown --folder --remaining-ok \
+            'https://drive.google.com/drive/folders/1ftEhuAnsiLy508YJNek_QOfZgEq-mDxL' \
+            -O /tmp/pf-source/tools
+          gdown \
+            'https://drive.google.com/uc?id=1s21BIDkof22sneMCz1TCm9gTCl0ZaHdz' \
+            -O /tmp/pf-source/CMakeLists.txt
+
+      - name: Stage and validate source tree
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE_ROOT=''
-          while IFS= read -r cmake; do
-            candidate="$(dirname "$cmake")"
-            if [ -d "$candidate/include" ] && \
-               [ -d "$candidate/src" ] && \
-               [ -d "$candidate/platform/android" ] && \
-               [ -d "$candidate/tools" ]; then
-              SOURCE_ROOT="$candidate"
-              break
-            fi
-          done < <(find /tmp/pulseforge-devcore -type f -name CMakeLists.txt -print)
 
-          if [ -z "$SOURCE_ROOT" ]; then
-            echo 'Could not locate the PulseForge DevCore root.' >&2
-            find /tmp/pulseforge-devcore -maxdepth 3 -type f | head -200 >&2 || true
-            exit 1
-          fi
+          INC=/tmp/pf-source/include
+          SRC=/tmp/pf-source/src
+          ANDROID=/tmp/pf-source/android
+          TOOLS=/tmp/pf-source/tools
 
-          echo "Using DevCore root: $SOURCE_ROOT"
+          [ -d "$INC/pulseforge" ] || INC="$INC/include"
+          [ -f "$SRC/app/application.cpp" ] || SRC="$SRC/src"
+          [ -f "$ANDROID/app/build.gradle" ] || ANDROID="$ANDROID/android"
+          [ -f "$TOOLS/autochart/ml_backend.py" ] || TOOLS="$TOOLS/tools"
+
+          test -f "$INC/pulseforge/application.hpp"
+          test -f "$SRC/app/application.cpp"
+          test -f "$SRC/io/chart_loader.cpp"
+          test -f "$ANDROID/app/build.gradle"
+          test -f "$ANDROID/app/src/main/AndroidManifest.xml"
+          test -f "$TOOLS/autochart/ml_backend.py"
+          grep -Eq 'VERSION[[:space:]]+0\.9\.7' /tmp/pf-source/CMakeLists.txt
+
           rm -rf include src platform/android tools
-          mkdir -p platform
-          cp -a "$SOURCE_ROOT/include" ./include
-          cp -a "$SOURCE_ROOT/src" ./src
-          cp -a "$SOURCE_ROOT/platform/android" ./platform/android
-          cp -a "$SOURCE_ROOT/tools" ./tools
-          cp "$SOURCE_ROOT/CMakeLists.txt" ./CMakeLists.txt
+          mkdir -p include src platform/android tools
+          cp -a "$INC"/. ./include/
+          cp -a "$SRC"/. ./src/
+          cp -a "$ANDROID"/. ./platform/android/
+          cp -a "$TOOLS"/. ./tools/
+          cp /tmp/pf-source/CMakeLists.txt ./CMakeLists.txt
 
+          # Keep public source only: no local builds, backups, keys or proprietary SDK packages.
           find include src platform/android tools -type f \
             \( -name '*.pre_*' -o -name '*.premerge' -o -name '*.bak' -o -name '*~' \
                -o -name '*.jks' -o -name '*.keystore' -o -name '*.p12' -o -name '*.aar' \
@@ -80,8 +94,11 @@ jobs:
 
           find include src platform/android tools -type f | sort | tee /tmp/source-files.txt
           count="$(wc -l < /tmp/source-files.txt)"
+          bytes="$(du -sb include src platform/android tools | awk '{s += $1} END {print s}')"
           echo "Source files: $count"
+          echo "Source bytes: $bytes"
           test "$count" -ge 120
+          test "$bytes" -ge 3000000
 
       - name: Commit source code to import branch
         shell: bash
