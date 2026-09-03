@@ -11,8 +11,10 @@
 namespace pulseforge {
 
 // Parse a dot-decimal floating-point value without consulting the device
-// locale. Android's supported libc++ releases omit floating-point from_chars,
-// while desktop standard libraries provide the allocation-free fast path.
+// locale. Android's libc++ and Apple libc++ releases used by supported
+// PulseForge targets do not consistently provide floating-point from_chars,
+// while the other desktop standard libraries provide the allocation-free fast
+// path. Keep one locale-neutral fallback for those libc++ targets.
 template <typename Floating>
     requires std::is_floating_point_v<Floating>
 [[nodiscard]] inline bool parse_ascii_floating(
@@ -23,7 +25,7 @@ template <typename Floating>
         return false;
     }
     Floating candidate{};
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__APPLE__)
     try {
         std::istringstream input{std::string(source)};
         input.imbue(std::locale::classic());
