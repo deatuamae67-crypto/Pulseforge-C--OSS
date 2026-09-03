@@ -1482,7 +1482,7 @@ private:
         set_loading_phase(ContentLoadPhase::inspecting);
         std::atomic<bool> complete{false};
         bool loaded = false;
-        std::jthread worker([&]() noexcept {
+        std::thread worker([&]() noexcept {
             try {
                 loaded = load_content();
             } catch (const std::exception& exception) {

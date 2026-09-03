@@ -3319,7 +3319,7 @@ void draw_autochart_progress(
         return shared.cancel.load(std::memory_order_acquire);
     };
 
-    std::jthread worker([&]() {
+    std::thread worker([&]() {
         auto result = generate_autochart_mod(media, options);
         {
             const std::scoped_lock lock(shared.mutex);

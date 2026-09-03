@@ -4,7 +4,10 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <iomanip>
 #include <limits>
+#include <locale>
+#include <sstream>
 #include <string_view>
 
 namespace pulseforge {
@@ -226,18 +229,10 @@ namespace {
 }
 
 [[nodiscard]] std::string decimal(const double value) {
-    char buffer[64]{};
-    const auto converted = std::to_chars(
-        std::begin(buffer),
-        std::end(buffer),
-        value,
-        std::chars_format::fixed,
-        6
-    );
-    if (converted.ec != std::errc{}) {
-        return "0.000000";
-    }
-    return {buffer, converted.ptr};
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::fixed << std::setprecision(6) << value;
+    return output ? output.str() : std::string{"0.000000"};
 }
 
 // PULSEFORGE_P1_5_0E_EXTENDED_FFMPEG_PROFILE_MATRIX_V1

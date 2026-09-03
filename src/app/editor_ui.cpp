@@ -1,5 +1,6 @@
 #include "editor_ui.hpp"
 
+#include "pulseforge/ascii_number.hpp"
 #include "pulseforge/audio_transport.hpp"
 #include "pulseforge/note_types.hpp"
 
@@ -313,15 +314,7 @@ void append_bounded_utf8(
     if (cleaned.empty()) {
         return false;
     }
-    const auto parsed = std::from_chars(
-        cleaned.data(),
-        cleaned.data() + cleaned.size(),
-        result,
-        std::chars_format::general
-    );
-    return parsed.ec == std::errc{}
-        && parsed.ptr == cleaned.data() + cleaned.size()
-        && std::isfinite(result);
+    return parse_ascii_floating<double>(cleaned, result);
 }
 
 [[nodiscard]] bool parse_int(
