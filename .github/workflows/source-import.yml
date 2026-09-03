@@ -1,0 +1,114 @@
+name: Import PulseForge source
+
+on:
+  push:
+    branches:
+      - import/pulseforge-0.9.7-oss
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-source:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout import branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download public DevCore snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-cache-dir 'gdown>=5.2,<6'
+          rm -rf /tmp/pulseforge-devcore
+          mkdir -p /tmp/pulseforge-devcore
+          gdown --folder --remaining-ok \
+            'https://drive.google.com/drive/folders/1MwUzOo9kJbSRD0bB_5tZuURHQ2fIqhBo' \
+            -O /tmp/pulseforge-devcore
+
+      - name: Locate and stage source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_ROOT=''
+          while IFS= read -r cmake; do
+            candidate="$(dirname "$cmake")"
+            if [ -d "$candidate/include" ] && \
+               [ -d "$candidate/src" ] && \
+               [ -d "$candidate/platform/android" ] && \
+               [ -d "$candidate/tools" ]; then
+              SOURCE_ROOT="$candidate"
+              break
+            fi
+          done < <(find /tmp/pulseforge-devcore -type f -name CMakeLists.txt -print)
+
+          if [ -z "$SOURCE_ROOT" ]; then
+            echo 'Could not locate the PulseForge DevCore root.' >&2
+            find /tmp/pulseforge-devcore -maxdepth 3 -type f | head -200 >&2 || true
+            exit 1
+          fi
+
+          echo "Using DevCore root: $SOURCE_ROOT"
+          rm -rf include src platform/android tools
+          mkdir -p platform
+          cp -a "$SOURCE_ROOT/include" ./include
+          cp -a "$SOURCE_ROOT/src" ./src
+          cp -a "$SOURCE_ROOT/platform/android" ./platform/android
+          cp -a "$SOURCE_ROOT/tools" ./tools
+          cp "$SOURCE_ROOT/CMakeLists.txt" ./CMakeLists.txt
+
+          # Never publish local build products, historical backups or proprietary SDK payloads.
+          find include src platform/android tools -type f \
+            \( -name '*.pre_*' -o -name '*.premerge' -o -name '*.bak' -o -name '*~' \
+               -o -name '*.jks' -o -name '*.keystore' -o -name '*.p12' -o -name '*.aar' \
+               -o -name '*.apk' -o -name '*.aab' -o -name '*.so' -o -name '*.dll' \
+               -o -name '*.dylib' -o -name '*.exe' \) -delete
+
+          find include src platform/android tools -type d \
+            \( -name build -o -name out -o -name .gradle -o -name __pycache__ \
+               -o -name node_modules -o -name CMakeFiles \) -prune -exec rm -rf {} + || true
+
+          # The Discord Social SDK remains optional and is never committed.
+          rm -rf third_party/discord_social_sdk platform/android/app/libs
+
+          test -f include/pulseforge/application.hpp
+          test -f src/app/application.cpp
+          test -f src/io/chart_loader.cpp
+          test -f platform/android/app/build.gradle
+          test -f platform/android/app/src/main/AndroidManifest.xml
+          test -f tools/autochart/ml_backend.py
+
+          echo 'Source file counts:'
+          find include src platform/android tools -type f | sort | tee /tmp/source-files.txt
+          echo "Total: $(wc -l < /tmp/source-files.txt) files"
+
+      - name: Scan staged source for obvious private material
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find include src platform/android tools -type f \
+             \( -name '*.jks' -o -name '*.keystore' -o -name '*.p12' -o -name '*.aar' \
+                -o -name '*.apk' -o -name '*.aab' -o -name '*.exe' -o -name '*.dll' \) \
+             | grep -q .; then
+            echo 'Refusing to commit a private/binary payload.' >&2
+            exit 1
+          fi
+
+      - name: Commit source code
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CMakeLists.txt include src platform/android tools
+          if git diff --cached --quiet; then
+            echo 'Source tree is already current.'
+            exit 0
+          fi
+          git commit -m 'source: import PulseForge 0.9.7 engine'
+          git push origin HEAD:import/pulseforge-0.9.7-oss
