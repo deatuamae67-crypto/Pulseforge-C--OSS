@@ -1,0 +1,44 @@
+# Generated build trees and IDE state
+/out/
+/build*/
+/local-tools/
+/.vs/
+/.vscode/
+*.obj
+*.pdb
+
+# Runtime/user-generated data
+*.pfreplay
+*.log
+settings.local.json
+
+# Platform noise
+.DS_Store
+Thumbs.db
+
+# Generated releases and packaging
+/Release/
+/renders/
+
+# Android/Gradle generated state
+/platform/android/.gradle/
+/platform/android/**/build/
+/platform/android/.cxx/
+/platform/android/app/.cxx/
+/platform/android/local.properties
+*.jks
+*.keystore
+
+# Optional third-party SDKs obtained separately
+/third_party/discord_social_sdk/
+
+# AutoChart local environments and downloaded model/cache data
+/tools/autochart/.venv/
+/tools/autochart/cache/
+/tools/autochart/__pycache__/
+
+# Local game content and caches
+/mods/
+/renders/
+/out/
+*.partial.mp4
