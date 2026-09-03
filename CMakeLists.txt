@@ -788,10 +788,12 @@ if(PULSEFORGE_BUILD_APP)
                 set_property(TARGET pulseforge_cli APPEND PROPERTY INSTALL_RPATH "@loader_path")
             endif()
         endif()
-    elseif(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE AND WIN32)
-        message(WARNING
-            "Discord Social SDK is linked, but no runtime DLL was supplied. "
-            "Set PULSEFORGE_DISCORD_SDK_RUNTIME_LIBRARY to discord_partner_sdk.dll."
+    elseif(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE AND NOT ANDROID)
+        message(FATAL_ERROR
+            "Discord Social SDK is linked, but its runtime shared library is missing. "
+            "A linked PulseForge build would fail in the operating-system loader before "
+            "the fail-open Discord backend can run. Supply "
+            "PULSEFORGE_DISCORD_SDK_RUNTIME_LIBRARY or install the complete SDK archive."
         )
     endif()
 
