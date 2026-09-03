@@ -1,0 +1,71 @@
+name: PulseForge runtime-scene portability patch
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-source:
+    if: ${{ startsWith(github.event.issue.title, '[runtime-scene-patch] PulseForge 0.9.7') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: import/pulseforge-0.9.7-oss
+          fetch-depth: 0
+
+      - name: Replace remaining floating from_chars
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/app/runtime_scene.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          include_old = '#include "runtime_texture_policy.hpp"\n\n#include "pulseforge/content_descriptors.hpp"'
+          include_new = '#include "runtime_texture_policy.hpp"\n\n#include "pulseforge/ascii_number.hpp"\n#include "pulseforge/content_descriptors.hpp"'
+          if text.count(include_old) != 1:
+              raise SystemExit('runtime_scene.cpp: expected one include insertion point')
+          text = text.replace(include_old, include_new)
+
+          old = '''            double parsed{};
+            const auto converted = std::from_chars(
+                text.data(),
+                text.data() + text.size(),
+                parsed
+            );
+            return converted.ec == std::errc{}
+                    && converted.ptr == text.data() + text.size()
+                    && std::isfinite(parsed)
+                ? parsed
+                : fallback;'''
+          new = '''            double parsed{};
+            return parse_ascii_floating<double>(text, parsed)
+                ? parsed
+                : fallback;'''
+          if text.count(old) != 1:
+              raise SystemExit('runtime_scene.cpp: expected one audited event-number parser')
+          text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          git diff -- src/app/runtime_scene.cpp
+
+      - name: Commit runtime-scene portability fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/runtime_scene.cpp
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'fix: centralize runtime event number parsing'
+          git push origin HEAD:import/pulseforge-0.9.7-oss
