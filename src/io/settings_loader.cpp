@@ -1455,6 +1455,11 @@ SettingsLoadResult load_settings(const std::filesystem::path& path) {
             );
         }
 
+        if (const auto discord_error =
+                discord_settings_validation_error(settings.discord);
+            discord_error.has_value()) {
+            return {std::nullopt, *discord_error};
+        }
         sanitize(settings);
         rebuild_legacy_lane_bindings(settings);
         return {std::move(settings), {}};

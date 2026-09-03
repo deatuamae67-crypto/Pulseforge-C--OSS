@@ -466,6 +466,17 @@ private:
     return value;
 }
 
+[[nodiscard]] std::optional<long double> token_long_double(const Token& token) {
+    if (token.kind != TokenKind::number) {
+        return std::nullopt;
+    }
+    long double value{};
+    if (!parse_ascii_floating(token.text, value)) {
+        return std::nullopt;
+    }
+    return value;
+}
+
 [[nodiscard]] std::optional<std::int64_t> token_integer(const Token& token) {
     if (token.kind != TokenKind::number
         || token.text.find_first_of(".eE") != std::string::npos) {
@@ -501,12 +512,12 @@ private:
 }
 
 [[nodiscard]] std::optional<std::uint64_t> duration_to_microseconds(
-    const double milliseconds
+    const long double milliseconds
 ) noexcept {
-    if (!std::isfinite(milliseconds) || milliseconds < 0.0) {
+    if (!std::isfinite(milliseconds) || milliseconds < 0.0L) {
         return std::nullopt;
     }
-    const auto scaled = static_cast<long double>(milliseconds) * 1'000.0L;
+    const auto scaled = milliseconds * 1'000.0L;
     if (scaled > static_cast<long double>(
             std::numeric_limits<std::uint64_t>::max())) {
         return std::nullopt;
@@ -635,8 +646,8 @@ enum class ParsePass : std::uint8_t { gather, emit };
 struct NativeCandidate final {
     std::optional<double> time;
     std::optional<double> time_ms;
-    std::optional<double> duration;
-    std::optional<double> duration_ms;
+    std::optional<long double> duration;
+    std::optional<long double> duration_ms;
     std::optional<std::int64_t> lane;
     std::optional<std::string> owner;
     std::optional<std::string> kind;
@@ -647,7 +658,7 @@ struct NativeCandidate final {
 struct PsychCandidate final {
     std::optional<double> time;
     std::optional<std::int64_t> raw_lane;
-    std::optional<double> duration;
+    std::optional<long double> duration;
     std::string kind{"normal"};
     std::string event_name;
     std::string event_value1;
@@ -791,6 +802,14 @@ private:
             return std::nullopt;
         }
         return token_double(take());
+    }
+
+    [[nodiscard]] std::optional<long double> read_duration_number() {
+        if (peek().kind != TokenKind::number) {
+            skip_value(0U);
+            return std::nullopt;
+        }
+        return token_long_double(take());
     }
 
     [[nodiscard]] std::optional<std::int64_t> read_integer() {
@@ -1406,10 +1425,10 @@ private:
                 native.time_ms = read_number();
                 native.saw_field = true;
             } else if (key == "duration") {
-                native.duration = read_number();
+                native.duration = read_duration_number();
                 native.saw_field = true;
             } else if (key == "durationMs") {
-                native.duration_ms = read_number();
+                native.duration_ms = read_duration_number();
                 native.saw_field = true;
             } else if (key == "lane") {
                 native.lane = read_integer();
@@ -1529,7 +1548,7 @@ private:
                     if (candidate.raw_lane.has_value() && *candidate.raw_lane < 0)
                         candidate.event_name = read_scalar_event_value();
                     else
-                        candidate.duration = read_number();
+                        candidate.duration = read_duration_number();
                     break;
                 case 3U:
                     if (candidate.raw_lane.has_value() && *candidate.raw_lane < 0)
@@ -1886,9 +1905,9 @@ private:
         const auto time_us = candidate.time.has_value()
             ? milliseconds_to_microseconds(*candidate.time)
             : std::nullopt;
-        const double raw_duration = candidate.duration.value_or(0.0);
-        const double psych_duration = raw_duration < 0.0
-            ? 0.0
+        const long double raw_duration = candidate.duration.value_or(0.0L);
+        const long double psych_duration = raw_duration < 0.0L
+            ? 0.0L
             : raw_duration;
         const auto duration_us = duration_to_microseconds(
             psych_duration
