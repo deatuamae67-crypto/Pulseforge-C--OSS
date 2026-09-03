@@ -1,6 +1,7 @@
 name: PulseForge cross-platform build validation
 
 on:
+  workflow_dispatch:
   issues:
     types: [opened]
 
@@ -12,7 +13,7 @@ env:
 
 jobs:
   windows-x64:
-    if: ${{ github.event.issue.title == '[build-validation] PulseForge 0.9.7' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[build-validation] PulseForge 0.9.7') }}
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
@@ -24,11 +25,15 @@ jobs:
 
       - name: Configure Windows MSVC x64
         shell: pwsh
-        run: cmake --preset windows-msvc
+        run: |
+          cmake --preset windows-msvc 2>&1 | Tee-Object -FilePath windows-configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Windows Release
         shell: pwsh
-        run: cmake --build --preset windows-release
+        run: |
+          cmake --build --preset windows-release 2>&1 | Tee-Object -FilePath windows-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Inspect Windows binaries
         shell: pwsh
@@ -37,8 +42,19 @@ jobs:
             Where-Object { $_.Extension -in '.exe','.dll','.lib' } |
             Select-Object FullName,Length
 
+      - name: Upload Windows validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-logs-windows-x64
+          path: |
+            windows-configure.log
+            windows-build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   linux-x86_64:
-    if: ${{ github.event.issue.title == '[build-validation] PulseForge 0.9.7' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[build-validation] PulseForge 0.9.7') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -63,19 +79,34 @@ jobs:
 
       - name: Configure Linux Release
         shell: bash
-        run: cmake --preset linux-release
+        run: |
+          set -o pipefail
+          cmake --preset linux-release 2>&1 | tee linux-configure.log
 
       - name: Build Linux Release
         shell: bash
-        run: cmake --build --preset linux-release
+        run: |
+          set -o pipefail
+          cmake --build --preset linux-release 2>&1 | tee linux-build.log
 
       - name: Inspect Linux binaries
         shell: bash
         run: |
           find out/build/linux-release -maxdepth 4 -type f -perm -111 -print -exec file {} \; || true
 
+      - name: Upload Linux validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-logs-linux-x86_64
+          path: |
+            linux-configure.log
+            linux-build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   macos:
-    if: ${{ github.event.issue.title == '[build-validation] PulseForge 0.9.7' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[build-validation] PulseForge 0.9.7') }}
     name: macOS ${{ matrix.arch }}
     strategy:
       fail-fast: false
@@ -107,19 +138,34 @@ jobs:
         shell: bash
         env:
           CMAKE_OSX_ARCHITECTURES: ${{ matrix.arch }}
-        run: cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES}"
+        run: |
+          set -o pipefail
+          cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES}" 2>&1 | tee macos-configure.log
 
       - name: Build macOS Release
         shell: bash
-        run: cmake --build --preset macos-release
+        run: |
+          set -o pipefail
+          cmake --build --preset macos-release 2>&1 | tee macos-build.log
 
       - name: Inspect macOS binaries
         shell: bash
         run: |
           find out/build/macos-release -maxdepth 4 -type f -perm -111 -print -exec file {} \; || true
 
+      - name: Upload macOS validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-logs-macos-${{ matrix.arch }}
+          path: |
+            macos-configure.log
+            macos-build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   android-arm64:
-    if: ${{ github.event.issue.title == '[build-validation] PulseForge 0.9.7' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[build-validation] PulseForge 0.9.7') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -154,14 +200,23 @@ jobs:
         env:
           PULSEFORGE_ANDROID_BUILD_ROOT: ${{ runner.temp }}/pulseforge-android
         run: |
-          set -euo pipefail
+          set -o pipefail
           chmod +x platform/android/gradlew
           cd platform/android
-          ./gradlew --no-daemon --stacktrace assembleRelease
+          ./gradlew --no-daemon --stacktrace assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/android-build.log"
 
       - name: Inspect Android APK and native library
         shell: bash
         run: |
           set -euo pipefail
-          find platform/android/app/build -type f \( -name '*.apk' -o -name 'libpulseforge.so' \) -print -exec ls -lh {} \; || true
-          find "$RUNNER_TEMP/pulseforge-android" -type f \( -name '*.apk' -o -name 'libpulseforge.so' \) -print -exec ls -lh {} \; || true
+          find platform/android/app/build -type f \( -name '*.apk' -o -name 'libpulseforge.so' -o -name 'libmain.so' \) -print -exec ls -lh {} \; || true
+          find "$RUNNER_TEMP/pulseforge-android" -type f \( -name '*.apk' -o -name 'libpulseforge.so' -o -name 'libmain.so' \) -print -exec ls -lh {} \; || true
+
+      - name: Upload Android validation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-logs-android-arm64
+          path: android-build.log
+          if-no-files-found: ignore
+          retention-days: 14
