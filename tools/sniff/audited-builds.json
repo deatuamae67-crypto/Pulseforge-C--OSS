@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "auditDate": "2026-08-12",
+  "builds": [
+    {
+      "name": "sniff-rusted.exe supplied in SNIFF.zip",
+      "zipSha256": "17D2E32D17021CD5CD605B55820D9645CDAE29DFF519C36DFDB0114B04301C1B",
+      "sha256": "182387A573EC9E71BC3E3341632831A63655808153A0DAAB6A228383E26550B8",
+      "sizeBytes": 4901888,
+      "authenticode": "NotSigned",
+      "peMachine": "x64",
+      "peSubsystem": "Windows CUI",
+      "peTimestamp": "0x6A7319F6",
+      "sourceCandidate": "https://github.com/HaxePixel/SNIFF-RUSTED/tree/d0a8fe9a71e858ecfca7bfb0a2154999466d794f",
+      "reproduciblyMatched": false,
+      "embeddedOrRedistributable": false
+    }
+  ]
+}

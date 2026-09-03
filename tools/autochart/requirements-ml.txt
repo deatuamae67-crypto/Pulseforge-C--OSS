@@ -1,0 +1,13 @@
+# PulseForge AutoChart neural backend (project-local Python 3.11)
+setuptools==80.9.0
+numpy==1.26.4
+soundfile>=0.12,<0.14
+librosa>=0.10,<0.12
+onnxruntime>=1.18,<2
+basic-pitch==0.4.0
+demucs==4.1.0
+beat-this==1.1.0
+adtof-pytorch @ https://github.com/xavriley/ADTOF-pytorch/archive/85c192e78f716ea0b111cc8a5ee4a8f6a3a4f8a9.zip
+
+# Optional vocal timing refinement.
+transformers==5.15.0

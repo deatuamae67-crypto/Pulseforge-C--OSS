@@ -1,0 +1,155 @@
+plugins {
+    id 'com.android.application'
+}
+
+import groovy.json.JsonSlurper
+
+def externalBuildRoot = providers.gradleProperty('PULSEFORGE_ANDROID_BUILD_ROOT').orNull
+if (externalBuildRoot != null && !externalBuildRoot.trim().isEmpty()) {
+    buildDir = file("${externalBuildRoot}/gradle")
+}
+
+def generatedPulseForgeAssets = file("$buildDir/generated/pulseforge-assets")
+def pulseForgeSourceAssets = file('../../../assets')
+
+def discordSdkAarProperty = providers.gradleProperty('PULSEFORGE_DISCORD_SDK_AAR').orNull
+def pulseForgeSettingsFile = file('../../../assets/settings.json')
+def settingsDiscordApplicationId = '0'
+if (pulseForgeSettingsFile.isFile()) {
+    try {
+        def parsedSettings = new JsonSlurper().parse(pulseForgeSettingsFile)
+        def configuredId = parsedSettings?.discord?.applicationId
+        if (configuredId != null) {
+            settingsDiscordApplicationId = configuredId.toString()
+        }
+    } catch (Exception ignored) {
+        // Native settings validation remains authoritative. Gradle falls back to 0.
+    }
+}
+def discordApplicationId = providers.gradleProperty('PULSEFORGE_DISCORD_APPLICATION_ID')
+    .orElse(settingsDiscordApplicationId).get()
+def bundledDiscordSdkAar = file('../../../third_party/discord_social_sdk/android/discord_partner_sdk.aar')
+def appLocalDiscordSdkAar = file('libs/discord_partner_sdk.aar')
+def discordSdkAar = discordSdkAarProperty != null && !discordSdkAarProperty.trim().isEmpty()
+    ? file(discordSdkAarProperty)
+    : (bundledDiscordSdkAar.exists() ? bundledDiscordSdkAar : appLocalDiscordSdkAar)
+def discordSdkEnabled = discordSdkAar.exists()
+
+if (discordSdkEnabled && discordApplicationId == '0') {
+    throw new GradleException(
+        'Discord Social SDK is present but PULSEFORGE_DISCORD_APPLICATION_ID is 0. ' +
+        'Set the real Discord Application ID so Android can register its OAuth deep link.'
+    )
+}
+
+
+// Keep the APK practical while retaining every asset needed by the portable
+// runtime. Large Windows-only MP4 sources are intentionally excluded; Android
+// uses the pre-decoded intro sequence instead.
+tasks.register('preparePulseForgeAssets', Sync) {
+    into(new File(generatedPulseForgeAssets, 'pulseforge/assets'))
+    from(pulseForgeSourceAssets) {
+        include 'settings.json'
+        include 'demo/**'
+        include 'credits/**'
+        include 'ui/**'
+        include 'shaders/**'
+        include 'menu/**'
+        include 'intro/README.md'
+        include 'intro/watch-dogs-boot-FiL0S0V.mp4'
+        include 'intro/watch-dogs-decoded/**'
+        include 'intro/ps2/README.txt'
+        include 'intro/ps2/startup_ps2-decoded/**'
+        include 'intro/ps2/rsod_background-decoded/**'
+        includeEmptyDirs = false
+    }
+}
+
+android {
+    namespace = 'org.pulseforge.engine'
+    compileSdkVersion 35
+    ndkVersion = '28.2.13676358'
+
+    defaultConfig {
+        applicationId 'org.pulseforge.engine'
+        minSdkVersion(discordSdkEnabled ? 24 : 21)
+        targetSdkVersion 35
+        versionCode 90700
+        versionName '0.9.7'
+        manifestPlaceholders = [discordApplicationId: discordApplicationId]
+
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_PLATFORM=android-${discordSdkEnabled ? 24 : 21}",
+                    '-DANDROID_STL=c++_static',
+                    '-DPULSEFORGE_BUILD_APP=ON',
+                    '-DPULSEFORGE_BUILD_TESTS=OFF',
+                    '-DPULSEFORGE_ENABLE_LUA=ON',
+                    '-DPULSEFORGE_ENABLE_IPO=ON',
+                    '-DPULSEFORGE_NATIVE_ARCH=OFF',
+                    '-DPULSEFORGE_WINDOWS_GUI=OFF',
+                    '-DPULSEFORGE_BUNDLE_FFMPEG=OFF',
+                    "-DPULSEFORGE_DISCORD_APPLICATION_ID=${discordApplicationId}",
+                    "-DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=${discordSdkEnabled ? 'ON' : 'OFF'}"
+                abiFilters 'arm64-v8a'
+                targets 'pulseforge'
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            ndk {
+                debugSymbolLevel 'SYMBOL_TABLE'
+            }
+            proguardFiles getDefaultProguardFile('proguard-android.txt'),
+                'proguard-rules.pro'
+        }
+    }
+
+    sourceSets.main {
+        jniLibs.srcDir 'libs'
+        assets.srcDir generatedPulseForgeAssets
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file('../../../CMakeLists.txt')
+            version '3.31.6'
+            if (externalBuildRoot != null && !externalBuildRoot.trim().isEmpty()) {
+                buildStagingDirectory file("${externalBuildRoot}/cxx")
+            }
+        }
+    }
+
+    buildFeatures {
+        prefab true
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    lint {
+        abortOnError = false
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('preparePulseForgeAssets')
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    if (discordSdkEnabled) {
+        implementation files(discordSdkAar)
+        implementation 'androidx.browser:browser:1.8.0'
+    }
+}
+
+if (discordSdkAarProperty != null && !discordSdkEnabled) {
+    throw new GradleException("PULSEFORGE_DISCORD_SDK_AAR does not exist: ${discordSdkAar}")
+}
