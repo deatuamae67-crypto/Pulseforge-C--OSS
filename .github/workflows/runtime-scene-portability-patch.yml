@@ -25,34 +25,46 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('src/app/runtime_scene.cpp')
           text = path.read_text(encoding='utf-8')
 
-          include_old = '#include "runtime_texture_policy.hpp"\n\n#include "pulseforge/content_descriptors.hpp"'
-          include_new = '#include "runtime_texture_policy.hpp"\n\n#include "pulseforge/ascii_number.hpp"\n#include "pulseforge/content_descriptors.hpp"'
-          if text.count(include_old) != 1:
-              raise SystemExit('runtime_scene.cpp: expected one include insertion point')
-          text = text.replace(include_old, include_new)
+          include = '#include "pulseforge/ascii_number.hpp"'
+          if include not in text:
+              anchor = '#include "runtime_texture_policy.hpp"\n'
+              if text.count(anchor) != 1:
+                  raise SystemExit('runtime_scene.cpp: expected one include anchor')
+              text = text.replace(anchor, anchor + '\n' + include + '\n', 1)
 
-          old = '''            double parsed{};
-            const auto converted = std::from_chars(
-                text.data(),
-                text.data() + text.size(),
-                parsed
-            );
-            return converted.ec == std::errc{}
-                    && converted.ptr == text.data() + text.size()
-                    && std::isfinite(parsed)
-                ? parsed
-                : fallback;'''
-          new = '''            double parsed{};
+          event_start = text.find('const auto event_number = [](')
+          event_end = text.find('\n        };', event_start)
+          if event_start < 0 or event_end < 0:
+              raise SystemExit('runtime_scene.cpp: event_number lambda not found')
+
+          block = text[event_start:event_end]
+          pattern = re.compile(
+              r'''            double parsed\{\};\n'''
+              r'''            const auto converted = std::from_chars\(\n'''
+              r'''                text\.data\(\),\n'''
+              r'''                text\.data\(\) \+ text\.size\(\),\n'''
+              r'''                parsed\n'''
+              r'''            \);\n'''
+              r'''            return converted\.ec == std::errc\{\}\n'''
+              r'''                    && converted\.ptr == text\.data\(\) \+ text\.size\(\)\n'''
+              r'''                    && std::isfinite\(parsed\)\n'''
+              r'''                \? parsed\n'''
+              r'''                : fallback;'''
+          )
+          replacement = '''            double parsed{};
             return parse_ascii_floating<double>(text, parsed)
                 ? parsed
                 : fallback;'''
-          if text.count(old) != 1:
-              raise SystemExit('runtime_scene.cpp: expected one audited event-number parser')
-          text = text.replace(old, new)
+          block, count = pattern.subn(replacement, block)
+          if count != 1:
+              raise SystemExit(f'runtime_scene.cpp: expected one event-number from_chars block, found {count}')
+
+          text = text[:event_start] + block + text[event_end:]
           path.write_text(text, encoding='utf-8')
           PY
 
