@@ -1,6 +1,8 @@
 #include "runtime_scene.hpp"
 #include "runtime_texture_policy.hpp"
 
+#include "pulseforge/ascii_number.hpp"
+
 #include "pulseforge/content_descriptors.hpp"
 #include "psych_camera_target.hpp"
 #include "psych_character_semantics.hpp"
@@ -5291,16 +5293,9 @@ struct RuntimeScene::Implementation {
                 return fallback;
             }
             double parsed{};
-            const auto converted = std::from_chars(
-                text.data(),
-                text.data() + text.size(),
-                parsed
-            );
-            return converted.ec == std::errc{}
-                    && converted.ptr == text.data() + text.size()
-                    && std::isfinite(parsed)
-                ? parsed
-                : fallback;
+  return parse_ascii_floating<double>(text, parsed)
+      ? parsed
+      : fallback;
         };
 
         if (equals_ascii_insensitive(name, "Play Animation")
