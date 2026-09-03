@@ -1,0 +1,112 @@
+name: PulseForge portability patch bridge
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-source:
+    if: ${{ startsWith(github.event.issue.title, '[portability-patch] PulseForge 0.9.7') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: import/pulseforge-0.9.7-oss
+          fetch-depth: 0
+
+      - name: Apply audited portability replacements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(
+                      f'{path}: expected {expected} occurrences, found {count}: {old!r}'
+                  )
+              file.write_text(text.replace(old, new), encoding='utf-8')
+              print(f'{path}: replaced {count} audited occurrence(s)')
+
+          replace_exact(
+              'src/app/application.cpp',
+              '        std::jthread worker([&]() noexcept {',
+              '        std::thread worker([&]() noexcept {',
+          )
+          replace_exact(
+              'src/app/launcher.cpp',
+              '    std::jthread worker([&]() {',
+              '    std::thread worker([&]() {',
+          )
+          replace_exact(
+              'src/app/editor_ui.cpp',
+              '#include "editor_ui.hpp"\n\n#include "pulseforge/audio_transport.hpp"',
+              '#include "editor_ui.hpp"\n\n#include "pulseforge/ascii_number.hpp"\n#include "pulseforge/audio_transport.hpp"',
+          )
+          replace_exact(
+              'src/app/editor_ui.cpp',
+              '''    const auto parsed = std::from_chars(
+                  cleaned.data(),
+                  cleaned.data() + cleaned.size(),
+                  result,
+                  std::chars_format::general
+              );
+              return parsed.ec == std::errc{}
+                  && parsed.ptr == cleaned.data() + cleaned.size()
+                  && std::isfinite(result);''',
+              '''    return parse_ascii_floating<double>(cleaned, result);''',
+          )
+          replace_exact(
+              'src/io/offline_render.cpp',
+              '#include <cstdlib>\n#include <limits>\n#include <string_view>',
+              '#include <cstdlib>\n#include <iomanip>\n#include <limits>\n#include <locale>\n#include <sstream>\n#include <string_view>',
+          )
+          replace_exact(
+              'src/io/offline_render.cpp',
+              '''[[nodiscard]] std::string decimal(const double value) {
+              char buffer[64]{};
+              const auto converted = std::to_chars(
+                  std::begin(buffer),
+                  std::end(buffer),
+                  value,
+                  std::chars_format::fixed,
+                  6
+              );
+              if (converted.ec != std::errc{}) {
+                  return "0.000000";
+              }
+              return {buffer, converted.ptr};
+          }''',
+              '''[[nodiscard]] std::string decimal(const double value) {
+              std::ostringstream output;
+              output.imbue(std::locale::classic());
+              output << std::fixed << std::setprecision(6) << value;
+              return output ? output.str() : std::string{"0.000000"};
+          }''',
+          )
+          PY
+
+          git diff --check
+          git diff -- src/app/application.cpp src/app/launcher.cpp \
+            src/app/editor_ui.cpp src/io/offline_render.cpp
+
+      - name: Commit portability fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/application.cpp src/app/launcher.cpp \
+            src/app/editor_ui.cpp src/io/offline_render.cpp
+          test -n "$(git diff --cached --name-only)"
+          git commit -m 'fix: harden Apple and Android libc++ portability'
+          git push origin HEAD:import/pulseforge-0.9.7-oss
