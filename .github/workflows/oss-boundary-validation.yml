@@ -1,0 +1,84 @@
+name: PulseForge OSS boundary validation
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oss-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Reject non-redistributable or private build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          violations=()
+
+          while IFS= read -r path; do
+            lower="${path,,}"
+            base="${lower##*/}"
+
+            case "$lower" in
+              third_party/discord_social_sdk/*)
+                violations+=("$path :: raw Discord Social SDK input must not be tracked")
+                ;;
+            esac
+
+            case "$base" in
+              discord_partner_sdk.dll|libdiscord_partner_sdk.so|libdiscord_partner_sdk.dylib|discord_partner_sdk.aar)
+                violations+=("$path :: Discord Social SDK runtime must not be redistributed in the OSS repository")
+                ;;
+              *.jks|*.keystore|*.p12|*.pfx)
+                violations+=("$path :: signing key/container must not be tracked")
+                ;;
+              discordsocialsdk*.zip|discord-social-sdk*.zip|discord_social_sdk*.zip)
+                violations+=("$path :: raw Discord Social SDK archive must not be tracked")
+                ;;
+              pulseforge-v*.zip|pulseforge-v*.tar.gz|pulseforge-v*.apk)
+                violations+=("$path :: generated release package belongs in GitHub Releases/Actions, not source control")
+                ;;
+            esac
+
+            case "$lower" in
+              pulseforge.exe|pulseforge-cli.exe|discord_partner_sdk.dll)
+                violations+=("$path :: generated/private root runtime binary must not be tracked")
+                ;;
+            esac
+          done < <(git ls-files)
+
+          if (( ${#violations[@]} > 0 )); then
+            printf 'PulseForge OSS boundary violations detected:\n' >&2
+            printf ' - %s\n' "${violations[@]}" >&2
+            exit 1
+          fi
+
+          echo 'PulseForge OSS boundary validation passed.'
+
+      - name: Confirm documented Discord release boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f docs/DISCORD_SDK_DISTRIBUTION.md
+          test -f docs/RELEASE_REQUIREMENTS.md
+          test -f docs/OSS_SCOPE.md
+
+          grep -q 'PULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK' docs/RELEASE_REQUIREMENTS.md
+          grep -qi 'discord' docs/DISCORD_SDK_DISTRIBUTION.md
+          echo 'Discord OSS/release-boundary documentation is present.'
