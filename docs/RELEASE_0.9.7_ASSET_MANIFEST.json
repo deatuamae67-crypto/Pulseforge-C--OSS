@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "pulseforge_version": "0.9.7",
+  "tag": "v0.9.7",
+  "release_id": 382859979,
+  "release_target_sha": "b1e7b048a63118299c5fad795f2b4c607f931a86",
+  "source_run_id": 33891158742,
+  "source_workflow_path": ".github/workflows/release-artifacts.yml",
+  "source_head_sha": "6e49caed8f7abbe5f2104632d48bdc93f4baa3b1",
+  "recorded_date": "2026-09-04",
+  "actions_artifacts_expire_on": "2026-10-04",
+  "assets": [
+    {
+      "name": "PulseForge-v0.9.7-Android-arm64-test-signed.apk",
+      "size_bytes": 3920967,
+      "digest": "sha256:848e0b42ee581ac801260eb81828d6f17ec5d5925b154546cb7fb906f41a2a18"
+    },
+    {
+      "name": "PulseForge-v0.9.7-Android-arm64-test-signed.SHA256SUMS.txt",
+      "size_bytes": 114,
+      "digest": "sha256:b6e7b70a6b90a693a6c0c592c4cd0acaceb5161956c5aa70c8de5bcd52005a16"
+    },
+    {
+      "name": "PulseForge-v0.9.7-Linux-x86_64.tar.gz",
+      "size_bytes": 4919850,
+      "digest": "sha256:e9063dda68e7f6e5c1a5692d5718883b458d1855819fe5a7815f7928483a36ce"
+    },
+    {
+      "name": "PulseForge-v0.9.7-Linux-x86_64.SHA256SUMS.txt",
+      "size_bytes": 104,
+      "digest": "sha256:afd49b8bd81b61f302ff3b0e3698039afb262dd15f7a55eb5ae1d2736cd0a2af"
+    },
+    {
+      "name": "PulseForge-v0.9.7-macOS-arm64.tar.gz",
+      "size_bytes": 3619661,
+      "digest": "sha256:aebfea49ac288c93343776df759bfacb71d837057bf5deefd5263df74562204e"
+    },
+    {
+      "name": "PulseForge-v0.9.7-macOS-arm64.SHA256SUMS.txt",
+      "size_bytes": 103,
+      "digest": "sha256:1ca04d5e0648dd8bf4cf02b380ab1842ecd5aafaca600b11499fa4323e95f1b5"
+    },
+    {
+      "name": "PulseForge-v0.9.7-macOS-x86_64.tar.gz",
+      "size_bytes": 4136790,
+      "digest": "sha256:de7a93432316b12f6e60a21398c4adec51dc43527863ce1c1d2ecbcff25c5b1d"
+    },
+    {
+      "name": "PulseForge-v0.9.7-macOS-x86_64.SHA256SUMS.txt",
+      "size_bytes": 104,
+      "digest": "sha256:31e3d45d2f582bb247cea7672e789967774cba497770664da8eb45219cf01254"
+    },
+    {
+      "name": "PulseForge-v0.9.7-Windows-x86_64.zip",
+      "size_bytes": 7476560,
+      "digest": "sha256:b70d5adf35fd2b071b54b0711e91215985feb41fd1bf78b5b8f5d16d444291df"
+    },
+    {
+      "name": "PulseForge-v0.9.7-Windows-x86_64.SHA256SUMS.txt",
+      "size_bytes": 104,
+      "digest": "sha256:26d5e310d6b4d423a48412aacd8968d8d39addb52ef01716c3c0ae9735d60b46"
+    }
+  ]
+}
