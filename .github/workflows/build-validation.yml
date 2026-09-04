@@ -2,12 +2,25 @@ name: PulseForge cross-platform build validation
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/build-validation.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'include/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'assets/**'
+      - 'platform/android/**'
+      - 'third_party/**'
 
 permissions:
   contents: read
 
 env:
-  SOURCE_REF: ${{ github.ref_name }}
+  SOURCE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   windows-x64:
