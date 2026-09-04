@@ -1,0 +1,48 @@
+# Changelog
+
+All notable public PulseForge changes are documented in this file.
+
+## [0.9.7] - 2026-09-04
+
+### Added
+
+- Cross-platform OSS source tree for Windows x86_64, Linux x86_64, macOS x86_64, macOS arm64 and Android arm64.
+- Deterministic core-test coverage integrated into GitHub Actions.
+- Cross-platform CMake presets and release packaging workflows.
+- Discord Rich Presence integration boundary with an optional no-op backend when the Discord Social SDK is unavailable.
+- Runtime and packaging checks for Discord-enabled builds.
+- Public contribution and maintenance files, including `CONTRIBUTING.md`, `SECURITY.md`, pull-request and issue templates, and Dependabot configuration.
+
+### Changed
+
+- Public CI now validates the actual pull-request head instead of a fixed historical import branch.
+- Pull-request validation runs on every PR targeting `main` so required checks remain reportable for documentation-only changes.
+- CI validation uses concurrency cancellation so superseded runs do not continue consuming runners.
+- Obsolete import/patch bridge workflows used during the OSS bootstrap were removed after their changes had been incorporated.
+- Portability fixes were consolidated for Windows/MSVC, Linux, macOS/libc++ and Android/NDK builds.
+
+### Release packaging
+
+The release-artifact workflow produces:
+
+- `PulseForge-v0.9.7-Windows-x86_64.zip`
+- `PulseForge-v0.9.7-Linux-x86_64.tar.gz`
+- `PulseForge-v0.9.7-macOS-x86_64.tar.gz`
+- `PulseForge-v0.9.7-macOS-arm64.tar.gz`
+- `PulseForge-v0.9.7-Android-arm64-test-signed.apk`
+
+Each package is accompanied by SHA-256 metadata and platform-specific inspection output.
+
+### Validation
+
+The PulseForge engine/build source merged into `main` is byte-identical to the source at commit `fbb9ee22350a939071595721f5d6a35909d41a6d`, where both the cross-platform build-validation matrix and deterministic core-test matrix completed successfully.
+
+The integration was merged through PR #25 into `main` at commit `fe100c6f5ff5c69aff85ecf760696d5f0c5fd8d5`. Changes after the validated source commit were limited to documentation and `.github` repository/CI maintenance files.
+
+### Distribution notes
+
+- The Discord Social SDK itself is not redistributed in the public source repository.
+- Public no-SDK CI builds must not be described as final Discord-enabled releases.
+- A Discord-enabled package must include the required platform runtime and satisfy `docs/RELEASE_REQUIREMENTS.md`.
+- The Android CI artifact is test-signed and is not a production signing identity.
+- macOS CI packages are ad-hoc signed unless a separate production signing/notarization process is applied.
