@@ -76,7 +76,10 @@ android {
         targetSdkVersion 35
         versionCode 90700
         versionName '0.9.7'
-        manifestPlaceholders = [discordApplicationId: discordApplicationId]
+        manifestPlaceholders = [
+            discordApplicationId: discordApplicationId,
+            discordActivityEnabled: discordSdkEnabled.toString()
+        ]
 
         externalNativeBuild {
             cmake {

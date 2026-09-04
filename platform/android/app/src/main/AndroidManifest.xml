@@ -89,6 +89,7 @@
              from PULSEFORGE_DISCORD_APPLICATION_ID. -->
         <activity
             android:name="com.discord.socialsdk.AuthenticationActivity"
+            android:enabled="${discordActivityEnabled}"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
