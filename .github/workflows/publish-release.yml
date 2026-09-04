@@ -1,14 +1,12 @@
 name: Publish PulseForge release
 
 on:
-  push:
-    branches:
-      - 'release/v0.9.7'
   workflow_dispatch:
     inputs:
       run_id:
         description: 'Successful PulseForge release-artifact run ID'
         required: true
+        default: '33891158742'
         type: string
       tag:
         description: 'Release tag'
@@ -18,9 +16,10 @@ on:
       target_sha:
         description: 'Commit SHA to tag for the release'
         required: true
+        default: 'b1e7b048a63118299c5fad795f2b4c607f931a86'
         type: string
       publication_mode:
-        description: 'GitHub Release publication mode'
+        description: 'Desired GitHub Release state'
         required: true
         default: 'draft'
         type: choice
@@ -42,48 +41,19 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Resolve publication parameters
-        id: params
+      - name: Restrict publication to repository owner
         shell: bash
-        env:
-          INPUT_RUN_ID: ${{ inputs.run_id }}
-          INPUT_TAG: ${{ inputs.tag }}
-          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
-          INPUT_MODE: ${{ inputs.publication_mode }}
         run: |
           set -euo pipefail
-
-          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
-            if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
-              echo "Manual release publication is restricted to the repository owner." >&2
-              exit 1
-            fi
-            run_id="$INPUT_RUN_ID"
-            tag="$INPUT_TAG"
-            target_sha="$INPUT_TARGET_SHA"
-            mode="$INPUT_MODE"
-          else
-            [[ "$GITHUB_REF" == 'refs/heads/release/v0.9.7' ]] || {
-              echo "Unexpected release branch: $GITHUB_REF" >&2
-              exit 1
-            }
-            run_id='33891158742'
-            tag='v0.9.7'
-            target_sha='b1e7b048a63118299c5fad795f2b4c607f931a86'
-            mode='draft'
+          if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
+            echo "Release publication is restricted to the repository owner." >&2
+            exit 1
           fi
 
-          [[ -n "$run_id" && -n "$tag" && -n "$target_sha" && -n "$mode" ]]
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
-          echo "mode=$mode" >> "$GITHUB_OUTPUT"
-
       - name: Validate release-artifact run
-        id: run
         shell: bash
         env:
-          RUN_ID: ${{ steps.params.outputs.run_id }}
+          RUN_ID: ${{ inputs.run_id }}
         run: |
           set -euo pipefail
           json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
@@ -92,9 +62,9 @@ jobs:
           workflow_path="$(jq -r '.path' <<<"$json")"
           head_sha="$(jq -r '.head_sha' <<<"$json")"
 
-          [[ "$status" == "completed" ]] || { echo "Run is not completed: $status" >&2; exit 1; }
-          [[ "$conclusion" == "success" ]] || { echo "Run did not succeed: $conclusion" >&2; exit 1; }
-          [[ "$workflow_path" == ".github/workflows/release-artifacts.yml" ]] || {
+          [[ "$status" == 'completed' ]] || { echo "Run is not completed: $status" >&2; exit 1; }
+          [[ "$conclusion" == 'success' ]] || { echo "Run did not succeed: $conclusion" >&2; exit 1; }
+          [[ "$workflow_path" == '.github/workflows/release-artifacts.yml' ]] || {
             echo "Run $RUN_ID is not a PulseForge release-artifact workflow run: $workflow_path" >&2
             exit 1
           }
@@ -103,19 +73,17 @@ jobs:
             exit 1
           }
 
-          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
-
       - name: Checkout selected release commit
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.params.outputs.target_sha }}
+          ref: ${{ inputs.target_sha }}
           fetch-depth: 0
 
       - name: Validate release target
         shell: bash
         env:
-          TAG: ${{ steps.params.outputs.tag }}
-          TARGET_SHA: ${{ steps.params.outputs.target_sha }}
+          TAG: ${{ inputs.tag }}
+          TARGET_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
           resolved="$(git rev-parse HEAD)"
@@ -137,7 +105,7 @@ jobs:
       - name: Download release artifacts
         shell: bash
         env:
-          RUN_ID: ${{ steps.params.outputs.run_id }}
+          RUN_ID: ${{ inputs.run_id }}
         run: |
           set -euo pipefail
           rm -rf release-artifacts
@@ -145,11 +113,9 @@ jobs:
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-artifacts
 
       - name: Verify package set and SHA-256 files
-        id: verify
         shell: bash
         run: |
           set -euo pipefail
-
           expected=(
             'PulseForge-v0.9.7-Windows-x86_64.zip'
             'PulseForge-v0.9.7-Linux-x86_64.tar.gz'
@@ -178,80 +144,76 @@ jobs:
             (cd "$directory" && sha256sum -c "$filename")
           done
 
-          mapfile -t package_files < <(
-            for package in "${expected[@]}"; do
-              find release-artifacts -type f -name "$package"
-            done
-          )
-          printf '%s\n' "${package_files[@]}" > "$RUNNER_TEMP/package-files.txt"
-          printf '%s\n' "${sums[@]}" > "$RUNNER_TEMP/checksum-files.txt"
-
-      - name: Ensure Git tag
-        shell: bash
-        env:
-          TAG: ${{ steps.params.outputs.tag }}
-          TARGET_SHA: ${{ steps.params.outputs.target_sha }}
-        run: |
-          set -euo pipefail
-          remote_line="$(git ls-remote --tags origin "refs/tags/$TAG")"
-          if [[ -n "$remote_line" ]]; then
-            remote_sha="${remote_line%%$'\t'*}"
-            [[ "$remote_sha" == "$TARGET_SHA" ]] || {
-              echo "Tag $TAG already exists at $remote_sha, expected $TARGET_SHA." >&2
-              exit 1
-            }
-            echo "Tag $TAG already points to $TARGET_SHA."
-          else
-            git tag "$TAG" "$TARGET_SHA"
-            git push origin "refs/tags/$TAG"
-          fi
-
-      - name: Check for an existing release
+      - name: Inspect existing release
         id: existing
         shell: bash
         env:
-          TAG: ${{ steps.params.outputs.tag }}
-          TARGET_SHA: ${{ steps.params.outputs.target_sha }}
+          TAG: ${{ inputs.tag }}
+          TARGET_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
           release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)"
           if [[ -n "$release_id" ]]; then
-            release_target="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.target_commitish')"
+            release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
+            release_target="$(jq -r '.target_commitish' <<<"$release_json")"
             [[ "$release_target" == "$TARGET_SHA" ]] || {
               echo "Existing release $TAG targets $release_target, expected $TARGET_SHA." >&2
               exit 1
             }
-            echo "Release $TAG already exists; leaving it unchanged."
+            echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
             echo 'exists=true' >> "$GITHUB_OUTPUT"
+            echo "Existing release $TAG validated."
           else
             echo 'exists=false' >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create GitHub Release
-        if: steps.existing.outputs.exists != 'true'
+      - name: Create draft release when absent
+        if: steps.existing.outputs.exists != 'true' && inputs.publication_mode == 'draft'
         shell: bash
         env:
-          TAG: ${{ steps.params.outputs.tag }}
-          TARGET_SHA: ${{ steps.params.outputs.target_sha }}
-          MODE: ${{ steps.params.outputs.mode }}
+          TAG: ${{ inputs.tag }}
+          TARGET_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
-          mapfile -t packages < "$RUNNER_TEMP/package-files.txt"
-          mapfile -t sums < "$RUNNER_TEMP/checksum-files.txt"
-
-          flags=()
-          case "$MODE" in
-            draft) flags+=(--draft) ;;
-            prerelease) flags+=(--prerelease) ;;
-            release) ;;
-            *) echo "Unsupported publication mode: $MODE" >&2; exit 1 ;;
-          esac
-
+          mapfile -t packages < <(find release-artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' \) | sort)
+          mapfile -t sums < <(find release-artifacts -type f -name '*SHA256SUMS.txt' | sort)
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$TARGET_SHA" \
             --title "PulseForge $PULSEFORGE_VERSION" \
             --notes-file docs/RELEASE_NOTES_0.9.7.md \
-            "${flags[@]}" \
+            --draft \
             "${packages[@]}" \
             "${sums[@]}"
+
+      - name: Keep validated draft unchanged
+        if: steps.existing.outputs.exists == 'true' && inputs.publication_mode == 'draft'
+        shell: bash
+        run: echo 'Validated draft release already exists; no publication change requested.'
+
+      - name: Publish existing draft as prerelease
+        if: steps.existing.outputs.exists == 'true' && inputs.publication_mode == 'prerelease'
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.existing.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false -F prerelease=true >/dev/null
+
+      - name: Publish existing draft as release
+        if: steps.existing.outputs.exists == 'true' && inputs.publication_mode == 'release'
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.existing.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false -F prerelease=false >/dev/null
+
+      - name: Refuse direct public creation without a draft
+        if: steps.existing.outputs.exists != 'true' && inputs.publication_mode != 'draft'
+        shell: bash
+        run: |
+          echo 'Create and review a draft release before public publication.' >&2
+          exit 1
