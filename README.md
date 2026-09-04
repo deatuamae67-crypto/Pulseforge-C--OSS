@@ -1,5 +1,10 @@
 # PulseForge C++ OSS 0.9.7
 
+[![Cross-platform build](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/build-validation.yml/badge.svg?branch=main)](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/build-validation.yml)
+[![Deterministic core tests](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/core-tests-validation.yml/badge.svg?branch=main)](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/core-tests-validation.yml)
+[![OSS boundary](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/oss-boundary-validation.yml/badge.svg?branch=main)](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/oss-boundary-validation.yml)
+[![Release integrity](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/release-integrity-validation.yml/badge.svg?branch=main)](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/release-integrity-validation.yml)
+
 PulseForge is a C++20 rhythm-game engine focused on deterministic timing,
 low-latency input and streaming charts whose note count is too large to
 materialise in memory. It imports common FNF/Psych-style content into a
@@ -9,6 +14,13 @@ The public source includes the engine core, SDL3 application, Lua 5.4 sandbox,
 PFC1 streaming pipeline, editors, deterministic tests, Android touch frontend
 and reproducible CMake/Gradle builds. Private mod collections and third-party
 media are intentionally not mirrored; see [the OSS scope](docs/OSS_SCOPE.md).
+
+> **0.9.7 release status:** the reviewed GitHub Release is still a private draft
+> and has not been published. The prepared public CI package set is the
+> **OSS/no-SDK** distribution described in
+> [the release requirements](docs/RELEASE_REQUIREMENTS.md). Publication and
+> production-signing work is tracked in
+> [the v0.9.7 publication checklist](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/issues/28).
 
 ## Build targets
 
