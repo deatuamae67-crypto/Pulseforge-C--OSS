@@ -680,7 +680,10 @@ if(PULSEFORGE_BUILD_APP)
         add_executable(pulseforge src/app/main.cpp)
         add_executable(PulseForge::App ALIAS pulseforge)
     endif()
-    target_link_libraries(pulseforge PRIVATE pulseforge_runtime)
+    # main.cpp uses SDL's platform entry-point/filesystem headers directly on
+    # Android and macOS. pulseforge_runtime deliberately keeps SDL private, so
+    # the application target must link SDL as a direct usage requirement too.
+    target_link_libraries(pulseforge PRIVATE pulseforge_runtime SDL3::SDL3)
     target_compile_definitions(pulseforge PRIVATE
         PULSEFORGE_VERSION="${PROJECT_VERSION}"
     )
@@ -707,7 +710,9 @@ if(PULSEFORGE_BUILD_APP)
         # both executables call the exact same main/core code.
         add_executable(pulseforge_cli src/app/main.cpp)
         set_property(TARGET pulseforge_cli PROPERTY OUTPUT_NAME "pulseforge-cli")
-        target_link_libraries(pulseforge_cli PRIVATE pulseforge_runtime)
+        target_link_libraries(
+            pulseforge_cli PRIVATE pulseforge_runtime SDL3::SDL3
+        )
         target_compile_definitions(pulseforge_cli PRIVATE
             PULSEFORGE_VERSION="${PROJECT_VERSION}"
             PULSEFORGE_CLI_FRONTEND=1

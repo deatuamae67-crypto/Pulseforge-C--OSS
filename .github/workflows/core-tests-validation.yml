@@ -1,0 +1,114 @@
+name: PulseForge deterministic core tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_REF: import/pulseforge-0.9.7-oss
+
+jobs:
+  core-tests:
+    name: core tests / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-msvc-x64
+            os: windows-2022
+          - name: linux-x86_64
+            os: ubuntu-24.04
+          - name: macos-arm64
+            os: macos-15
+          - name: macos-x86_64
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 1
+
+      - name: Configure deterministic core tests
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake -S . -B out/build/core-tests -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULSEFORGE_BUILD_APP=OFF \
+            -DPULSEFORGE_BUILD_TESTS=ON \
+            -DPULSEFORGE_BUILD_AUTOCHART=OFF \
+            -DPULSEFORGE_ENABLE_LUA=ON \
+            -DPULSEFORGE_BUNDLE_FFMPEG=OFF \
+            -DPULSEFORGE_ENABLE_DISCORD_SOCIAL_SDK=OFF \
+            2>&1 | tee core-configure.log
+
+      - name: Configure deterministic core tests with MSVC x64
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S . -B out/build/core-tests -G "Visual Studio 17 2022" -A x64 `
+            -DPULSEFORGE_BUILD_APP=OFF `
+            -DPULSEFORGE_BUILD_TESTS=ON `
+            -DPULSEFORGE_BUILD_AUTOCHART=OFF `
+            -DPULSEFORGE_ENABLE_LUA=ON `
+            -DPULSEFORGE_BUNDLE_FFMPEG=OFF `
+            -DPULSEFORGE_ENABLE_DISCORD_SOCIAL_SDK=OFF `
+            2>&1 | Tee-Object -FilePath core-configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Record Windows compiler identity
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Select-String -Path out/build/core-tests/CMakeCache.txt -Pattern 'CMAKE_(C|CXX)_COMPILER:FILEPATH|CMAKE_GENERATOR:' | Tee-Object -FilePath compiler-identity.log
+          if (-not (Select-String -Path out/build/core-tests/CMakeCache.txt -Pattern 'CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022' -Quiet)) {
+            throw 'Windows core tests are not using the Visual Studio 2022 generator.'
+          }
+
+      - name: Build core tests
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build out/build/core-tests --parallel 2 2>&1 | tee core-build.log
+
+      - name: Build core tests with MSVC Release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake --build out/build/core-tests --config Release --parallel 2 2>&1 | Tee-Object -FilePath core-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run CTest
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -o pipefail
+          ctest --test-dir out/build/core-tests --output-on-failure --no-tests=error 2>&1 | tee core-ctest.log
+
+      - name: Run CTest with MSVC Release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ctest --test-dir out/build/core-tests -C Release --output-on-failure --no-tests=error 2>&1 | Tee-Object -FilePath core-ctest.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload core validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-test-logs-${{ matrix.name }}
+          path: |
+            core-configure.log
+            compiler-identity.log
+            core-build.log
+            core-ctest.log
+            out/build/core-tests/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 14

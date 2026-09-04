@@ -6,6 +6,14 @@
 /.vscode/
 *.obj
 *.pdb
+*.ilk
+*.exp
+*.dSYM/
+
+# Root-level binaries copied from local release/testing runs
+/PulseForge.exe
+/pulseforge-cli.exe
+/discord_partner_sdk.dll
 
 # Runtime/user-generated data
 *.pfreplay
@@ -42,3 +50,15 @@ Thumbs.db
 /renders/
 /out/
 *.partial.mp4
+
+# Local archives, recovery snapshots and patch payloads
+/_BACKUP_*/
+/.p1_*_backup/
+/patch-backups/
+/rollback/
+/rollback_payload/
+/payload/
+/validation/
+/*.zip
+/*.7z
+/*.rar

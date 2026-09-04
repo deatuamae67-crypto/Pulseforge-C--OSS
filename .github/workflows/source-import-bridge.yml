@@ -1,0 +1,239 @@
+name: PulseForge source import bridge
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  import-source:
+    if: ${{ github.actor == github.repository_owner }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout import branch
+        uses: actions/checkout@v4
+        with:
+          ref: import/pulseforge-0.9.7-oss
+          fetch-depth: 0
+
+      - name: Download source folders from public DevCore
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-cache-dir 'gdown>=6,<7'
+          rm -rf /tmp/pf-source
+          mkdir -p /tmp/pf-source/{include,src,android,tools}
+
+          cat > /tmp/pf_download_tree.py <<'PY'
+          import json
+          import pathlib
+          import re
+          import subprocess
+          import sys
+          import time
+          import urllib.parse
+
+          folder_url = sys.argv[1]
+          output_root = pathlib.Path(sys.argv[2])
+          output_root.mkdir(parents=True, exist_ok=True)
+
+          listing = subprocess.run(
+              ['gdown', '--folder', '--json', folder_url],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          entries = json.loads(listing.stdout)
+
+          banned_suffixes = {
+              '.jks', '.keystore', '.p12', '.aar', '.apk', '.aab',
+              '.so', '.dll', '.dylib', '.exe',
+          }
+          banned_dirs = {
+              'build', 'out', '.gradle', '__pycache__', 'node_modules',
+              'CMakeFiles', 'libs',
+          }
+
+          def excluded(path: pathlib.PurePosixPath) -> bool:
+              name = path.name.lower()
+              if '.pre_' in name or name.endswith('.premerge'):
+                  return True
+              if name.endswith('.bak') or name.endswith('~') or 'backup' in name:
+                  return True
+              if path.suffix.lower() in banned_suffixes:
+                  return True
+              return any(part in banned_dirs for part in path.parts)
+
+          def drive_id(url: str) -> str:
+              parsed = urllib.parse.urlparse(url)
+              query_id = urllib.parse.parse_qs(parsed.query).get('id')
+              if query_id:
+                  return query_id[0]
+              match = re.search(r'/d/([A-Za-z0-9_-]+)', parsed.path)
+              if match:
+                  return match.group(1)
+              if re.fullmatch(r'[A-Za-z0-9_-]{10,}', url):
+                  return url
+              raise ValueError(f'Could not extract Drive id from {url!r}')
+
+          def looks_like_html(path: pathlib.Path) -> bool:
+              try:
+                  prefix = path.read_bytes()[:512].lstrip().lower()
+              except OSError:
+                  return True
+              return prefix.startswith(b'<!doctype html') or prefix.startswith(b'<html')
+
+          failures = []
+          kept = 0
+          for entry in entries:
+              rel = pathlib.PurePosixPath(entry['path'])
+              if excluded(rel):
+                  print(f'SKIP {rel}')
+                  continue
+
+              file_id = drive_id(entry['url'])
+              destination = output_root.joinpath(*rel.parts)
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              temporary = pathlib.Path(str(destination) + '.part')
+              temporary.unlink(missing_ok=True)
+
+              direct_url = (
+                  'https://drive.usercontent.google.com/download'
+                  f'?id={file_id}&export=download&confirm=t'
+              )
+              ok = False
+              for attempt in range(1, 4):
+                  temporary.unlink(missing_ok=True)
+                  curl = subprocess.run([
+                      'curl', '--fail', '--location', '--silent', '--show-error',
+                      '--retry', '3', '--retry-delay', '2', '--retry-all-errors',
+                      '--connect-timeout', '20', '--max-time', '120',
+                      direct_url, '-o', str(temporary),
+                  ])
+                  if (
+                      curl.returncode == 0
+                      and temporary.is_file()
+                      and temporary.stat().st_size > 0
+                      and not looks_like_html(temporary)
+                  ):
+                      ok = True
+                      break
+
+                  temporary.unlink(missing_ok=True)
+                  fallback = subprocess.run([
+                      'gdown', '--quiet', '--continue', file_id,
+                      '-O', str(temporary),
+                  ])
+                  if (
+                      fallback.returncode == 0
+                      and temporary.is_file()
+                      and temporary.stat().st_size > 0
+                      and not looks_like_html(temporary)
+                  ):
+                      ok = True
+                      break
+                  time.sleep(attempt * 3)
+
+              if not ok:
+                  failures.append((file_id, str(rel)))
+                  print(f'FAILED {file_id} {rel}', file=sys.stderr)
+                  continue
+
+              temporary.replace(destination)
+              kept += 1
+              print(f'OK {file_id} {rel} ({destination.stat().st_size} bytes)')
+              time.sleep(0.15)
+
+          print(f'Downloaded {kept} filtered files from {folder_url}')
+          if failures:
+              print('Unresolved public Drive downloads:', file=sys.stderr)
+              for file_id, rel in failures:
+                  print(f'  {file_id}  {rel}', file=sys.stderr)
+              raise SystemExit(2)
+          PY
+
+          python /tmp/pf_download_tree.py \
+            'https://drive.google.com/drive/folders/1bGtwum34lRz9jyeYdxWMu8wdjC0NHPJr' \
+            /tmp/pf-source/include
+          python /tmp/pf_download_tree.py \
+            'https://drive.google.com/drive/folders/1AZ0jiUc1m0jOoqoUncTJePog4mtUYLMn' \
+            /tmp/pf-source/src
+          python /tmp/pf_download_tree.py \
+            'https://drive.google.com/drive/folders/17cXFrFe_QgA9t7hPDGgvPHnzF_bqW_L2' \
+            /tmp/pf-source/android
+          python /tmp/pf_download_tree.py \
+            'https://drive.google.com/drive/folders/1ftEhuAnsiLy508YJNek_QOfZgEq-mDxL' \
+            /tmp/pf-source/tools
+
+          CMAKE_ID='1s21BIDkof22sneMCz1TCm9gTCl0ZaHdz'
+          CMAKE_URL="https://drive.usercontent.google.com/download?id=${CMAKE_ID}&export=download&confirm=t"
+          curl --fail --location --silent --show-error --retry 4 --retry-all-errors \
+            "$CMAKE_URL" -o /tmp/pf-source/CMakeLists.txt
+          grep -Eq 'VERSION[[:space:]]+0\.9\.7' /tmp/pf-source/CMakeLists.txt
+
+      - name: Stage and validate source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          INC=/tmp/pf-source/include
+          SRC=/tmp/pf-source/src
+          ANDROID=/tmp/pf-source/android
+          TOOLS=/tmp/pf-source/tools
+
+          [ -d "$INC/pulseforge" ] || INC="$INC/include"
+          [ -f "$SRC/app/application.cpp" ] || SRC="$SRC/src"
+          [ -f "$ANDROID/app/build.gradle" ] || ANDROID="$ANDROID/android"
+          [ -f "$TOOLS/autochart/ml_backend.py" ] || TOOLS="$TOOLS/tools"
+
+          test -f "$INC/pulseforge/application.hpp"
+          test -f "$SRC/app/application.cpp"
+          test -f "$SRC/io/chart_loader.cpp"
+          test -f "$ANDROID/app/build.gradle"
+          test -f "$ANDROID/app/src/main/AndroidManifest.xml"
+          test -f "$TOOLS/autochart/ml_backend.py"
+          grep -Eq 'VERSION[[:space:]]+0\.9\.7' /tmp/pf-source/CMakeLists.txt
+
+          rm -rf include src platform/android tools
+          mkdir -p include src platform/android tools
+          cp -a "$INC"/. ./include/
+          cp -a "$SRC"/. ./src/
+          cp -a "$ANDROID"/. ./platform/android/
+          cp -a "$TOOLS"/. ./tools/
+          cp /tmp/pf-source/CMakeLists.txt ./CMakeLists.txt
+
+          rm -rf third_party/discord_social_sdk platform/android/app/libs
+
+          test -f include/pulseforge/application.hpp
+          test -f src/app/application.cpp
+          test -f src/app/streaming_editor_ui.cpp
+          test -f src/io/chart_loader.cpp
+          test -f platform/android/app/build.gradle
+          test -f platform/android/app/src/main/AndroidManifest.xml
+          test -f tools/autochart/ml_backend.py
+
+          find include src platform/android tools -type f | sort | tee /tmp/source-files.txt
+          count="$(wc -l < /tmp/source-files.txt)"
+          bytes="$(du -sb include src platform/android tools | awk '{s += $1} END {print s}')"
+          echo "Source files: $count"
+          echo "Source bytes: $bytes"
+          test "$count" -ge 120
+          test "$bytes" -ge 3000000
+
+      - name: Commit source code to import branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CMakeLists.txt include src platform/android tools
+          if git diff --cached --quiet; then
+            echo 'Source tree is already current.'
+            exit 0
+          fi
+          git commit -m 'source: import PulseForge 0.9.7 engine'
+          git push origin HEAD:import/pulseforge-0.9.7-oss
