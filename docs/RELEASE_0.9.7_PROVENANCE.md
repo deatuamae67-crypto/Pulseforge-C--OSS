@@ -1,6 +1,6 @@
 # PulseForge 0.9.7 release provenance
 
-This document records the build and validation provenance for the first public PulseForge 0.9.7 OSS release candidate.
+This document records the build, validation and publication provenance for the first public PulseForge 0.9.7 OSS release candidate.
 
 ## Source state
 
@@ -13,7 +13,7 @@ This document records the build and validation provenance for the first public P
 
 The changes between the validated source head and the merge were limited to repository documentation and `.github` maintenance/CI files; there were no changes to `src/`, `include/`, `tests/`, `CMakeLists.txt`, `CMakePresets.json`, `platform/android/`, `assets/`, or `third_party/`.
 
-The release-workflow commit changes only the macOS Intel runner label from `macos-15-intel` to `macos-26-intel`; it does not change PulseForge engine or build inputs. Documentation and release-publication workflow commits after that point likewise do not alter the generated engine binaries.
+The release-workflow commit changes only the macOS Intel runner label from `macos-15-intel` to `macos-26-intel`; it does not change PulseForge engine or build inputs. Documentation, governance and release-publication workflow commits after that point likewise do not alter the generated engine binaries.
 
 ## Preferred `main` release-artifact run
 
@@ -39,6 +39,25 @@ Independent package evidence also confirms:
 
 The preferred current package set therefore no longer depends on the earlier macOS x86_64 fallback.
 
+## Durable asset-integrity record
+
+GitHub Actions artifact retention is finite. The five workflow artifacts from run `33891158742` are currently retained until 4 October 2026; after that point the workflow ZIPs may no longer be downloadable even though the reviewed GitHub Release assets remain intact.
+
+`docs/RELEASE_0.9.7_ASSET_MANIFEST.json` is therefore the durable integrity record for the reviewed `v0.9.7` package set. It records:
+
+- release ID `382859979`;
+- release target `b1e7b048a63118299c5fad795f2b4c607f931a86`;
+- source run `33891158742` and its workflow/source SHA;
+- the exact ten reviewed Release asset names;
+- each asset's exact byte size;
+- each asset's GitHub SHA-256 digest.
+
+Before this manifest was committed, all ten current GitHub Release assets were independently cross-checked against the files extracted directly from run `33891158742`: names, byte sizes and SHA-256 values matched 10/10.
+
+The read-only `.github/workflows/release-integrity-validation.yml` workflow continuously validates the durable manifest, source-run provenance and current GitHub Release asset metadata. It has only `actions: read` and `contents: read` permissions and cannot publish or mutate a release.
+
+The controlled publisher still downloads and re-hashes the Actions artifacts while all five remain retained. After those artifacts expire, it may use the reviewed durable manifest only to validate an already-existing release whose ten assets still match exactly. The manifest is verification evidence only: it is never used to reconstruct package bytes. If the existing draft is deleted after the Actions artifacts become unavailable, the publisher refuses to recreate it.
+
 ## Historical macOS x86_64 fallback
 
 Before `macos-26-intel` capacity was used successfully, release-artifact run `33883728198` provided a validated macOS x86_64 fallback built from commit `4063a05110be16f044809c58048ea9baae74f590` with unchanged engine/build inputs.
@@ -62,8 +81,8 @@ The Android package is test-signed and the macOS packages are ad-hoc signed; pro
 
 ## Publication status
 
-The source is merged, the deterministic and cross-platform source validations are green, and all five release packages from preferred run `33891158742` are built and independently checksum-verified.
+A GitHub Release draft named `PulseForge 0.9.7` exists as release ID `382859979` with reserved tag name `v0.9.7` and target commit `b1e7b048a63118299c5fad795f2b4c607f931a86`. It contains the five reviewed platform packages plus the five corresponding `SHA256SUMS.txt` files.
 
-Reusable GitHub Release text is stored in `docs/RELEASE_NOTES_0.9.7.md`. The controlled `.github/workflows/publish-release.yml` workflow validates the successful release-artifact run, verifies exactly five packages and five SHA-256 files, and defaults to creating a draft release.
+The release remains a draft and has not been published publicly. The actual Git ref `refs/tags/v0.9.7` is not materialized while the release remains in this draft state.
 
-A Git tag/GitHub Release named `v0.9.7` has not yet been created through the available connector path. Final publication should use run `33891158742` and this provenance record.
+Reusable GitHub Release text is stored in `docs/RELEASE_NOTES_0.9.7.md`. Public publication is controlled by `.github/workflows/publish-release.yml`, which is owner-only, must be dispatched from `main`, validates the approved release-artifact run provenance, validates the durable asset manifest, and refuses direct public creation without a reviewed draft.
