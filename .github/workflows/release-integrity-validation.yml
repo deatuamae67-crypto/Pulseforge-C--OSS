@@ -1,0 +1,202 @@
+name: PulseForge release integrity validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-release.yml'
+      - '.github/workflows/release-integrity-validation.yml'
+      - 'docs/RELEASE_0.9.7_ASSET_MANIFEST.json'
+      - 'docs/RELEASE_0.9.7_PROVENANCE.md'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-release.yml'
+      - '.github/workflows/release-integrity-validation.yml'
+      - 'docs/RELEASE_0.9.7_ASSET_MANIFEST.json'
+      - 'docs/RELEASE_0.9.7_PROVENANCE.md'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  MANIFEST: docs/RELEASE_0.9.7_ASSET_MANIFEST.json
+
+jobs:
+  validate-release-integrity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout validation source
+        uses: actions/checkout@v7
+
+      - name: Validate durable release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$MANIFEST"
+
+          jq -e '
+            .schema_version == 1
+            and .pulseforge_version == "0.9.7"
+            and .tag == "v0.9.7"
+            and .release_id == 382859979
+            and .release_target_sha == "b1e7b048a63118299c5fad795f2b4c607f931a86"
+            and .source_run_id == 33891158742
+            and .source_workflow_path == ".github/workflows/release-artifacts.yml"
+            and .source_head_sha == "6e49caed8f7abbe5f2104632d48bdc93f4baa3b1"
+            and (.assets | length) == 10
+            and ([.assets[].name] | unique | length) == 10
+            and all(.assets[];
+              (.name | type) == "string"
+              and (.name | length) > 0
+              and (.size_bytes | type) == "number"
+              and .size_bytes > 0
+              and (.digest | test("^sha256:[0-9a-f]{64}$"))
+            )
+          ' "$MANIFEST" >/dev/null
+
+      - name: Validate source run provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="$(jq -r '.source_run_id' "$MANIFEST")"
+          expected_path="$(jq -r '.source_workflow_path' "$MANIFEST")"
+          expected_sha="$(jq -r '.source_head_sha' "$MANIFEST")"
+
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+          status="$(jq -r '.status' <<<"$run_json")"
+          conclusion="$(jq -r '.conclusion' <<<"$run_json")"
+          workflow_path="$(jq -r '.path' <<<"$run_json")"
+          head_sha="$(jq -r '.head_sha' <<<"$run_json")"
+
+          [[ "$status" == 'completed' ]] || {
+            echo "Release-artifact run is not completed: $status" >&2
+            exit 1
+          }
+          [[ "$conclusion" == 'success' ]] || {
+            echo "Release-artifact run conclusion is $conclusion" >&2
+            exit 1
+          }
+          [[ "$workflow_path" == "$expected_path" ]] || {
+            echo "Unexpected workflow path: $workflow_path" >&2
+            exit 1
+          }
+          [[ "$head_sha" == "$expected_sha" ]] || {
+            echo "Unexpected source SHA: $head_sha" >&2
+            exit 1
+          }
+
+      - name: Validate GitHub Release against durable manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id="$(jq -r '.release_id' "$MANIFEST")"
+          expected_tag="$(jq -r '.tag' "$MANIFEST")"
+          expected_target="$(jq -r '.release_target_sha' "$MANIFEST")"
+
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
+          actual_tag="$(jq -r '.tag_name' <<<"$release_json")"
+          actual_target="$(jq -r '.target_commitish' <<<"$release_json")"
+
+          [[ "$actual_tag" == "$expected_tag" ]] || {
+            echo "Release tag mismatch: release=$actual_tag expected=$expected_tag" >&2
+            exit 1
+          }
+          [[ "$actual_target" == "$expected_target" ]] || {
+            echo "Release target mismatch: release=$actual_target expected=$expected_target" >&2
+            exit 1
+          }
+
+          manifest_count="$(jq '.assets | length' "$MANIFEST")"
+          release_count="$(jq '.assets | length' <<<"$release_json")"
+          [[ "$release_count" == "$manifest_count" ]] || {
+            echo "Release asset count mismatch: release=$release_count manifest=$manifest_count" >&2
+            exit 1
+          }
+
+          jq -r '.assets[].name' "$MANIFEST" | sort > /tmp/pulseforge-manifest-assets.txt
+          jq -r '.assets[].name' <<<"$release_json" | sort > /tmp/pulseforge-release-assets.txt
+          diff -u /tmp/pulseforge-manifest-assets.txt /tmp/pulseforge-release-assets.txt || {
+            echo 'Release asset names do not exactly match the durable manifest.' >&2
+            exit 1
+          }
+
+          while IFS=$'\t' read -r name expected_size expected_digest; do
+            asset_json="$(jq -c --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json")"
+            [[ -n "$asset_json" ]] || {
+              echo "Missing release asset: $name" >&2
+              exit 1
+            }
+
+            state="$(jq -r '.state' <<<"$asset_json")"
+            actual_size="$(jq -r '.size' <<<"$asset_json")"
+            actual_digest="$(jq -r '.digest // empty' <<<"$asset_json")"
+
+            [[ "$state" == 'uploaded' ]] || {
+              echo "Release asset $name is not fully uploaded: $state" >&2
+              exit 1
+            }
+            [[ "$actual_size" == "$expected_size" ]] || {
+              echo "Release asset $name size mismatch: release=$actual_size manifest=$expected_size" >&2
+              exit 1
+            }
+            [[ "$actual_digest" == "$expected_digest" ]] || {
+              echo "Release asset $name digest mismatch: release=$actual_digest manifest=$expected_digest" >&2
+              exit 1
+            }
+          done < <(jq -r '.assets[] | [.name, (.size_bytes | tostring), .digest] | @tsv' "$MANIFEST")
+
+          draft="$(jq -r '.draft' <<<"$release_json")"
+          prerelease="$(jq -r '.prerelease' <<<"$release_json")"
+          echo "Release asset integrity verified (draft=$draft, prerelease=$prerelease)."
+
+      - name: Validate tag target when tag exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(jq -r '.tag' "$MANIFEST")"
+          expected_target="$(jq -r '.release_target_sha' "$MANIFEST")"
+          release_id="$(jq -r '.release_id' "$MANIFEST")"
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
+          draft="$(jq -r '.draft' <<<"$release_json")"
+
+          refs_json="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag")"
+          ref_count="$(jq 'length' <<<"$refs_json")"
+
+          if [[ "$ref_count" == '0' ]]; then
+            [[ "$draft" == 'true' ]] || {
+              echo "Published release $tag has no Git tag ref." >&2
+              exit 1
+            }
+            echo "Draft release has no materialized Git tag yet; this is valid."
+            exit 0
+          fi
+
+          [[ "$ref_count" == '1' ]] || {
+            echo "Expected at most one exact tag ref for $tag, found $ref_count." >&2
+            exit 1
+          }
+
+          object_type="$(jq -r '.[0].object.type' <<<"$refs_json")"
+          object_sha="$(jq -r '.[0].object.sha' <<<"$refs_json")"
+          if [[ "$object_type" == 'tag' ]]; then
+            tag_json="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
+            object_type="$(jq -r '.object.type' <<<"$tag_json")"
+            object_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          fi
+
+          [[ "$object_type" == 'commit' && "$object_sha" == "$expected_target" ]] || {
+            echo "Tag $tag resolves to $object_type $object_sha, expected commit $expected_target." >&2
+            exit 1
+          }
+          echo "Tag $tag resolves to the expected release target."
