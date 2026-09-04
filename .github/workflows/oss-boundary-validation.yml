@@ -34,19 +34,42 @@ jobs:
           import sys
 
           uses_pattern = re.compile(
-              r'''(?mx)
+              r'''(?x)
               (?:^[ \t]*(?:-[ \t]*)?|[{,][ \t]*)
               (?:uses|"uses"|'uses')[ \t]*:[ \t]*
               (?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^,}\s#]+))
               '''
           )
+          block_scalar_pattern = re.compile(
+              r'''(?x)
+              :[ \t]*
+              (?:[|>](?:[+-]?\d*|\d+[+-]?))
+              [ \t]*(?:\#.*)?$
+              '''
+          )
+
+          def indentation(line):
+              return len(line) - len(line.lstrip(' '))
 
           def extract_uses(text):
               refs = []
-              for match in uses_pattern.finditer(text):
-                  spec = next(group for group in match.groups() if group is not None)
-                  line_number = text.count('\n', 0, match.start()) + 1
-                  refs.append((line_number, spec))
+              block_parent_indent = None
+              for line_number, line in enumerate(text.splitlines(), 1):
+                  stripped = line.strip()
+                  indent = indentation(line)
+
+                  if block_parent_indent is not None:
+                      if not stripped or indent > block_parent_indent:
+                          continue
+                      block_parent_indent = None
+
+                  if block_scalar_pattern.search(line):
+                      block_parent_indent = indent
+                      continue
+
+                  for match in uses_pattern.finditer(line):
+                      spec = next(group for group in match.groups() if group is not None)
+                      refs.append((line_number, spec))
               return refs
 
           scanner_cases = [
@@ -57,6 +80,9 @@ jobs:
                ['owner/repo/.github/workflows/ci.yml@main']),
               ("- { 'uses': 'actions/checkout@v7', with: { fetch-depth: 1 } }\n",
                ['actions/checkout@v7']),
+              ('steps:\n  - run: |\n      echo "{ uses: actions/checkout@v7 }"\n'
+               '  - { uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 }\n',
+               ['actions/checkout@0123456789abcdef0123456789abcdef01234567']),
           ]
           for sample, expected in scanner_cases:
               actual = [spec for _, spec in extract_uses(sample)]
