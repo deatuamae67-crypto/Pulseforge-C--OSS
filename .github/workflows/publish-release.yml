@@ -69,7 +69,7 @@ jobs:
             }
             run_id='33891158742'
             tag='v0.9.7'
-            target_sha="$GITHUB_SHA"
+            target_sha='b1e7b048a63118299c5fad795f2b4c607f931a86'
             mode='draft'
           fi
 
@@ -186,14 +186,41 @@ jobs:
           printf '%s\n' "${package_files[@]}" > "$RUNNER_TEMP/package-files.txt"
           printf '%s\n' "${sums[@]}" > "$RUNNER_TEMP/checksum-files.txt"
 
+      - name: Ensure Git tag
+        shell: bash
+        env:
+          TAG: ${{ steps.params.outputs.tag }}
+          TARGET_SHA: ${{ steps.params.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          remote_line="$(git ls-remote --tags origin "refs/tags/$TAG")"
+          if [[ -n "$remote_line" ]]; then
+            remote_sha="${remote_line%%$'\t'*}"
+            [[ "$remote_sha" == "$TARGET_SHA" ]] || {
+              echo "Tag $TAG already exists at $remote_sha, expected $TARGET_SHA." >&2
+              exit 1
+            }
+            echo "Tag $TAG already points to $TARGET_SHA."
+          else
+            git tag "$TAG" "$TARGET_SHA"
+            git push origin "refs/tags/$TAG"
+          fi
+
       - name: Check for an existing release
         id: existing
         shell: bash
         env:
           TAG: ${{ steps.params.outputs.tag }}
+          TARGET_SHA: ${{ steps.params.outputs.target_sha }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)"
+          if [[ -n "$release_id" ]]; then
+            release_target="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.target_commitish')"
+            [[ "$release_target" == "$TARGET_SHA" ]] || {
+              echo "Existing release $TAG targets $release_target, expected $TARGET_SHA." >&2
+              exit 1
+            }
             echo "Release $TAG already exists; leaving it unchanged."
             echo 'exists=true' >> "$GITHUB_OUTPUT"
           else
