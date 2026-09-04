@@ -27,6 +27,7 @@ on:
           - release
 
 permissions:
+  actions: read
   contents: write
 
 env:
