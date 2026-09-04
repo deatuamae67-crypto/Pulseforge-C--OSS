@@ -33,6 +33,39 @@ jobs:
           import re
           import sys
 
+          uses_pattern = re.compile(
+              r'''(?mx)
+              (?:^[ \t]*(?:-[ \t]*)?|[{,][ \t]*)
+              (?:uses|"uses"|'uses')[ \t]*:[ \t]*
+              (?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^,}\s#]+))
+              '''
+          )
+
+          def extract_uses(text):
+              refs = []
+              for match in uses_pattern.finditer(text):
+                  spec = next(group for group in match.groups() if group is not None)
+                  line_number = text.count('\n', 0, match.start()) + 1
+                  refs.append((line_number, spec))
+              return refs
+
+          scanner_cases = [
+              ('uses: actions/checkout@v7\n', ['actions/checkout@v7']),
+              ('- uses: actions/checkout@v7\n', ['actions/checkout@v7']),
+              ('- { uses: actions/checkout@v7 }\n', ['actions/checkout@v7']),
+              ('jobs: { build: { "uses": "owner/repo/.github/workflows/ci.yml@main" } }\n',
+               ['owner/repo/.github/workflows/ci.yml@main']),
+              ("- { 'uses': 'actions/checkout@v7', with: { fetch-depth: 1 } }\n",
+               ['actions/checkout@v7']),
+          ]
+          for sample, expected in scanner_cases:
+              actual = [spec for _, spec in extract_uses(sample)]
+              if actual != expected:
+                  raise SystemExit(
+                      f'Internal action-reference scanner self-test failed: sample={sample!r} '
+                      f'expected={expected!r} actual={actual!r}'
+                  )
+
           violations = []
           roots = [pathlib.Path('.github/workflows'), pathlib.Path('.github/actions')]
           for root in roots:
@@ -40,13 +73,19 @@ jobs:
                   continue
               paths = sorted(set(root.rglob('*.yml')) | set(root.rglob('*.yaml')))
               for path in paths:
-                  for line_number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
-                      match = re.match(r'^\s*uses:\s*([^\s#]+)', line)
-                      if not match:
+                  text = path.read_text(encoding='utf-8')
+                  for line_number, spec in extract_uses(text):
+                      if spec.startswith('./'):
                           continue
-                      spec = match.group(1)
-                      if spec.startswith('./') or spec.startswith('docker://'):
+
+                      if spec.startswith('docker://'):
+                          image = spec[len('docker://'):]
+                          if not re.fullmatch(r'.+@sha256:[0-9a-fA-F]{64}', image):
+                              violations.append(
+                                  f'{path}:{line_number}: docker action must be pinned by sha256 digest: {spec}'
+                              )
                           continue
+
                       if '@' not in spec:
                           violations.append(f'{path}:{line_number}: remote action has no ref: {spec}')
                           continue
@@ -62,7 +101,7 @@ jobs:
                   print(f' - {violation}', file=sys.stderr)
               sys.exit(1)
 
-          print('All remote GitHub Actions are pinned to immutable commit SHAs.')
+          print('All remote GitHub Actions and docker action images use immutable references.')
           PY
 
       - name: Reject non-redistributable or private build inputs
