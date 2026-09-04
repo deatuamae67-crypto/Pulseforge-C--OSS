@@ -127,7 +127,7 @@ jobs:
             echo "Tag must be v$PULSEFORGE_VERSION for this workflow." >&2
             exit 1
           }
-          grep -Eq 'project\(PulseForge[[:space:]]+VERSION[[:space:]]+0\.9\.7' CMakeLists.txt || {
+          tr '\n' ' ' < CMakeLists.txt | grep -Eq 'project\([[:space:]]*PulseForge[[:space:]]+VERSION[[:space:]]+0\.9\.7' || {
             echo 'CMakeLists.txt does not identify PulseForge 0.9.7.' >&2
             exit 1
           }
