@@ -35,13 +35,14 @@ permissions:
 env:
   PULSEFORGE_VERSION: '0.9.7'
   GH_TOKEN: ${{ github.token }}
+  RELEASE_MANIFEST: 'docs/RELEASE_0.9.7_ASSET_MANIFEST.json'
 
 jobs:
   publish:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Restrict publication to repository owner
+      - name: Restrict publication to repository owner and main
         shell: bash
         run: |
           set -euo pipefail
@@ -49,29 +50,115 @@ jobs:
             echo "Release publication is restricted to the repository owner." >&2
             exit 1
           fi
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo "Release publication must be dispatched from refs/heads/main; got $GITHUB_REF." >&2
+            exit 1
+          fi
 
-      - name: Validate release-artifact run
+      - name: Load reviewed release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$RELEASE_MANIFEST?ref=$GITHUB_SHA" --jq '.content')"
+          [[ -n "$encoded" ]] || {
+            echo "Release manifest $RELEASE_MANIFEST is missing at workflow SHA $GITHUB_SHA." >&2
+            exit 1
+          }
+          printf '%s' "$encoded" | tr -d '\n' | base64 --decode > /tmp/pulseforge-release-manifest.json
+          jq -e . /tmp/pulseforge-release-manifest.json >/dev/null
+
+      - name: Validate release manifest and inputs
+        shell: bash
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          TAG: ${{ inputs.tag }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          manifest=/tmp/pulseforge-release-manifest.json
+
+          jq -e '
+            .schema_version == 1
+            and .pulseforge_version == "0.9.7"
+            and .tag == "v0.9.7"
+            and .release_target_sha == "b1e7b048a63118299c5fad795f2b4c607f931a86"
+            and .source_run_id == 33891158742
+            and .source_workflow_path == ".github/workflows/release-artifacts.yml"
+            and .source_head_sha == "6e49caed8f7abbe5f2104632d48bdc93f4baa3b1"
+            and (.assets | length) == 10
+            and ([.assets[].name] | unique | length) == 10
+            and all(.assets[];
+              (.name | type) == "string"
+              and (.name | length) > 0
+              and (.size_bytes | type) == "number"
+              and .size_bytes > 0
+              and (.digest | test("^sha256:[0-9a-f]{64}$"))
+            )
+          ' "$manifest" >/dev/null
+
+          expected_run="$(jq -r '.source_run_id' "$manifest")"
+          expected_tag="$(jq -r '.tag' "$manifest")"
+          expected_target="$(jq -r '.release_target_sha' "$manifest")"
+          [[ "$RUN_ID" == "$expected_run" ]] || {
+            echo "run_id must be $expected_run for the reviewed manifest." >&2
+            exit 1
+          }
+          [[ "$TAG" == "$expected_tag" ]] || {
+            echo "tag must be $expected_tag for the reviewed manifest." >&2
+            exit 1
+          }
+          [[ "$TARGET_SHA" == "$expected_target" ]] || {
+            echo "target_sha must be $expected_target for the reviewed manifest." >&2
+            exit 1
+          }
+
+      - name: Validate release-artifact run provenance
         shell: bash
         env:
           RUN_ID: ${{ inputs.run_id }}
         run: |
           set -euo pipefail
+          manifest=/tmp/pulseforge-release-manifest.json
           json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
           status="$(jq -r '.status' <<<"$json")"
           conclusion="$(jq -r '.conclusion' <<<"$json")"
           workflow_path="$(jq -r '.path' <<<"$json")"
           head_sha="$(jq -r '.head_sha' <<<"$json")"
+          expected_path="$(jq -r '.source_workflow_path' "$manifest")"
+          expected_sha="$(jq -r '.source_head_sha' "$manifest")"
 
           [[ "$status" == 'completed' ]] || { echo "Run is not completed: $status" >&2; exit 1; }
           [[ "$conclusion" == 'success' ]] || { echo "Run did not succeed: $conclusion" >&2; exit 1; }
-          [[ "$workflow_path" == '.github/workflows/release-artifacts.yml' ]] || {
-            echo "Run $RUN_ID is not a PulseForge release-artifact workflow run: $workflow_path" >&2
+          [[ "$workflow_path" == "$expected_path" ]] || {
+            echo "Run $RUN_ID has unexpected workflow path: $workflow_path" >&2
             exit 1
           }
-          [[ "$head_sha" == '6e49caed8f7abbe5f2104632d48bdc93f4baa3b1' ]] || {
+          [[ "$head_sha" == "$expected_sha" ]] || {
             echo "Unexpected release-artifact source SHA: $head_sha" >&2
             exit 1
           }
+
+      - name: Inspect release-artifact availability
+        id: artifacts
+        shell: bash
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100")"
+          total="$(jq '.artifacts | length' <<<"$json")"
+          active="$(jq '[.artifacts[] | select(.expired == false)] | length' <<<"$json")"
+
+          if [[ "$total" == '5' && "$active" == '5' ]]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+            echo 'All five approved Actions artifacts are still available.'
+          elif [[ "$active" == '0' && ( "$total" == '0' || "$total" == '5' ) ]]; then
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'Approved Actions artifacts are no longer downloadable; an existing release may only be validated against the reviewed durable manifest.'
+          else
+            echo "Unexpected partial artifact availability: total=$total active=$active; refusing publication." >&2
+            exit 1
+          fi
 
       - name: Checkout selected release commit
         uses: actions/checkout@v7
@@ -102,7 +189,8 @@ jobs:
           test -f docs/RELEASE_NOTES_0.9.7.md
           test -f docs/RELEASE_0.9.7_PROVENANCE.md
 
-      - name: Download release artifacts
+      - name: Download release artifacts while retained
+        if: steps.artifacts.outputs.available == 'true'
         shell: bash
         env:
           RUN_ID: ${{ inputs.run_id }}
@@ -112,7 +200,8 @@ jobs:
           mkdir -p release-artifacts
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-artifacts
 
-      - name: Verify package set and SHA-256 files
+      - name: Verify retained package set and SHA-256 files
+        if: steps.artifacts.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -144,6 +233,45 @@ jobs:
             (cd "$directory" && sha256sum -c "$filename")
           done
 
+      - name: Verify retained artifacts against durable manifest
+        if: steps.artifacts.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=/tmp/pulseforge-release-manifest.json
+          mapfile -t local_files < <(
+            find release-artifacts -type f \
+              \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' -o -name '*SHA256SUMS.txt' \) \
+              | sort
+          )
+          [[ "${#local_files[@]}" == '10' ]] || {
+            echo "Expected exactly 10 local release files, found ${#local_files[@]}." >&2
+            exit 1
+          }
+
+          printf '%s\n' "${local_files[@]##*/}" | sort > /tmp/pulseforge-local-assets.txt
+          jq -r '.assets[].name' "$manifest" | sort > /tmp/pulseforge-manifest-assets.txt
+          diff -u /tmp/pulseforge-manifest-assets.txt /tmp/pulseforge-local-assets.txt || {
+            echo 'Retained artifact names do not exactly match the durable manifest.' >&2
+            exit 1
+          }
+
+          for file in "${local_files[@]}"; do
+            name="$(basename "$file")"
+            local_size="$(stat -c '%s' "$file")"
+            local_digest="sha256:$(sha256sum "$file" | awk '{print $1}')"
+            expected_size="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .size_bytes' "$manifest")"
+            expected_digest="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest' "$manifest")"
+            [[ "$local_size" == "$expected_size" ]] || {
+              echo "Retained artifact $name size mismatch: local=$local_size manifest=$expected_size" >&2
+              exit 1
+            }
+            [[ "$local_digest" == "$expected_digest" ]] || {
+              echo "Retained artifact $name digest mismatch: local=$local_digest manifest=$expected_digest" >&2
+              exit 1
+            }
+          done
+
       - name: Inspect existing release
         id: existing
         shell: bash
@@ -152,12 +280,18 @@ jobs:
           TARGET_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
+          manifest=/tmp/pulseforge-release-manifest.json
+          expected_release_id="$(jq -r '.release_id' "$manifest")"
           release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)"
           if [[ -n "$release_id" ]]; then
             release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
             release_target="$(jq -r '.target_commitish' <<<"$release_json")"
             [[ "$release_target" == "$TARGET_SHA" ]] || {
               echo "Existing release $TAG targets $release_target, expected $TARGET_SHA." >&2
+              exit 1
+            }
+            [[ "$release_id" == "$expected_release_id" ]] || {
+              echo "Existing release ID $release_id does not match reviewed manifest release ID $expected_release_id." >&2
               exit 1
             }
             echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
@@ -167,51 +301,32 @@ jobs:
             echo 'exists=false' >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify existing release assets against validated run
+      - name: Verify existing release assets against durable manifest
         if: steps.existing.outputs.exists == 'true'
         shell: bash
         env:
           RELEASE_ID: ${{ steps.existing.outputs.release_id }}
         run: |
           set -euo pipefail
+          manifest=/tmp/pulseforge-release-manifest.json
           release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
 
-          mapfile -t local_files < <(
-            find release-artifacts -type f \
-              \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' -o -name '*SHA256SUMS.txt' \) \
-              | sort
-          )
-          [[ "${#local_files[@]}" == '10' ]] || {
-            echo "Expected exactly 10 validated local release files, found ${#local_files[@]}." >&2
+          manifest_count="$(jq '.assets | length' "$manifest")"
+          release_count="$(jq '.assets | length' <<<"$release_json")"
+          unique_release_name_count="$(jq -r '.assets[].name' <<<"$release_json" | sort -u | wc -l | tr -d ' ')"
+          [[ "$manifest_count" == '10' && "$release_count" == '10' && "$unique_release_name_count" == '10' ]] || {
+            echo "Existing release must contain exactly 10 uniquely named reviewed assets." >&2
             exit 1
           }
 
-          printf '%s\n' "${local_files[@]##*/}" | sort > /tmp/pulseforge-local-assets.txt
+          jq -r '.assets[].name' "$manifest" | sort > /tmp/pulseforge-manifest-assets.txt
           jq -r '.assets[].name' <<<"$release_json" | sort > /tmp/pulseforge-release-assets.txt
-
-          local_name_count="$(wc -l < /tmp/pulseforge-local-assets.txt | tr -d ' ')"
-          unique_local_name_count="$(sort -u /tmp/pulseforge-local-assets.txt | wc -l | tr -d ' ')"
-          release_asset_count="$(jq '.assets | length' <<<"$release_json")"
-          unique_release_name_count="$(sort -u /tmp/pulseforge-release-assets.txt | wc -l | tr -d ' ')"
-
-          [[ "$local_name_count" == '10' && "$unique_local_name_count" == '10' ]] || {
-            echo 'Validated run contains duplicate or unexpected release asset names.' >&2
-            exit 1
-          }
-          [[ "$release_asset_count" == '10' && "$unique_release_name_count" == '10' ]] || {
-            echo "Existing release must contain exactly 10 uniquely named assets; found $release_asset_count assets and $unique_release_name_count unique names." >&2
+          diff -u /tmp/pulseforge-manifest-assets.txt /tmp/pulseforge-release-assets.txt || {
+            echo 'Existing release asset names do not exactly match the durable manifest.' >&2
             exit 1
           }
 
-          diff -u /tmp/pulseforge-local-assets.txt /tmp/pulseforge-release-assets.txt || {
-            echo 'Existing release asset names do not exactly match the validated artifact run.' >&2
-            exit 1
-          }
-
-          for file in "${local_files[@]}"; do
-            name="$(basename "$file")"
-            local_size="$(stat -c '%s' "$file")"
-            local_digest="sha256:$(sha256sum "$file" | awk '{print $1}')"
+          while IFS=$'\t' read -r name expected_size expected_digest; do
             asset_json="$(jq -c --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json")"
             remote_state="$(jq -r '.state' <<<"$asset_json")"
             remote_size="$(jq -r '.size' <<<"$asset_json")"
@@ -221,24 +336,20 @@ jobs:
               echo "Release asset $name is not fully uploaded: $remote_state" >&2
               exit 1
             }
-            [[ "$remote_size" == "$local_size" ]] || {
-              echo "Release asset $name size mismatch: release=$remote_size validated=$local_size" >&2
+            [[ "$remote_size" == "$expected_size" ]] || {
+              echo "Release asset $name size mismatch: release=$remote_size manifest=$expected_size" >&2
               exit 1
             }
-            [[ -n "$remote_digest" ]] || {
-              echo "Release asset $name does not expose a digest; refusing publication." >&2
+            [[ "$remote_digest" == "$expected_digest" ]] || {
+              echo "Release asset $name digest mismatch: release=$remote_digest manifest=$expected_digest" >&2
               exit 1
             }
-            [[ "$remote_digest" == "$local_digest" ]] || {
-              echo "Release asset $name digest mismatch: release=$remote_digest validated=$local_digest" >&2
-              exit 1
-            }
-          done
+          done < <(jq -r '.assets[] | [.name, (.size_bytes | tostring), .digest] | @tsv' "$manifest")
 
-          echo 'Existing release assets exactly match the validated artifact run.'
+          echo 'Existing release assets exactly match the reviewed durable manifest.'
 
       - name: Create draft release when absent
-        if: steps.existing.outputs.exists != 'true' && inputs.publication_mode == 'draft'
+        if: steps.existing.outputs.exists != 'true' && steps.artifacts.outputs.available == 'true' && inputs.publication_mode == 'draft'
         shell: bash
         env:
           TAG: ${{ inputs.tag }}
@@ -255,6 +366,13 @@ jobs:
             --draft \
             "${packages[@]}" \
             "${sums[@]}"
+
+      - name: Refuse draft recreation after artifact expiry
+        if: steps.existing.outputs.exists != 'true' && steps.artifacts.outputs.available != 'true' && inputs.publication_mode == 'draft'
+        shell: bash
+        run: |
+          echo 'The reviewed draft no longer exists and the approved Actions artifacts are unavailable. The durable manifest is verification evidence only and must never be used to reconstruct release packages.' >&2
+          exit 1
 
       - name: Keep validated draft unchanged
         if: steps.existing.outputs.exists == 'true' && inputs.publication_mode == 'draft'
