@@ -1,0 +1,22 @@
+# PulseForge repository ownership
+#
+# This file documents ownership and review responsibility. It does not by
+# itself enforce review requirements; enforcement belongs in the main-branch
+# ruleset. While the repository has a single maintainer, do not enable
+# "Require review from Code Owners" unless a second trusted reviewer is added.
+
+# Default owner for the repository.
+* @deatuamae67-crypto
+
+# Security/release-sensitive configuration.
+/.github/ @deatuamae67-crypto
+/CMakeLists.txt @deatuamae67-crypto
+/cmake/ @deatuamae67-crypto
+/platform/android/ @deatuamae67-crypto
+/docs/RELEASE* @deatuamae67-crypto
+/SECURITY.md @deatuamae67-crypto
+
+# Discord integration and credential-storage boundary.
+/src/app/discord_presence.cpp @deatuamae67-crypto
+/src/app/discord_presence.hpp @deatuamae67-crypto
+/src/app/discord_token_store* @deatuamae67-crypto
