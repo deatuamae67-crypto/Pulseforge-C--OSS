@@ -196,6 +196,40 @@ jobs:
             'ndk;28.2.13676358' \
             'cmake;3.31.6'
 
+      - name: Resolve optional Discord Android support dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          stub_dir="$RUNNER_TEMP/pulseforge-discord-aar-stub"
+          stub_aar="$RUNNER_TEMP/discord_partner_sdk-ci-stub.aar"
+          rm -rf "$stub_dir" "$stub_aar"
+          mkdir -p "$stub_dir"
+          cat > "$stub_dir/AndroidManifest.xml" <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.pulseforge.ci.discordstub" />
+          EOF
+          python3 - "$stub_dir" "$stub_aar" <<'PY'
+          import pathlib, sys, zipfile
+          root = pathlib.Path(sys.argv[1])
+          output = pathlib.Path(sys.argv[2])
+          with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+              zf.write(root / 'AndroidManifest.xml', 'AndroidManifest.xml')
+          PY
+
+          chmod +x platform/android/gradlew
+          cd platform/android
+          ./gradlew --no-daemon --stacktrace \
+            :app:dependencies \
+            --configuration releaseRuntimeClasspath \
+            -PPULSEFORGE_DISCORD_SDK_AAR="$stub_aar" \
+            -PPULSEFORGE_DISCORD_APPLICATION_ID=1 \
+            2>&1 | tee "$GITHUB_WORKSPACE/android-discord-dependencies.log"
+
+          grep -F 'androidx.browser:browser:1.10.0' "$GITHUB_WORKSPACE/android-discord-dependencies.log"
+          if grep -Eq 'androidx\.browser:browser:1\.10\.0.*FAILED' "$GITHUB_WORKSPACE/android-discord-dependencies.log"; then
+            echo 'androidx.browser 1.10.0 did not resolve successfully.' >&2
+            exit 1
+          fi
+
       - name: Build unsigned Android Release APK
         shell: bash
         env:
@@ -218,6 +252,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: validation-logs-android-arm64
-          path: android-build.log
+          path: |
+            android-discord-dependencies.log
+            android-build.log
           if-no-files-found: ignore
           retention-days: 14
