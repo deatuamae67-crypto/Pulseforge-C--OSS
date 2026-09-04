@@ -46,14 +46,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
-            echo "Release publication is restricted to the repository owner." >&2
+          [[ "$GITHUB_ACTOR" == "$GITHUB_REPOSITORY_OWNER" ]] || {
+            echo 'Release publication is restricted to the repository owner.' >&2
             exit 1
-          fi
-          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+          }
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || {
             echo "Release publication must be dispatched from refs/heads/main; got $GITHUB_REF." >&2
             exit 1
-          fi
+          }
 
       - name: Load reviewed release manifest
         shell: bash
@@ -81,6 +81,7 @@ jobs:
             .schema_version == 1
             and .pulseforge_version == "0.9.7"
             and .tag == "v0.9.7"
+            and .release_id == 382859979
             and .release_target_sha == "b1e7b048a63118299c5fad795f2b4c607f931a86"
             and .source_run_id == 33891158742
             and .source_workflow_path == ".github/workflows/release-artifacts.yml"
@@ -154,7 +155,7 @@ jobs:
             echo 'All five approved Actions artifacts are still available.'
           elif [[ "$active" == '0' && ( "$total" == '0' || "$total" == '5' ) ]]; then
             echo 'available=false' >> "$GITHUB_OUTPUT"
-            echo 'Approved Actions artifacts are no longer downloadable; an existing release may only be validated against the reviewed durable manifest.'
+            echo 'Approved Actions artifacts are no longer downloadable; continuing only because the reviewed Release must already exist and match the durable manifest.'
           else
             echo "Unexpected partial artifact availability: total=$total active=$active; refusing publication." >&2
             exit 1
@@ -200,7 +201,7 @@ jobs:
           mkdir -p release-artifacts
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-artifacts
 
-      - name: Verify retained package set and SHA-256 files
+      - name: Verify retained packages and checksum files
         if: steps.artifacts.outputs.available == 'true'
         shell: bash
         run: |
@@ -272,8 +273,8 @@ jobs:
             }
           done
 
-      - name: Inspect existing release
-        id: existing
+      - name: Load and validate reviewed GitHub Release
+        id: release
         shell: bash
         env:
           TAG: ${{ inputs.tag }}
@@ -281,127 +282,220 @@ jobs:
         run: |
           set -euo pipefail
           manifest=/tmp/pulseforge-release-manifest.json
-          expected_release_id="$(jq -r '.release_id' "$manifest")"
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)"
-          if [[ -n "$release_id" ]]; then
-            release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
-            release_target="$(jq -r '.target_commitish' <<<"$release_json")"
-            [[ "$release_target" == "$TARGET_SHA" ]] || {
-              echo "Existing release $TAG targets $release_target, expected $TARGET_SHA." >&2
-              exit 1
-            }
-            [[ "$release_id" == "$expected_release_id" ]] || {
-              echo "Existing release ID $release_id does not match reviewed manifest release ID $expected_release_id." >&2
-              exit 1
-            }
-            echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-            echo 'exists=true' >> "$GITHUB_OUTPUT"
-            echo "Existing release $TAG validated."
-          else
-            echo 'exists=false' >> "$GITHUB_OUTPUT"
-          fi
+          release_id="$(jq -r '.release_id' "$manifest")"
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")" || {
+            echo "Reviewed release ID $release_id is missing or inaccessible. This publisher never creates or replaces the reviewed release." >&2
+            exit 1
+          }
 
-      - name: Verify existing release assets against durable manifest
-        if: steps.existing.outputs.exists == 'true'
-        shell: bash
-        env:
-          RELEASE_ID: ${{ steps.existing.outputs.release_id }}
-        run: |
-          set -euo pipefail
-          manifest=/tmp/pulseforge-release-manifest.json
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          actual_id="$(jq -r '.id' <<<"$release_json")"
+          actual_tag="$(jq -r '.tag_name' <<<"$release_json")"
+          actual_target="$(jq -r '.target_commitish' <<<"$release_json")"
+          [[ "$actual_id" == "$release_id" ]] || {
+            echo "Release ID mismatch: release=$actual_id manifest=$release_id" >&2
+            exit 1
+          }
+          [[ "$actual_tag" == "$TAG" ]] || {
+            echo "Release tag mismatch: release=$actual_tag expected=$TAG" >&2
+            exit 1
+          }
+          [[ "$actual_target" == "$TARGET_SHA" ]] || {
+            echo "Release target mismatch: release=$actual_target expected=$TARGET_SHA" >&2
+            exit 1
+          }
 
           manifest_count="$(jq '.assets | length' "$manifest")"
           release_count="$(jq '.assets | length' <<<"$release_json")"
           unique_release_name_count="$(jq -r '.assets[].name' <<<"$release_json" | sort -u | wc -l | tr -d ' ')"
           [[ "$manifest_count" == '10' && "$release_count" == '10' && "$unique_release_name_count" == '10' ]] || {
-            echo "Existing release must contain exactly 10 uniquely named reviewed assets." >&2
+            echo 'Reviewed release must contain exactly 10 uniquely named assets.' >&2
             exit 1
           }
 
           jq -r '.assets[].name' "$manifest" | sort > /tmp/pulseforge-manifest-assets.txt
           jq -r '.assets[].name' <<<"$release_json" | sort > /tmp/pulseforge-release-assets.txt
           diff -u /tmp/pulseforge-manifest-assets.txt /tmp/pulseforge-release-assets.txt || {
-            echo 'Existing release asset names do not exactly match the durable manifest.' >&2
+            echo 'Reviewed Release asset names do not exactly match the durable manifest.' >&2
             exit 1
           }
 
           while IFS=$'\t' read -r name expected_size expected_digest; do
             asset_json="$(jq -c --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json")"
-            remote_state="$(jq -r '.state' <<<"$asset_json")"
-            remote_size="$(jq -r '.size' <<<"$asset_json")"
-            remote_digest="$(jq -r '.digest // empty' <<<"$asset_json")"
-
-            [[ "$remote_state" == 'uploaded' ]] || {
-              echo "Release asset $name is not fully uploaded: $remote_state" >&2
+            state="$(jq -r '.state' <<<"$asset_json")"
+            actual_size="$(jq -r '.size' <<<"$asset_json")"
+            actual_digest="$(jq -r '.digest // empty' <<<"$asset_json")"
+            [[ "$state" == 'uploaded' ]] || {
+              echo "Release asset $name is not fully uploaded: $state" >&2
               exit 1
             }
-            [[ "$remote_size" == "$expected_size" ]] || {
-              echo "Release asset $name size mismatch: release=$remote_size manifest=$expected_size" >&2
+            [[ "$actual_size" == "$expected_size" ]] || {
+              echo "Release asset $name size mismatch: release=$actual_size manifest=$expected_size" >&2
               exit 1
             }
-            [[ "$remote_digest" == "$expected_digest" ]] || {
-              echo "Release asset $name digest mismatch: release=$remote_digest manifest=$expected_digest" >&2
+            [[ "$actual_digest" == "$expected_digest" ]] || {
+              echo "Release asset $name digest mismatch: release=$actual_digest manifest=$expected_digest" >&2
               exit 1
             }
           done < <(jq -r '.assets[] | [.name, (.size_bytes | tostring), .digest] | @tsv' "$manifest")
 
-          echo 'Existing release assets exactly match the reviewed durable manifest.'
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "draft=$(jq -r '.draft' <<<"$release_json")" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$(jq -r '.prerelease' <<<"$release_json")" >> "$GITHUB_OUTPUT"
+          echo 'Reviewed GitHub Release and all ten assets match the durable manifest.'
 
-      - name: Create draft release when absent
-        if: steps.existing.outputs.exists != 'true' && steps.artifacts.outputs.available == 'true' && inputs.publication_mode == 'draft'
+      - name: Validate any existing Git tag before mutation
+        id: tag
         shell: bash
         env:
           TAG: ${{ inputs.tag }}
           TARGET_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
-          mapfile -t packages < <(find release-artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' \) | sort)
-          mapfile -t sums < <(find release-artifacts -type f -name '*SHA256SUMS.txt' | sort)
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$TARGET_SHA" \
-            --title "PulseForge $PULSEFORGE_VERSION" \
-            --notes-file docs/RELEASE_NOTES_0.9.7.md \
-            --draft \
-            "${packages[@]}" \
-            "${sums[@]}"
+          set +e
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" \
+            > /tmp/pulseforge-tag-ref.json \
+            2> /tmp/pulseforge-tag-ref-error.txt
+          rc=$?
+          set -e
 
-      - name: Refuse draft recreation after artifact expiry
-        if: steps.existing.outputs.exists != 'true' && steps.artifacts.outputs.available != 'true' && inputs.publication_mode == 'draft'
-        shell: bash
-        run: |
-          echo 'The reviewed draft no longer exists and the approved Actions artifacts are unavailable. The durable manifest is verification evidence only and must never be used to reconstruct release packages.' >&2
-          exit 1
+          if [[ "$rc" != '0' ]]; then
+            if grep -q 'HTTP 404' /tmp/pulseforge-tag-ref-error.txt; then
+              echo 'exists=false' >> "$GITHUB_OUTPUT"
+              echo 'No materialized Git tag exists yet.'
+              exit 0
+            fi
+            cat /tmp/pulseforge-tag-ref-error.txt >&2
+            exit "$rc"
+          fi
+
+          object_type="$(jq -r '.object.type' /tmp/pulseforge-tag-ref.json)"
+          object_sha="$(jq -r '.object.sha' /tmp/pulseforge-tag-ref.json)"
+          for _ in 1 2 3 4; do
+            [[ "$object_type" == 'tag' ]] || break
+            tag_json="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
+            object_type="$(jq -r '.object.type' <<<"$tag_json")"
+            object_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          done
+
+          [[ "$object_type" == 'commit' && "$object_sha" == "$TARGET_SHA" ]] || {
+            echo "Existing tag $TAG resolves to $object_type $object_sha, expected commit $TARGET_SHA. Refusing release mutation." >&2
+            exit 1
+          }
+
+          if [[ "${{ steps.release.outputs.draft }}" == 'true' ]]; then
+            echo "Tag $TAG is already materialized while the reviewed Release is still draft. Refusing an unexpected pre-publication state." >&2
+            exit 1
+          fi
+
+          echo 'exists=true' >> "$GITHUB_OUTPUT"
+          echo "Existing tag $TAG resolves to the expected release target."
 
       - name: Keep validated draft unchanged
-        if: steps.existing.outputs.exists == 'true' && inputs.publication_mode == 'draft'
+        if: inputs.publication_mode == 'draft'
         shell: bash
-        run: echo 'Validated draft release already exists; no publication change requested.'
+        run: |
+          set -euo pipefail
+          [[ "${{ steps.release.outputs.draft }}" == 'true' ]] || {
+            echo 'The reviewed Release is already public; draft mode cannot revert it to draft.' >&2
+            exit 1
+          }
+          echo 'Validated reviewed draft; no publication state change requested.'
 
-      - name: Publish existing draft as prerelease
-        if: steps.existing.outputs.exists == 'true' && inputs.publication_mode == 'prerelease'
+      - name: Publish reviewed draft as prerelease
+        if: inputs.publication_mode == 'prerelease' && steps.release.outputs.draft == 'true'
         shell: bash
         env:
-          RELEASE_ID: ${{ steps.existing.outputs.release_id }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
         run: |
           set -euo pipefail
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
             -F draft=false -F prerelease=true >/dev/null
 
-      - name: Publish existing draft as release
-        if: steps.existing.outputs.exists == 'true' && inputs.publication_mode == 'release'
+      - name: Keep existing prerelease state
+        if: inputs.publication_mode == 'prerelease' && steps.release.outputs.draft != 'true' && steps.release.outputs.prerelease == 'true'
+        shell: bash
+        run: echo 'Reviewed Release is already a prerelease; no state change needed.'
+
+      - name: Refuse regular-release downgrade to prerelease
+        if: inputs.publication_mode == 'prerelease' && steps.release.outputs.draft != 'true' && steps.release.outputs.prerelease != 'true'
+        shell: bash
+        run: |
+          echo 'Reviewed Release is already a regular public release and will not be downgraded to prerelease.' >&2
+          exit 1
+
+      - name: Publish or promote reviewed release
+        if: inputs.publication_mode == 'release' && (steps.release.outputs.draft == 'true' || steps.release.outputs.prerelease == 'true')
         shell: bash
         env:
-          RELEASE_ID: ${{ steps.existing.outputs.release_id }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
         run: |
           set -euo pipefail
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
             -F draft=false -F prerelease=false >/dev/null
 
-      - name: Refuse direct public creation without a draft
-        if: steps.existing.outputs.exists != 'true' && inputs.publication_mode != 'draft'
+      - name: Keep existing regular release state
+        if: inputs.publication_mode == 'release' && steps.release.outputs.draft != 'true' && steps.release.outputs.prerelease != 'true'
         shell: bash
+        run: echo 'Reviewed Release is already a regular public release; no state change needed.'
+
+      - name: Verify public release state and tag target
+        if: inputs.publication_mode != 'draft'
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+          TAG: ${{ inputs.tag }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          PUBLICATION_MODE: ${{ inputs.publication_mode }}
         run: |
-          echo 'Create and review a draft release before public publication.' >&2
-          exit 1
+          set -euo pipefail
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          draft="$(jq -r '.draft' <<<"$release_json")"
+          prerelease="$(jq -r '.prerelease' <<<"$release_json")"
+          target="$(jq -r '.target_commitish' <<<"$release_json")"
+          [[ "$draft" == 'false' ]] || {
+            echo 'Release remained draft after publication request.' >&2
+            exit 1
+          }
+          [[ "$target" == "$TARGET_SHA" ]] || {
+            echo "Published release target changed to $target; expected $TARGET_SHA." >&2
+            exit 1
+          }
+          if [[ "$PUBLICATION_MODE" == 'prerelease' ]]; then
+            [[ "$prerelease" == 'true' ]] || {
+              echo 'Release is not marked prerelease after prerelease publication.' >&2
+              exit 1
+            }
+          else
+            [[ "$prerelease" == 'false' ]] || {
+              echo 'Release is still marked prerelease after regular publication.' >&2
+              exit 1
+            }
+          fi
+
+          tag_ref=''
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            set +e
+            tag_ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" 2>/dev/null)"
+            rc=$?
+            set -e
+            [[ "$rc" == '0' ]] && break
+            sleep 1
+          done
+          [[ -n "$tag_ref" ]] || {
+            echo "Published Release did not materialize refs/tags/$TAG." >&2
+            exit 1
+          }
+
+          object_type="$(jq -r '.object.type' <<<"$tag_ref")"
+          object_sha="$(jq -r '.object.sha' <<<"$tag_ref")"
+          for _ in 1 2 3 4; do
+            [[ "$object_type" == 'tag' ]] || break
+            tag_json="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
+            object_type="$(jq -r '.object.type' <<<"$tag_json")"
+            object_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          done
+          [[ "$object_type" == 'commit' && "$object_sha" == "$TARGET_SHA" ]] || {
+            echo "Published tag $TAG resolves to $object_type $object_sha, expected commit $TARGET_SHA." >&2
+            exit 1
+          }
+          echo "Published Release and refs/tags/$TAG resolve to the reviewed target."
