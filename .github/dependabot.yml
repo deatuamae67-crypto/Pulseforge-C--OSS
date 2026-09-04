@@ -19,3 +19,5 @@ updates:
       android-build-dependencies:
         patterns:
           - "*"
+        exclude-patterns:
+          - "gradle-wrapper"
