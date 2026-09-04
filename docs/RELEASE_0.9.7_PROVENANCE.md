@@ -9,34 +9,38 @@ This document records the build and validation provenance for the first public P
 - Last engine/build-source head with both PR validation matrices completed successfully: `fbb9ee22350a939071595721f5d6a35909d41a6d`
 - Cross-platform build validation run: `33884590462` — success
 - Deterministic core tests run: `33884590622` — success
+- Current release-workflow commit: `6e49caed8f7abbe5f2104632d48bdc93f4baa3b1`
 
 The changes between the validated source head and the merge were limited to repository documentation and `.github` maintenance/CI files; there were no changes to `src/`, `include/`, `tests/`, `CMakeLists.txt`, `CMakePresets.json`, `platform/android/`, `assets/`, or `third_party/`.
 
-## Current `main` release-artifact run
+The release-workflow commit changes only the macOS Intel runner label from `macos-15-intel` to `macos-26-intel`; it does not change PulseForge engine or build inputs. Documentation-only commits after that workflow commit likewise do not alter the generated binaries.
 
-Release-artifact run `33888451183` targets merge commit `fe100c6f5ff5c69aff85ecf760696d5f0c5fd8d5`.
+## Preferred current `main` release-artifact run
 
-The following packages completed successfully and their package-level SHA-256 files were independently rechecked after downloading the GitHub Actions artifacts:
+Release-artifact run `33891158742` targets commit `6e49caed8f7abbe5f2104632d48bdc93f4baa3b1` on `main`.
 
-| Target | Package | SHA-256 |
-| --- | --- | --- |
-| Windows x86_64 | `PulseForge-v0.9.7-Windows-x86_64.zip` | `4917a088ee09ddb528285c117627278972f5aaa77ecac36dc399fe7125be0577` |
-| Linux x86_64 | `PulseForge-v0.9.7-Linux-x86_64.tar.gz` | `2bdf7a117e1c8ded2f88ed993980c728ec02ef70393d927bb791c6123b45d72a` |
-| macOS arm64 | `PulseForge-v0.9.7-macOS-arm64.tar.gz` | `681362b26e0b658bf991dd9a42ca9f57029638056bae8fd50fc328b72fcd37e0` |
-| Android arm64 | `PulseForge-v0.9.7-Android-arm64-test-signed.apk` | `403a74af9d8223ff2fc693558c46f5921f58c76b2db1b0c93486a26d34938469` |
+The following packages have completed successfully in this run. Their package-level SHA-256 files were independently rechecked after downloading the GitHub Actions artifacts:
 
-Independent package evidence also confirmed:
+| Target | Package | SHA-256 | Status |
+| --- | --- | --- | --- |
+| Windows x86_64 | `PulseForge-v0.9.7-Windows-x86_64.zip` | `b70d5adf35fd2b071b54b0711e91215985feb41fd1bf78b5b8f5d16d444291df` | verified |
+| Linux x86_64 | `PulseForge-v0.9.7-Linux-x86_64.tar.gz` | `e9063dda68e7f6e5c1a5692d5718883b458d1855819fe5a7815f7928483a36ce` | verified |
+| macOS arm64 | `PulseForge-v0.9.7-macOS-arm64.tar.gz` | `aebfea49ac288c93343776df759bfacb71d837057bf5deefd5263df74562204e` | verified |
+| Android arm64 | `PulseForge-v0.9.7-Android-arm64-test-signed.apk` | `848e0b42ee581ac801260eb81828d6f17ec5d5925b154546cb7fb906f41a2a18` | verified |
+| macOS x86_64 | `PulseForge-v0.9.7-macOS-x86_64.tar.gz` | pending current-run package | building |
 
-- Windows contains both `bin/pulseforge.exe` and `bin/pulseforge-cli.exe` plus the expected OSS documentation/runtime policy files.
+Independent package evidence for the four completed current-run packages also confirms:
+
+- Windows contains both `bin/pulseforge.exe` and `bin/pulseforge-cli.exe`.
 - Linux is an x86-64 ELF executable and the recorded `ldd` output contains no unresolved shared libraries.
 - macOS arm64 is a Mach-O 64-bit arm64 executable and passed the workflow's ad-hoc codesign verification.
 - Android identifies as `org.pulseforge.engine`, `versionCode=90700`, `versionName=0.9.7`, `minSdkVersion=21`, `targetSdkVersion=35`, with native code `arm64-v8a`; the CI artifact is deliberately test-signed.
 
-## macOS x86_64 runner fallback
+## macOS x86_64 fallback provenance
 
-The macOS x86_64 job in current `main` run `33888451183` remains queued because no `macos-15-intel` runner has been assigned.
+The current run now uses GitHub's supported `macos-26-intel` runner label for x86_64 and its job is actively building.
 
-A previous successful release-artifact run, `33883728198`, built macOS x86_64 from commit `4063a05110be16f044809c58048ea9baae74f590` using the same release workflow and identical build inputs. A commit comparison from that source to the merge commit shows only README, documentation and `.github` changes; no engine, CMake, platform, asset or third-party build input changed.
+Until that package completes, a previous successful release-artifact run, `33883728198`, provides a validated fallback built from commit `4063a05110be16f044809c58048ea9baae74f590`. A commit comparison from that source to the merged engine state showed no changes to engine, CMake, platform, asset or third-party build inputs.
 
 The independently checked fallback package is:
 
@@ -45,7 +49,7 @@ The independently checked fallback package is:
 - Architecture evidence: Mach-O 64-bit executable `x86_64`
 - Workflow result: successful build, ad-hoc signing, codesign verification and artifact upload
 
-This fallback is suitable as a provenance-preserving release candidate because the build inputs are unchanged. If the current `main` macOS x86_64 job later completes, its newly produced artifact should supersede this fallback in the final GitHub Release.
+If run `33891158742` completes its macOS x86_64 job successfully, that newly produced artifact supersedes this fallback for the final GitHub Release.
 
 ## Distribution boundary
 
@@ -55,4 +59,6 @@ The Android package is test-signed and the macOS packages are ad-hoc signed; pro
 
 ## Publication status
 
-The source is merged and the release candidate set is validated as recorded above. A Git tag/GitHub Release named `v0.9.7` has not yet been created by this automation path; publication should use this provenance record and, where available, prefer artifacts produced directly from current `main` run `33888451183`.
+The source is merged and four of five packages from the preferred current-main run are independently verified. The current macOS x86_64 package is still building, with a validated identical-input fallback available.
+
+A Git tag/GitHub Release named `v0.9.7` has not yet been created through the available automation path. Publication should use this provenance record and, once available, the full artifact set from run `33891158742`.
