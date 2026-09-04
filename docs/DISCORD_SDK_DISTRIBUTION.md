@@ -1,0 +1,62 @@
+# Discord Social SDK distribution policy
+
+PulseForge integrates Discord Rich Presence and account linking through Discord's official Social SDK.
+
+## Source repository boundary
+
+The public source repository does **not** mirror or publish Discord's SDK archive as a standalone dependency. The raw SDK remains governed by Discord's Social SDK Terms and must be obtained by an authorized developer from the Discord Developer Portal.
+
+The project-local SDK directory remains ignored by Git:
+
+```text
+third_party/discord_social_sdk/
+```
+
+Developers can stage an authorized SDK archive with:
+
+```powershell
+.\scripts\setup-discord-social-sdk.ps1 -SdkPath C:\Downloads\discord_social_sdk.zip
+```
+
+or:
+
+```bash
+./scripts/setup-discord-social-sdk.sh --sdk ~/Downloads/discord_social_sdk.zip
+```
+
+## Shipping the game
+
+Discord's C++ integration documentation requires the Social SDK runtime to ship with the game when the SDK is linked.
+
+PulseForge release packages therefore treat the runtime as a required integrated application dependency:
+
+- Windows: `discord_partner_sdk.dll` beside `pulseforge.exe` and `pulseforge-cli.exe`.
+- Linux: `libdiscord_partner_sdk.so` beside the executable, with an `$ORIGIN` runtime search path.
+- macOS: `libdiscord_partner_sdk.dylib` beside the executable/bundle payload, with an `@loader_path` runtime search path.
+- Android: `discord_partner_sdk.aar` is consumed through Gradle/Prefab and its native runtime is packaged into the APK.
+
+A Discord-enabled release must never be published if the corresponding runtime dependency is missing.
+
+## CI and release secrets
+
+Public CI may compile the no-op backend without access to proprietary SDK files. Release CI that produces Discord-enabled distributable binaries must receive an authorized SDK archive through a repository secret or another private authenticated source.
+
+Recommended secret name:
+
+```text
+PULSEFORGE_DISCORD_SDK_ARCHIVE_URL
+```
+
+The downloaded SDK archive must only be used as an input to the build. Do not upload the unmodified SDK archive as a public artifact. Only publish the final PulseForge application package containing the runtime integrated as required by Discord.
+
+## Fail-open runtime behavior
+
+Discord connectivity, account state, authentication failures, rate limits and Discord being closed must never terminate gameplay or prevent PulseForge from starting.
+
+This is distinct from a missing loader dependency: if PulseForge is linked against the Discord shared library but the runtime DLL/SO/dylib was omitted from the application package, the operating-system loader can fail before PulseForge's own fail-open code executes. Packaging validation therefore prevents such a build from being released.
+
+## Official references
+
+- Discord Social SDK Terms: https://support-dev.discord.com/hc/en-us/articles/30225844245271-Discord-Social-SDK-Terms
+- Discord Social SDK C++ getting started: https://docs.discord.com/developers/discord-social-sdk/getting-started/using-c%2B%2B
+- Discord Social SDK documentation: https://discord.com/developers/docs/social-sdk/index.html

@@ -2,18 +2,22 @@ name: PulseForge deterministic core tests
 
 on:
   workflow_dispatch:
-  issues:
-    types: [opened]
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
-  SOURCE_REF: import/pulseforge-0.9.7-oss
+  SOURCE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   core-tests:
-    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, '[core-tests] PulseForge 0.9.7') }}
     name: core tests / ${{ matrix.name }}
     strategy:
       fail-fast: false

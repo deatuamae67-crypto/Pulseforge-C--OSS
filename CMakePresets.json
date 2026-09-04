@@ -1,0 +1,88 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows MSVC x64 (VS 2022)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/out/build/msvc",
+      "cacheVariables": {
+        "PULSEFORGE_BUILD_APP": "ON",
+        "PULSEFORGE_BUILD_TESTS": "OFF",
+        "PULSEFORGE_BUILD_AUTOCHART": "OFF",
+        "PULSEFORGE_ENABLE_LUA": "ON",
+        "PULSEFORGE_WARNINGS_AS_ERRORS": "OFF",
+        "PULSEFORGE_DISCORD_APPLICATION_ID": "1544144634832355429"
+      }
+    },
+    {
+      "name": "windows-msvc-vs2026",
+      "displayName": "Windows MSVC x64 (VS 2026)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/out/build/msvc-vs2026",
+      "cacheVariables": {
+        "PULSEFORGE_BUILD_APP": "ON",
+        "PULSEFORGE_BUILD_TESTS": "OFF",
+        "PULSEFORGE_BUILD_AUTOCHART": "OFF",
+        "PULSEFORGE_ENABLE_LUA": "ON",
+        "PULSEFORGE_WARNINGS_AS_ERRORS": "OFF",
+        "PULSEFORGE_DISCORD_APPLICATION_ID": "1544144634832355429"
+      }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux x86_64 Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PULSEFORGE_BUILD_APP": "ON",
+        "PULSEFORGE_BUILD_TESTS": "OFF",
+        "PULSEFORGE_BUILD_AUTOCHART": "OFF",
+        "PULSEFORGE_ENABLE_LUA": "ON",
+        "PULSEFORGE_BUNDLE_FFMPEG": "OFF",
+        "PULSEFORGE_WARNINGS_AS_ERRORS": "OFF"
+      }
+    },
+    {
+      "name": "macos-release",
+      "displayName": "macOS native Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/macos-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0",
+        "PULSEFORGE_BUILD_APP": "ON",
+        "PULSEFORGE_BUILD_TESTS": "OFF",
+        "PULSEFORGE_BUILD_AUTOCHART": "OFF",
+        "PULSEFORGE_ENABLE_LUA": "ON",
+        "PULSEFORGE_BUNDLE_FFMPEG": "OFF",
+        "PULSEFORGE_WARNINGS_AS_ERRORS": "OFF"
+      }
+    },
+    {
+      "name": "core-only",
+      "displayName": "Portable core only",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/core",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PULSEFORGE_BUILD_APP": "OFF",
+        "PULSEFORGE_BUILD_TESTS": "OFF",
+        "PULSEFORGE_BUILD_AUTOCHART": "OFF",
+        "PULSEFORGE_ENABLE_LUA": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows-release", "configurePreset": "windows-msvc", "configuration": "Release", "jobs": 0 },
+    { "name": "windows-debug", "configurePreset": "windows-msvc", "configuration": "Debug", "jobs": 0 },
+    { "name": "windows-release-vs2026", "configurePreset": "windows-msvc-vs2026", "configuration": "Release", "jobs": 0 },
+    { "name": "linux-release", "configurePreset": "linux-release", "jobs": 0 },
+    { "name": "macos-release", "configurePreset": "macos-release", "jobs": 0 },
+    { "name": "core-release", "configurePreset": "core-only", "jobs": 0 }
+  ]
+}

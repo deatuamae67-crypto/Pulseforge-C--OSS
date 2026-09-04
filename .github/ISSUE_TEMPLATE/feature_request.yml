@@ -1,0 +1,55 @@
+name: Feature request
+description: Propose an improvement to PulseForge
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Explain the concrete limitation, compatibility gap or workflow problem this would solve.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired behavior without requiring a specific implementation if alternatives are possible.
+    validations:
+      required: true
+  - type: checkboxes
+    id: areas
+    attributes:
+      label: Relevant areas
+      options:
+        - label: Core/gameplay
+        - label: PFC1/streaming
+        - label: Psych/FNF mod compatibility
+        - label: Lua/NoteTypes/events
+        - label: Launcher/UI
+        - label: AutoChart
+        - label: Offline rendering/FFmpeg
+        - label: Discord Social SDK
+        - label: Windows/Linux/macOS/Android portability
+        - label: Build/CI/release
+  - type: textarea
+    id: scale
+    attributes:
+      label: Scale and performance considerations
+      description: If relevant, describe expected chart sizes, note counts, memory/latency requirements or long-session behavior.
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility considerations
+      description: Note any materialized/PFC1 parity, existing mod behavior, API or migration implications.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional alternatives or workarounds.
+  - type: checkboxes
+    id: oss
+    attributes:
+      label: OSS boundary
+      options:
+        - label: The request does not depend on committing private/unlicensed content, secrets, signing keys or Discord SDK binaries to this repository.
+          required: true

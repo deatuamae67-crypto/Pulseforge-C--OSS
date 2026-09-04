@@ -1,0 +1,88 @@
+{
+  "schema": "pulseforge-autochart-ml-health-v1",
+  "ok": true,
+  "deep": false,
+  "pythonVersion": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+  "device": "cpu",
+  "phonemeModel": "facebook/wav2vec2-xlsr-53-phon-cv-ft",
+  "phonemeModelRevision": "1c2ce0df451c63934f4bad5b65e8e87acf1bf15f",
+  "stages": [
+    {
+      "name": "python",
+      "available": true,
+      "tested": true,
+      "latencyMs": 0.0,
+      "detail": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]"
+    },
+    {
+      "name": "ffmpeg",
+      "available": true,
+      "tested": true,
+      "latencyMs": 24.21689999755472,
+      "detail": "ffmpeg version 8.1.2-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers"
+    },
+    {
+      "name": "torch",
+      "available": true,
+      "tested": false,
+      "latencyMs": 1902.3010000018985,
+      "detail": "version 2.13.0"
+    },
+    {
+      "name": "soundfile",
+      "available": true,
+      "tested": false,
+      "latencyMs": 15.930599998682737,
+      "detail": "version 0.13.1"
+    },
+    {
+      "name": "demucs",
+      "available": true,
+      "tested": false,
+      "latencyMs": 3.655699998489581,
+      "detail": "version 4.1.0"
+    },
+    {
+      "name": "beatThis",
+      "available": true,
+      "tested": false,
+      "latencyMs": 3.444499998295214,
+      "detail": "version 1.1.0"
+    },
+    {
+      "name": "adtof",
+      "available": false,
+      "tested": false,
+      "latencyMs": 1.1257000005571172,
+      "detail": "unavailable: No module named 'adtof_pytorch'"
+    },
+    {
+      "name": "basicPitch",
+      "available": true,
+      "tested": false,
+      "latencyMs": 5640.702700002294,
+      "detail": "version 0.4.0"
+    },
+    {
+      "name": "transformers",
+      "available": true,
+      "tested": false,
+      "latencyMs": 1972.0332000033522,
+      "detail": "version 5.15.0"
+    },
+    {
+      "name": "device",
+      "available": true,
+      "tested": true,
+      "latencyMs": 0.0,
+      "detail": "cpu"
+    },
+    {
+      "name": "phonemeModel",
+      "available": true,
+      "tested": false,
+      "latencyMs": 0.0,
+      "detail": "facebook/wav2vec2-xlsr-53-phon-cv-ft"
+    }
+  ]
+}
