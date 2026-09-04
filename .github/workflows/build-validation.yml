@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 env:
-  SOURCE_REF: import/pulseforge-0.9.7-oss
+  SOURCE_REF: ${{ github.ref_name }}
 
 jobs:
   windows-x64:
