@@ -676,6 +676,9 @@ if(PULSEFORGE_BUILD_APP)
         add_library(pulseforge SHARED src/app/main.cpp)
         set_property(TARGET pulseforge PROPERTY OUTPUT_NAME "main")
         add_library(PulseForge::App ALIAS pulseforge)
+    elseif(APPLE)
+        add_executable(pulseforge MACOSX_BUNDLE src/app/main.cpp)
+        add_executable(PulseForge::App ALIAS pulseforge)
     else()
         add_executable(pulseforge src/app/main.cpp)
         add_executable(PulseForge::App ALIAS pulseforge)
@@ -687,6 +690,14 @@ if(PULSEFORGE_BUILD_APP)
     target_compile_definitions(pulseforge PRIVATE
         PULSEFORGE_VERSION="${PROJECT_VERSION}"
     )
+    if(APPLE)
+        set_target_properties(pulseforge PROPERTIES
+            MACOSX_BUNDLE_BUNDLE_NAME "PulseForge"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "org.pulseforge.engine"
+            MACOSX_BUNDLE_BUNDLE_VERSION "90700"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        )
+    endif()
     pulseforge_set_warnings(pulseforge)
 
     if(WIN32)
@@ -1442,6 +1453,8 @@ endif()
 if(PULSEFORGE_BUILD_APP)
     if(ANDROID)
         install(TARGETS pulseforge LIBRARY DESTINATION lib)
+    elseif(APPLE)
+        install(TARGETS pulseforge BUNDLE DESTINATION . RUNTIME DESTINATION bin)
     else()
         install(TARGETS pulseforge RUNTIME DESTINATION bin)
     endif()

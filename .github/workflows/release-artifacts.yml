@@ -68,6 +68,10 @@ jobs:
           test -x "$stage/bin/pulseforge"
           file "$stage/bin/pulseforge" | tee "$RUNNER_TEMP/$package.file.txt"
           ldd "$stage/bin/pulseforge" | tee "$RUNNER_TEMP/$package.ldd.txt"
+          if grep -q 'not found' "$RUNNER_TEMP/$package.ldd.txt"; then
+            echo 'Linux package has unresolved shared libraries.' >&2
+            exit 1
+          fi
           tar -C "$RUNNER_TEMP" -czf "$archive" "$package"
           (cd "$RUNNER_TEMP" && sha256sum "$package.tar.gz" > "$package.SHA256SUMS.txt")
           echo "package=$package" >> "$GITHUB_OUTPUT"
@@ -115,7 +119,7 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}'
           cmake --build --preset macos-release --parallel 2
 
-      - name: Stage, ad-hoc sign and verify macOS package
+      - name: Stage, ad-hoc sign and verify macOS application
         id: package
         shell: bash
         run: |
@@ -124,12 +128,18 @@ jobs:
           stage="$RUNNER_TEMP/$package"
           archive="$RUNNER_TEMP/$package.tar.gz"
           cmake --install out/build/macos-release --prefix "$stage"
-          test -x "$stage/bin/pulseforge"
-          codesign --force --sign - "$stage/bin/pulseforge"
-          codesign --verify --verbose=2 "$stage/bin/pulseforge"
-          file "$stage/bin/pulseforge" | tee "$RUNNER_TEMP/$package.file.txt"
-          lipo -archs "$stage/bin/pulseforge" | tee "$RUNNER_TEMP/$package.arch.txt"
-          otool -L "$stage/bin/pulseforge" | tee "$RUNNER_TEMP/$package.otool.txt"
+          app="$stage/PulseForge.app"
+          binary="$app/Contents/MacOS/pulseforge"
+          test -x "$binary"
+          test -f "$app/Contents/Info.plist"
+          test -d "$app/Contents/MacOS/assets"
+          codesign --deep --force --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          plutil -p "$app/Contents/Info.plist" | tee "$RUNNER_TEMP/$package.plist.txt"
+          file "$binary" | tee "$RUNNER_TEMP/$package.file.txt"
+          lipo -archs "$binary" | tee "$RUNNER_TEMP/$package.arch.txt"
+          grep -qx '${{ matrix.arch }}' "$RUNNER_TEMP/$package.arch.txt"
+          otool -L "$binary" | tee "$RUNNER_TEMP/$package.otool.txt"
           tar -C "$RUNNER_TEMP" -czf "$archive" "$package"
           (cd "$RUNNER_TEMP" && shasum -a 256 "$package.tar.gz" > "$package.SHA256SUMS.txt")
           echo "package=$package" >> "$GITHUB_OUTPUT"
@@ -144,6 +154,7 @@ jobs:
             ${{ runner.temp }}/${{ steps.package.outputs.package }}.file.txt
             ${{ runner.temp }}/${{ steps.package.outputs.package }}.arch.txt
             ${{ runner.temp }}/${{ steps.package.outputs.package }}.otool.txt
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.plist.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -209,6 +220,15 @@ jobs:
             --verbose --print-certs "$signed" | tee "$RUNNER_TEMP/$package.signature.txt"
           unzip -l "$signed" | tee "$RUNNER_TEMP/$package.contents.txt"
           grep -q 'lib/arm64-v8a/libmain.so' "$RUNNER_TEMP/$package.contents.txt"
+          grep -q 'lib/arm64-v8a/libSDL3.so' "$RUNNER_TEMP/$package.contents.txt"
+          grep -q 'assets/pulseforge/assets/settings.json' "$RUNNER_TEMP/$package.contents.txt"
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$signed" \
+            | tee "$RUNNER_TEMP/$package.badging.txt"
+          grep -q "package: name='org.pulseforge.engine'.*versionCode='90700'.*versionName='0.9.7'" \
+            "$RUNNER_TEMP/$package.badging.txt"
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump xmltree \
+            "$signed" AndroidManifest.xml \
+            | tee "$RUNNER_TEMP/$package.manifest.txt"
           (cd "$RUNNER_TEMP" && sha256sum "$package.apk" > "$package.SHA256SUMS.txt")
           echo "package=$package" >> "$GITHUB_OUTPUT"
 
@@ -221,5 +241,7 @@ jobs:
             ${{ runner.temp }}/${{ steps.package.outputs.package }}.SHA256SUMS.txt
             ${{ runner.temp }}/${{ steps.package.outputs.package }}.signature.txt
             ${{ runner.temp }}/${{ steps.package.outputs.package }}.contents.txt
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.badging.txt
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.manifest.txt
           if-no-files-found: error
           retention-days: 30
