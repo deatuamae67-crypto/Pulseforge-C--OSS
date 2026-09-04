@@ -17,6 +17,11 @@ on:
       - '.github/workflows/release-integrity-validation.yml'
       - 'docs/RELEASE_0.9.7_ASSET_MANIFEST.json'
       - 'docs/RELEASE_0.9.7_PROVENANCE.md'
+  release:
+    types:
+      - published
+      - released
+      - prereleased
   workflow_dispatch:
 
 permissions:
@@ -38,6 +43,8 @@ jobs:
     steps:
       - name: Checkout validation source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'release' && 'main' || github.sha }}
 
       - name: Validate durable release manifest
         shell: bash
@@ -96,15 +103,41 @@ jobs:
             exit 1
           }
 
-      - name: Validate GitHub Release against durable manifest
+      - name: Probe GitHub Release visibility
+        id: release
         shell: bash
         run: |
           set -euo pipefail
           release_id="$(jq -r '.release_id' "$MANIFEST")"
+          set +e
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            > /tmp/pulseforge-release.json \
+            2> /tmp/pulseforge-release-error.txt
+          rc=$?
+          set -e
+
+          if [[ "$rc" == '0' ]]; then
+            echo 'accessible=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if grep -q 'HTTP 403' /tmp/pulseforge-release-error.txt; then
+            echo 'accessible=false' >> "$GITHUB_OUTPUT"
+            echo 'Draft Release metadata is not exposed to this read-only GITHUB_TOKEN; continuing with the reviewed manifest, source-run provenance and tag-state checks.'
+            exit 0
+          fi
+
+          cat /tmp/pulseforge-release-error.txt >&2
+          exit "$rc"
+
+      - name: Validate visible GitHub Release against durable manifest
+        if: steps.release.outputs.accessible == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(cat /tmp/pulseforge-release.json)"
           expected_tag="$(jq -r '.tag' "$MANIFEST")"
           expected_target="$(jq -r '.release_target_sha' "$MANIFEST")"
-
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
           actual_tag="$(jq -r '.tag_name' <<<"$release_json")"
           actual_target="$(jq -r '.target_commitish' <<<"$release_json")"
 
@@ -119,8 +152,9 @@ jobs:
 
           manifest_count="$(jq '.assets | length' "$MANIFEST")"
           release_count="$(jq '.assets | length' <<<"$release_json")"
-          [[ "$release_count" == "$manifest_count" ]] || {
-            echo "Release asset count mismatch: release=$release_count manifest=$manifest_count" >&2
+          unique_release_name_count="$(jq -r '.assets[].name' <<<"$release_json" | sort -u | wc -l | tr -d ' ')"
+          [[ "$release_count" == "$manifest_count" && "$unique_release_name_count" == "$manifest_count" ]] || {
+            echo "Release asset set is not exactly $manifest_count unique assets." >&2
             exit 1
           }
 
@@ -158,32 +192,44 @@ jobs:
 
           draft="$(jq -r '.draft' <<<"$release_json")"
           prerelease="$(jq -r '.prerelease' <<<"$release_json")"
-          echo "Release asset integrity verified (draft=$draft, prerelease=$prerelease)."
+          echo "Visible Release asset integrity verified (draft=$draft, prerelease=$prerelease)."
 
-      - name: Validate tag target when tag exists
+      - name: Validate tag and publication state
         shell: bash
         run: |
           set -euo pipefail
           tag="$(jq -r '.tag' "$MANIFEST")"
           expected_target="$(jq -r '.release_target_sha' "$MANIFEST")"
-          release_id="$(jq -r '.release_id' "$MANIFEST")"
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
-          draft="$(jq -r '.draft' <<<"$release_json")"
-
           refs_json="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag")"
           ref_count="$(jq 'length' <<<"$refs_json")"
 
           if [[ "$ref_count" == '0' ]]; then
-            [[ "$draft" == 'true' ]] || {
-              echo "Published release $tag has no Git tag ref." >&2
-              exit 1
-            }
-            echo "Draft release has no materialized Git tag yet; this is valid."
+            if [[ "${{ steps.release.outputs.accessible }}" == 'true' ]]; then
+              draft="$(jq -r '.draft' /tmp/pulseforge-release.json)"
+              [[ "$draft" == 'true' ]] || {
+                echo "Visible published release $tag has no Git tag ref." >&2
+                exit 1
+              }
+              echo 'Visible draft has no materialized Git tag yet; this is valid.'
+            else
+              echo 'Read-only token cannot inspect the draft and no Git tag is materialized; publication remains gated by publish-release.yml live draft verification.'
+            fi
             exit 0
           fi
 
           [[ "$ref_count" == '1' ]] || {
-            echo "Expected at most one exact tag ref for $tag, found $ref_count." >&2
+            echo "Expected one exact tag ref for $tag, found $ref_count." >&2
+            exit 1
+          }
+
+          if [[ "${{ steps.release.outputs.accessible }}" != 'true' ]]; then
+            echo "Tag $tag is materialized but the expected Release is not readable with the read-only token; refusing an ambiguous publication state." >&2
+            exit 1
+          fi
+
+          draft="$(jq -r '.draft' /tmp/pulseforge-release.json)"
+          [[ "$draft" == 'false' ]] || {
+            echo "Tag $tag is materialized while the Release is still marked draft." >&2
             exit 1
           }
 
