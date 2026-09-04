@@ -1,0 +1,190 @@
+name: Publish PulseForge release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Successful PulseForge release-artifact run ID'
+        required: true
+        type: string
+      tag:
+        description: 'Release tag'
+        required: true
+        default: 'v0.9.7'
+        type: string
+      target_sha:
+        description: 'Commit SHA to tag for the release'
+        required: true
+        type: string
+      publication_mode:
+        description: 'GitHub Release publication mode'
+        required: true
+        default: 'draft'
+        type: choice
+        options:
+          - draft
+          - prerelease
+          - release
+
+permissions:
+  contents: write
+
+env:
+  PULSEFORGE_VERSION: '0.9.7'
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Restrict publication to repository owner
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_ACTOR" != "$GITHUB_REPOSITORY_OWNER" ]]; then
+            echo "Release publication is restricted to the repository owner." >&2
+            exit 1
+          fi
+
+      - name: Validate release-artifact run
+        id: run
+        shell: bash
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+          status="$(jq -r '.status' <<<"$json")"
+          conclusion="$(jq -r '.conclusion' <<<"$json")"
+          workflow_path="$(jq -r '.path' <<<"$json")"
+          head_sha="$(jq -r '.head_sha' <<<"$json")"
+
+          [[ "$status" == "completed" ]] || { echo "Run is not completed: $status" >&2; exit 1; }
+          [[ "$conclusion" == "success" ]] || { echo "Run did not succeed: $conclusion" >&2; exit 1; }
+          [[ "$workflow_path" == ".github/workflows/release-artifacts.yml" ]] || {
+            echo "Run $RUN_ID is not a PulseForge release-artifact workflow run: $workflow_path" >&2
+            exit 1
+          }
+
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout selected release commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_sha }}
+          fetch-depth: 0
+
+      - name: Validate release target
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          resolved="$(git rev-parse HEAD)"
+          [[ "$resolved" == "$TARGET_SHA" ]] || {
+            echo "Checked out $resolved, expected $TARGET_SHA" >&2
+            exit 1
+          }
+          [[ "$TAG" == "v$PULSEFORGE_VERSION" ]] || {
+            echo "Tag must be v$PULSEFORGE_VERSION for this workflow." >&2
+            exit 1
+          }
+          grep -Eq 'project\(PulseForge[[:space:]]+VERSION[[:space:]]+0\.9\.7' CMakeLists.txt || {
+            echo 'CMakeLists.txt does not identify PulseForge 0.9.7.' >&2
+            exit 1
+          }
+          test -f docs/RELEASE_NOTES_0.9.7.md
+          test -f docs/RELEASE_0.9.7_PROVENANCE.md
+
+      - name: Download release artifacts
+        shell: bash
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          rm -rf release-artifacts
+          mkdir -p release-artifacts
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-artifacts
+
+      - name: Verify package set and SHA-256 files
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected=(
+            'PulseForge-v0.9.7-Windows-x86_64.zip'
+            'PulseForge-v0.9.7-Linux-x86_64.tar.gz'
+            'PulseForge-v0.9.7-macOS-x86_64.tar.gz'
+            'PulseForge-v0.9.7-macOS-arm64.tar.gz'
+            'PulseForge-v0.9.7-Android-arm64-test-signed.apk'
+          )
+
+          for package in "${expected[@]}"; do
+            count="$(find release-artifacts -type f -name "$package" | wc -l | tr -d ' ')"
+            [[ "$count" == '1' ]] || {
+              echo "Expected exactly one $package, found $count." >&2
+              exit 1
+            }
+          done
+
+          mapfile -t sums < <(find release-artifacts -type f -name '*SHA256SUMS.txt' | sort)
+          [[ "${#sums[@]}" == '5' ]] || {
+            echo "Expected five SHA256SUMS files, found ${#sums[@]}." >&2
+            exit 1
+          }
+
+          for sum in "${sums[@]}"; do
+            directory="$(dirname "$sum")"
+            filename="$(basename "$sum")"
+            (cd "$directory" && sha256sum -c "$filename")
+          done
+
+          mapfile -t package_files < <(
+            for package in "${expected[@]}"; do
+              find release-artifacts -type f -name "$package"
+            done
+          )
+          printf '%s\n' "${package_files[@]}" > "$RUNNER_TEMP/package-files.txt"
+          printf '%s\n' "${sums[@]}" > "$RUNNER_TEMP/checksum-files.txt"
+
+      - name: Ensure release does not already exist
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Refusing to overwrite it." >&2
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          MODE: ${{ inputs.publication_mode }}
+        run: |
+          set -euo pipefail
+          mapfile -t packages < "$RUNNER_TEMP/package-files.txt"
+          mapfile -t sums < "$RUNNER_TEMP/checksum-files.txt"
+
+          flags=()
+          case "$MODE" in
+            draft) flags+=(--draft) ;;
+            prerelease) flags+=(--prerelease) ;;
+            release) ;;
+            *) echo "Unsupported publication mode: $MODE" >&2; exit 1 ;;
+          esac
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$TARGET_SHA" \
+            --title "PulseForge $PULSEFORGE_VERSION" \
+            --notes-file docs/RELEASE_NOTES_0.9.7.md \
+            "${flags[@]}" \
+            "${packages[@]}" \
+            "${sums[@]}"
