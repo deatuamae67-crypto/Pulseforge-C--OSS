@@ -29,6 +29,64 @@ env:
   PULSEFORGE_VERSION: '0.9.7'
 
 jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Configure and build Release
+        shell: pwsh
+        run: |
+          cmake --preset windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build --preset windows-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage and verify Windows package
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = "PulseForge-v$env:PULSEFORGE_VERSION-Windows-x86_64"
+          $stage = Join-Path $env:RUNNER_TEMP $package
+          $archive = "$stage.zip"
+          $fileList = Join-Path $env:RUNNER_TEMP "$package.files.txt"
+          $checksums = Join-Path $env:RUNNER_TEMP "$package.SHA256SUMS.txt"
+
+          cmake --install out/build/msvc --config Release --prefix "$stage"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $binary = Join-Path $stage 'bin/pulseforge.exe'
+          if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+            throw "Installed Windows package is missing $binary"
+          }
+
+          Get-ChildItem -LiteralPath $stage -Recurse -File |
+            Sort-Object FullName |
+            ForEach-Object {
+              $relative = [System.IO.Path]::GetRelativePath($stage, $_.FullName)
+              "{0}`t{1}" -f $relative, $_.Length
+            } | Set-Content -LiteralPath $fileList -Encoding utf8
+
+          if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
+          Compress-Archive -Path $stage -DestinationPath $archive -CompressionLevel Optimal
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $package.zip" | Set-Content -LiteralPath $checksums -Encoding ascii
+          "package=$package" >> $env:GITHUB_OUTPUT
+
+      - name: Upload Windows release
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.package }}
+          path: |
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.zip
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.SHA256SUMS.txt
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.files.txt
+          if-no-files-found: error
+          retention-days: 30
+
   linux-x86_64:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
