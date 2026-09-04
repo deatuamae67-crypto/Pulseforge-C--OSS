@@ -167,6 +167,76 @@ jobs:
             echo 'exists=false' >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify existing release assets against validated run
+        if: steps.existing.outputs.exists == 'true'
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.existing.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+
+          mapfile -t local_files < <(
+            find release-artifacts -type f \
+              \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' -o -name '*SHA256SUMS.txt' \) \
+              | sort
+          )
+          [[ "${#local_files[@]}" == '10' ]] || {
+            echo "Expected exactly 10 validated local release files, found ${#local_files[@]}." >&2
+            exit 1
+          }
+
+          printf '%s\n' "${local_files[@]##*/}" | sort > /tmp/pulseforge-local-assets.txt
+          jq -r '.assets[].name' <<<"$release_json" | sort > /tmp/pulseforge-release-assets.txt
+
+          local_name_count="$(wc -l < /tmp/pulseforge-local-assets.txt | tr -d ' ')"
+          unique_local_name_count="$(sort -u /tmp/pulseforge-local-assets.txt | wc -l | tr -d ' ')"
+          release_asset_count="$(jq '.assets | length' <<<"$release_json")"
+          unique_release_name_count="$(sort -u /tmp/pulseforge-release-assets.txt | wc -l | tr -d ' ')"
+
+          [[ "$local_name_count" == '10' && "$unique_local_name_count" == '10' ]] || {
+            echo 'Validated run contains duplicate or unexpected release asset names.' >&2
+            exit 1
+          }
+          [[ "$release_asset_count" == '10' && "$unique_release_name_count" == '10' ]] || {
+            echo "Existing release must contain exactly 10 uniquely named assets; found $release_asset_count assets and $unique_release_name_count unique names." >&2
+            exit 1
+          }
+
+          diff -u /tmp/pulseforge-local-assets.txt /tmp/pulseforge-release-assets.txt || {
+            echo 'Existing release asset names do not exactly match the validated artifact run.' >&2
+            exit 1
+          }
+
+          for file in "${local_files[@]}"; do
+            name="$(basename "$file")"
+            local_size="$(stat -c '%s' "$file")"
+            local_digest="sha256:$(sha256sum "$file" | awk '{print $1}')"
+            asset_json="$(jq -c --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json")"
+            remote_state="$(jq -r '.state' <<<"$asset_json")"
+            remote_size="$(jq -r '.size' <<<"$asset_json")"
+            remote_digest="$(jq -r '.digest // empty' <<<"$asset_json")"
+
+            [[ "$remote_state" == 'uploaded' ]] || {
+              echo "Release asset $name is not fully uploaded: $remote_state" >&2
+              exit 1
+            }
+            [[ "$remote_size" == "$local_size" ]] || {
+              echo "Release asset $name size mismatch: release=$remote_size validated=$local_size" >&2
+              exit 1
+            }
+            [[ -n "$remote_digest" ]] || {
+              echo "Release asset $name does not expose a digest; refusing publication." >&2
+              exit 1
+            }
+            [[ "$remote_digest" == "$local_digest" ]] || {
+              echo "Release asset $name digest mismatch: release=$remote_digest validated=$local_digest" >&2
+              exit 1
+            }
+          done
+
+          echo 'Existing release assets exactly match the validated artifact run.'
+
       - name: Create draft release when absent
         if: steps.existing.outputs.exists != 'true' && inputs.publication_mode == 'draft'
         shell: bash
