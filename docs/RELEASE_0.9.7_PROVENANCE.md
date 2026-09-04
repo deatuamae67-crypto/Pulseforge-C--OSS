@@ -54,7 +54,9 @@ GitHub Actions artifact retention is finite. The five workflow artifacts from ru
 
 Before this manifest was committed, all ten current GitHub Release assets were independently cross-checked against the files extracted directly from run `33891158742`: names, byte sizes and SHA-256 values matched 10/10.
 
-The read-only `.github/workflows/release-integrity-validation.yml` workflow continuously validates the durable manifest, source-run provenance and current GitHub Release asset metadata. It has only `actions: read` and `contents: read` permissions and cannot publish or mutate a release.
+The read-only `.github/workflows/release-integrity-validation.yml` workflow has only `actions: read` and `contents: read` permissions and cannot publish or mutate a release. With those deliberately restricted permissions, GitHub does not expose private draft-Release metadata to the workflow token. While `v0.9.7` remains a draft, this workflow therefore validates the reviewed manifest, successful source-run provenance and the expected absence of a materialized `v0.9.7` tag. It refuses an ambiguous state where the tag exists but the expected Release remains unreadable to the read-only token.
+
+The live draft itself is validated inside the controlled publisher immediately before any publication change. That publisher has the `contents: write` permission required for release publication and requires all ten attached draft assets to match the reviewed manifest exactly by name, upload state, byte size and GitHub SHA-256 digest. Once the Release is publicly visible, the read-only integrity workflow can also validate those Release assets directly and requires the materialized Git tag to resolve to the expected release target.
 
 The controlled publisher still downloads and re-hashes the Actions artifacts while all five remain retained. After those artifacts expire, it may use the reviewed durable manifest only to validate an already-existing release whose ten assets still match exactly. The manifest is verification evidence only: it is never used to reconstruct package bytes. If the existing draft is deleted after the Actions artifacts become unavailable, the publisher refuses to recreate it.
 
@@ -85,4 +87,4 @@ A GitHub Release draft named `PulseForge 0.9.7` exists as release ID `382859979`
 
 The release remains a draft and has not been published publicly. The actual Git ref `refs/tags/v0.9.7` is not materialized while the release remains in this draft state.
 
-Reusable GitHub Release text is stored in `docs/RELEASE_NOTES_0.9.7.md`. Public publication is controlled by `.github/workflows/publish-release.yml`, which is owner-only, must be dispatched from `main`, validates the approved release-artifact run provenance, validates the durable asset manifest, and refuses direct public creation without a reviewed draft.
+Reusable GitHub Release text is stored in `docs/RELEASE_NOTES_0.9.7.md`. Public publication is controlled by `.github/workflows/publish-release.yml`, which is owner-only, must be dispatched from `main`, validates the approved release-artifact run provenance, validates the durable asset manifest, validates the live draft asset set immediately before publication, and refuses direct public creation without a reviewed draft.
