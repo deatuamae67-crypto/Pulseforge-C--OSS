@@ -22,7 +22,113 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Require immutable GitHub Action pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          uses_pattern = re.compile(
+              r'''(?x)
+              (?:^[ \t]*(?:-[ \t]*)?|[{,][ \t]*)
+              (?:uses|"uses"|'uses')[ \t]*:[ \t]*
+              (?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^,}\s#]+))
+              '''
+          )
+          block_scalar_pattern = re.compile(
+              r'''(?x)
+              :[ \t]*
+              (?:[|>](?:[+-]?\d*|\d+[+-]?))
+              [ \t]*(?:\#.*)?$
+              '''
+          )
+
+          def indentation(line):
+              return len(line) - len(line.lstrip(' '))
+
+          def extract_uses(text):
+              refs = []
+              block_parent_indent = None
+              for line_number, line in enumerate(text.splitlines(), 1):
+                  stripped = line.strip()
+                  indent = indentation(line)
+
+                  if block_parent_indent is not None:
+                      if not stripped or indent > block_parent_indent:
+                          continue
+                      block_parent_indent = None
+
+                  if block_scalar_pattern.search(line):
+                      block_parent_indent = indent
+                      continue
+
+                  for match in uses_pattern.finditer(line):
+                      spec = next(group for group in match.groups() if group is not None)
+                      refs.append((line_number, spec))
+              return refs
+
+          scanner_cases = [
+              ('uses: actions/checkout@v7\n', ['actions/checkout@v7']),
+              ('- uses: actions/checkout@v7\n', ['actions/checkout@v7']),
+              ('- { uses: actions/checkout@v7 }\n', ['actions/checkout@v7']),
+              ('jobs: { build: { "uses": "owner/repo/.github/workflows/ci.yml@main" } }\n',
+               ['owner/repo/.github/workflows/ci.yml@main']),
+              ("- { 'uses': 'actions/checkout@v7', with: { fetch-depth: 1 } }\n",
+               ['actions/checkout@v7']),
+              ('steps:\n  - run: |\n      echo "{ uses: actions/checkout@v7 }"\n'
+               '  - { uses: actions/checkout@0123456789abcdef0123456789abcdef01234567 }\n',
+               ['actions/checkout@0123456789abcdef0123456789abcdef01234567']),
+          ]
+          for sample, expected in scanner_cases:
+              actual = [spec for _, spec in extract_uses(sample)]
+              if actual != expected:
+                  raise SystemExit(
+                      f'Internal action-reference scanner self-test failed: sample={sample!r} '
+                      f'expected={expected!r} actual={actual!r}'
+                  )
+
+          violations = []
+          roots = [pathlib.Path('.github/workflows'), pathlib.Path('.github/actions')]
+          for root in roots:
+              if not root.exists():
+                  continue
+              paths = sorted(set(root.rglob('*.yml')) | set(root.rglob('*.yaml')))
+              for path in paths:
+                  text = path.read_text(encoding='utf-8')
+                  for line_number, spec in extract_uses(text):
+                      if spec.startswith('./'):
+                          continue
+
+                      if spec.startswith('docker://'):
+                          image = spec[len('docker://'):]
+                          if not re.fullmatch(r'.+@sha256:[0-9a-fA-F]{64}', image):
+                              violations.append(
+                                  f'{path}:{line_number}: docker action must be pinned by sha256 digest: {spec}'
+                              )
+                          continue
+
+                      if '@' not in spec:
+                          violations.append(f'{path}:{line_number}: remote action has no ref: {spec}')
+                          continue
+                      ref = spec.rsplit('@', 1)[1]
+                      if not re.fullmatch(r'[0-9a-fA-F]{40}', ref):
+                          violations.append(
+                              f'{path}:{line_number}: remote action must be pinned to a full 40-hex commit SHA: {spec}'
+                          )
+
+          if violations:
+              print('Mutable GitHub Action references detected:', file=sys.stderr)
+              for violation in violations:
+                  print(f' - {violation}', file=sys.stderr)
+              sys.exit(1)
+
+          print('All remote GitHub Actions and docker action images use immutable references.')
+          PY
 
       - name: Reject non-redistributable or private build inputs
         shell: bash
