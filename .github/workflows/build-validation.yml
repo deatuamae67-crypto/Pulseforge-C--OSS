@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Checkout validated source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.SOURCE_REF }}
           fetch-depth: 1
@@ -48,7 +48,7 @@ jobs:
 
       - name: Upload Windows validation logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: validation-logs-windows-x64
           path: |
@@ -62,7 +62,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Checkout validated source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.SOURCE_REF }}
           fetch-depth: 1
@@ -99,7 +99,7 @@ jobs:
 
       - name: Upload Linux validation logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: validation-logs-linux-x86_64
           path: |
@@ -122,7 +122,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Checkout validated source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.SOURCE_REF }}
           fetch-depth: 1
@@ -157,7 +157,7 @@ jobs:
 
       - name: Upload macOS validation logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: validation-logs-macos-${{ matrix.arch }}
           path: |
@@ -171,19 +171,19 @@ jobs:
     timeout-minutes: 90
     steps:
       - name: Checkout validated source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.SOURCE_REF }}
           fetch-depth: 1
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Android SDK, NDK and CMake
         shell: bash
@@ -215,7 +215,7 @@ jobs:
 
       - name: Upload Android validation log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: validation-logs-android-arm64
           path: android-build.log

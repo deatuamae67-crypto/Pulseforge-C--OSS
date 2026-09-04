@@ -74,7 +74,7 @@ jobs:
           }
 
       - name: Checkout selected release commit
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.target_sha }}
           fetch-depth: 0
