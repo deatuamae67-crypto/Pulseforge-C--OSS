@@ -34,7 +34,8 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/app/application.cpp CHANGELOG.md \
-            docs/RELEASE_NOTES_1.0.0.md docs/MOD_CORPUS_1.0.0.md mods/README.md
+            docs/RELEASE_NOTES_1.0.0.md docs/MOD_CORPUS_1.0.0.md
+          git add -f mods/README.md
           git diff --cached --quiet && { echo 'No source changes produced.' >&2; exit 1; }
           git commit -m 'fix(compat): preserve Psych easing fidelity in 1.0.0'
           echo "VALIDATED_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
