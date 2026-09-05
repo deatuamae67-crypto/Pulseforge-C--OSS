@@ -18,10 +18,11 @@ Expected integrated runtime:
 
 - Windows: `discord_partner_sdk.dll`
 - Linux: `libdiscord_partner_sdk.so`
-- macOS: `libdiscord_partner_sdk.dylib`
+- macOS Social SDK 1.10+: `discord_partner_sdk.framework` embedded in `PulseForge.app/Contents/Frameworks` and resolved through a bundle-local `@rpath`
+- macOS legacy SDK layout: `libdiscord_partner_sdk.dylib` only when deliberately building against an older authorized archive
 - Android: Discord AAR/Prefab native runtime embedded by Gradle
 
-The raw Discord SDK archive must not be uploaded as a standalone public artifact.
+The raw Discord SDK archive, framework, xcframework, DLL, SO, dylib or AAR must not be uploaded as a standalone public artifact.
 
 ## No-SDK development builds
 
