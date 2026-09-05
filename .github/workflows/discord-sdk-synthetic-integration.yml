@@ -338,4 +338,5 @@ jobs:
           grep -F 'com.discord.socialsdk.AuthenticationActivity' android-discord-manifest.txt
           grep -F 'discord-1' android-discord-manifest.txt
 
-          strings "$apk" | grep -F 'com/discord/socialsdk/DiscordSocialSdkInit' >/dev/null || true
+          unzip -p "$apk" 'classes*.dex' | strings | \
+            grep -F 'Lcom/discord/socialsdk/DiscordSocialSdkInit;' >/dev/null
