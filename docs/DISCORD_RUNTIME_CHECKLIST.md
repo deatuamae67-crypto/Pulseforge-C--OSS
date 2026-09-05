@@ -8,9 +8,8 @@ Before publishing any PulseForge binary with the Discord Social SDK enabled:
 - [ ] `PULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON` used for the release build.
 - [ ] Windows package contains `discord_partner_sdk.dll` beside the executable.
 - [ ] Linux package contains `libdiscord_partner_sdk.so` and resolves it through `$ORIGIN` or an equivalent package-local path.
-- [ ] If deliberately using the currently validated legacy macOS SDK layout, the package contains `libdiscord_partner_sdk.dylib` and resolves it through `@loader_path` or an equivalent bundle-local path.
-- [ ] For macOS Social SDK 1.10+, issue #42 has been completed against the authorized `discord_partner_sdk.framework` before treating the build as Discord-enabled.
-- [ ] After #42 is completed, the macOS framework is embedded in `PulseForge.app/Contents/Frameworks`, code-signed as part of the final app and resolved through a bundle-local `@rpath`.
+- [ ] macOS package uses a runtime supplied by the same authorized SDK version. The currently validated 1.10.19337 path contains `libdiscord_partner_sdk.dylib` and resolves it through the bundle-local runtime path configured by PulseForge.
+- [ ] If the optional framework path from issue #42 is used, the complete `discord_partner_sdk.framework` is embedded in `pulseforge.app/Contents/Frameworks`, including its nested dependencies, and resolves through `@rpath`.
 - [ ] Android package was built with `discord_partner_sdk.aar` through Gradle/Prefab.
 - [ ] Final packaged binary is checked for unresolved dynamic dependencies.
 - [ ] Application starts with Discord closed/unreachable without affecting gameplay.
