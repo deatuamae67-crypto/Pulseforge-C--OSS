@@ -1,0 +1,124 @@
+name: Apply PR45 framework staging fix
+
+on:
+  push:
+    branches:
+      - feat/discord-macos-framework
+    paths:
+      - .github/workflows/_apply-pr45-framework-copy-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/discord-macos-framework
+          fetch-depth: 0
+
+      - name: Patch framework staging and validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cmake = Path('CMakeLists.txt')
+          text = cmake.read_text()
+          old = '''            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${_pulseforge_discord_framework}"
+                "$<TARGET_BUNDLE_CONTENT_DIR:pulseforge>/Frameworks/discord_partner_sdk.framework"
+'''
+          new = '''            COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "$<TARGET_BUNDLE_CONTENT_DIR:pulseforge>/Frameworks/discord_partner_sdk.framework"
+            COMMAND /usr/bin/ditto
+                "${_pulseforge_discord_framework}"
+                "$<TARGET_BUNDLE_CONTENT_DIR:pulseforge>/Frameworks/discord_partner_sdk.framework"
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one production framework copy block, found {text.count(old)}')
+          cmake.write_text(text.replace(old, new, 1))
+
+          workflow = Path('.github/workflows/macos-discord-framework-validation.yml')
+          text = workflow.read_text()
+          old = '''            COMMAND ${CMAKE_COMMAND} -E copy_directory
+              "${DISCORD_FRAMEWORK}"
+              "$<TARGET_BUNDLE_CONTENT_DIR:fixture>/Frameworks/discord_partner_sdk.framework"
+'''
+          new = '''            COMMAND ${CMAKE_COMMAND} -E rm -rf
+              "$<TARGET_BUNDLE_CONTENT_DIR:fixture>/Frameworks/discord_partner_sdk.framework"
+            COMMAND /usr/bin/ditto
+              "${DISCORD_FRAMEWORK}"
+              "$<TARGET_BUNDLE_CONTENT_DIR:fixture>/Frameworks/discord_partner_sdk.framework"
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one validation framework copy block, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          anchor = '''          app="$fixture/build/fixture.app"
+          test -f "$app/Contents/Frameworks/discord_partner_sdk.framework/Versions/A/Frameworks/libdiscord_krisp.dylib"
+'''
+          replacement = '''          app="$fixture/build/fixture.app"
+          embedded="$app/Contents/Frameworks/discord_partner_sdk.framework"
+          test -L "$embedded/Versions/Current"
+          test "$(readlink "$embedded/Versions/Current")" = "A"
+          test -L "$embedded/Headers"
+          test "$(readlink "$embedded/Headers")" = "Versions/Current/Headers"
+          test -L "$embedded/Resources"
+          test "$(readlink "$embedded/Resources")" = "Versions/Current/Resources"
+          test -L "$embedded/discord_partner_sdk"
+          test "$(readlink "$embedded/discord_partner_sdk")" = "Versions/Current/discord_partner_sdk"
+          test -f "$app/Contents/Frameworks/discord_partner_sdk.framework/Versions/A/Frameworks/libdiscord_krisp.dylib"
+'''
+          if text.count(anchor) != 1:
+              raise SystemExit(f'Expected exactly one built-app assertion anchor, found {text.count(anchor)}')
+          text = text.replace(anchor, replacement, 1)
+
+          anchor = '''          installed="$fixture/install/fixture.app"
+          test -f "$installed/Contents/Frameworks/discord_partner_sdk.framework/Versions/A/discord_partner_sdk"
+'''
+          replacement = '''          installed="$fixture/install/fixture.app"
+          installed_framework="$installed/Contents/Frameworks/discord_partner_sdk.framework"
+          test -L "$installed_framework/Versions/Current"
+          test "$(readlink "$installed_framework/Versions/Current")" = "A"
+          test -L "$installed_framework/Headers"
+          test "$(readlink "$installed_framework/Headers")" = "Versions/Current/Headers"
+          test -L "$installed_framework/Resources"
+          test "$(readlink "$installed_framework/Resources")" = "Versions/Current/Resources"
+          test -L "$installed_framework/discord_partner_sdk"
+          test "$(readlink "$installed_framework/discord_partner_sdk")" = "Versions/Current/discord_partner_sdk"
+          test -f "$installed/Contents/Frameworks/discord_partner_sdk.framework/Versions/A/discord_partner_sdk"
+'''
+          if text.count(anchor) != 1:
+              raise SystemExit(f'Expected exactly one installed-app assertion anchor, found {text.count(anchor)}')
+          text = text.replace(anchor, replacement, 1)
+
+          duplicate = '''          embedded="$app/Contents/Frameworks/discord_partner_sdk.framework"
+          codesign --force --sign - \\
+'''
+          replacement = '''          codesign --force --sign - \\
+'''
+          if text.count(duplicate) != 1:
+              raise SystemExit(f'Expected exactly one redundant embedded assignment, found {text.count(duplicate)}')
+          text = text.replace(duplicate, replacement, 1)
+          workflow.write_text(text)
+
+          Path('.github/workflows/_apply-pr45-framework-copy-fix.yml').unlink()
+          PY
+
+          git diff --check
+          git diff -- CMakeLists.txt .github/workflows/macos-discord-framework-validation.yml
+
+      - name: Commit corrected packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: preserve macOS Discord framework symlinks"
+          git push origin HEAD:feat/discord-macos-framework
