@@ -1,0 +1,252 @@
+name: PulseForge 1.0.0 release artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-artifacts.yml'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'include/**'
+      - 'src/**'
+      - 'assets/**'
+      - 'platform/android/**'
+      - 'third_party/**'
+      - 'THIRD_PARTY_LICENSES/**'
+      - 'THIRD_PARTY.md'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifacts-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PULSEFORGE_VERSION: '1.0.0'
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Configure and build Release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --preset windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build --preset windows-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Stage Windows package
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = "PulseForge-v$env:PULSEFORGE_VERSION-Windows-x86_64"
+          $stage = Join-Path $env:RUNNER_TEMP $package
+          $archive = "$stage.zip"
+          $checksums = Join-Path $env:RUNNER_TEMP "$package.SHA256SUMS.txt"
+          cmake --install out/build/msvc --config Release --prefix "$stage"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binary = Join-Path $stage 'bin/pulseforge.exe'
+          if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "Missing $binary" }
+          if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
+          Compress-Archive -Path $stage -DestinationPath $archive -CompressionLevel Optimal
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $package.zip" | Set-Content -LiteralPath $checksums -Encoding ascii
+          "package=$package" >> $env:GITHUB_OUTPUT
+      - name: Upload Windows package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.package.outputs.package }}
+          path: |
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.zip
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  linux-x86_64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config file \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
+      - name: Configure and build Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset linux-release
+          cmake --build --preset linux-release --parallel 2
+      - name: Stage Linux package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="PulseForge-v${PULSEFORGE_VERSION}-Linux-x86_64"
+          stage="$RUNNER_TEMP/$package"
+          archive="$RUNNER_TEMP/$package.tar.gz"
+          cmake --install out/build/linux-release --prefix "$stage"
+          test -x "$stage/bin/pulseforge"
+          ldd "$stage/bin/pulseforge" | tee "$RUNNER_TEMP/$package.ldd.txt"
+          if grep -q 'not found' "$RUNNER_TEMP/$package.ldd.txt"; then exit 1; fi
+          tar -C "$RUNNER_TEMP" -czf "$archive" "$package"
+          (cd "$RUNNER_TEMP" && sha256sum "$package.tar.gz" > "$package.SHA256SUMS.txt")
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+      - name: Upload Linux package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.package.outputs.package }}
+          path: |
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.tar.gz
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.SHA256SUMS.txt
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.ldd.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-26-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Ensure build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v cmake >/dev/null || brew install cmake
+          command -v ninja >/dev/null || brew install ninja
+      - name: Configure and build Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}'
+          cmake --build --preset macos-release --parallel 2
+      - name: Stage macOS package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="PulseForge-v${PULSEFORGE_VERSION}-macOS-${{ matrix.arch }}"
+          stage="$RUNNER_TEMP/$package"
+          archive="$RUNNER_TEMP/$package.tar.gz"
+          cmake --install out/build/macos-release --prefix "$stage"
+          app="$stage/PulseForge.app"
+          binary="$app/Contents/MacOS/pulseforge"
+          test -x "$binary"
+          test -f "$app/Contents/Info.plist"
+          codesign --deep --force --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          lipo -archs "$binary" | tee "$RUNNER_TEMP/$package.arch.txt"
+          grep -qx '${{ matrix.arch }}' "$RUNNER_TEMP/$package.arch.txt"
+          tar -C "$RUNNER_TEMP" -czf "$archive" "$package"
+          (cd "$RUNNER_TEMP" && shasum -a 256 "$package.tar.gz" > "$package.SHA256SUMS.txt")
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+      - name: Upload macOS package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.package.outputs.package }}
+          path: |
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.tar.gz
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.SHA256SUMS.txt
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.arch.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  android-arm64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up JDK 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Install Android SDK, NDK and CMake
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager 'platforms;android-35' 'build-tools;36.0.0' \
+            'ndk;28.2.13676358' 'cmake;3.31.6'
+      - name: Build Android Release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x platform/android/gradlew
+          cd platform/android
+          ./gradlew --no-daemon --stacktrace \
+            -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android" \
+            :app:assembleRelease
+      - name: Align, test-sign and verify APK
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="PulseForge-v${PULSEFORGE_VERSION}-Android-arm64-test-signed"
+          unsigned="$RUNNER_TEMP/pulseforge-android/gradle/outputs/apk/release/app-release-unsigned.apk"
+          aligned="$RUNNER_TEMP/$package-aligned.apk"
+          signed="$RUNNER_TEMP/$package.apk"
+          keystore="$RUNNER_TEMP/pulseforge-ci-test.jks"
+          test -f "$unsigned"
+          keytool -genkeypair -noprompt -keystore "$keystore" \
+            -storepass android -keypass android -alias pulseforge-ci \
+            -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname 'CN=PulseForge CI Test Build,OU=CI,O=PulseForge,C=PT'
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/zipalign" -P 16 -f 4 "$unsigned" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
+            --ks "$keystore" --ks-key-alias pulseforge-ci \
+            --ks-pass pass:android --key-pass pass:android \
+            --out "$signed" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$signed" \
+            | tee "$RUNNER_TEMP/$package.signature.txt"
+          unzip -l "$signed" | tee "$RUNNER_TEMP/$package.contents.txt"
+          grep -q 'lib/arm64-v8a/libmain.so' "$RUNNER_TEMP/$package.contents.txt"
+          grep -q 'lib/arm64-v8a/libSDL3.so' "$RUNNER_TEMP/$package.contents.txt"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$signed" \
+            | tee "$RUNNER_TEMP/$package.badging.txt"
+          grep -q "package: name='org.pulseforge.engine'.*versionCode='100000'.*versionName='1.0.0'" \
+            "$RUNNER_TEMP/$package.badging.txt"
+          (cd "$RUNNER_TEMP" && sha256sum "$package.apk" > "$package.SHA256SUMS.txt")
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+      - name: Upload Android package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.package.outputs.package }}
+          path: |
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.apk
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.SHA256SUMS.txt
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.signature.txt
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.contents.txt
+            ${{ runner.temp }}/${{ steps.package.outputs.package }}.badging.txt
+          if-no-files-found: error
+          retention-days: 30
