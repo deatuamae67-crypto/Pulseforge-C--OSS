@@ -289,7 +289,8 @@ int main(const int argument_count, char** arguments) {
             "stopped looping SFX reports not playing"
         );
 
-        if (argument_count == 2) {
+        if (argument_count == 2
+            && std::filesystem::is_regular_file(arguments[1])) {
             pulseforge::AudioManifest menu_music;
             menu_music.instrumental = std::filesystem::path(arguments[1]);
             require(
