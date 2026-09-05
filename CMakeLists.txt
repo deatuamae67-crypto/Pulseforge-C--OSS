@@ -779,7 +779,9 @@ if(PULSEFORGE_BUILD_APP)
         # both executables call the exact same main/core code.
         add_executable(pulseforge_cli src/app/main.cpp)
         set_property(TARGET pulseforge_cli PROPERTY OUTPUT_NAME "pulseforge-cli")
-        target_link_libraries(pulseforge_cli PRIVATE pulseforge_runtime)
+        target_link_libraries(
+            pulseforge_cli PRIVATE pulseforge_runtime SDL3::SDL3
+        )
         target_compile_definitions(pulseforge_cli PRIVATE
             PULSEFORGE_VERSION="${PROJECT_VERSION}"
             PULSEFORGE_CLI_FRONTEND=1
@@ -877,13 +879,17 @@ if(PULSEFORGE_BUILD_APP)
             # packaging should use the framework path above.
             set_property(TARGET pulseforge APPEND PROPERTY BUILD_RPATH "@loader_path")
             set_property(TARGET pulseforge APPEND PROPERTY INSTALL_RPATH "@loader_path")
+            if(TARGET pulseforge_cli)
+                set_property(TARGET pulseforge_cli APPEND PROPERTY BUILD_RPATH "@loader_path")
+                set_property(TARGET pulseforge_cli APPEND PROPERTY INSTALL_RPATH "@loader_path")
+            endif()
         endif()
     elseif(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE AND NOT ANDROID)
         message(FATAL_ERROR
             "Discord Social SDK is linked, but its runtime dependency is missing. "
             "A linked PulseForge build would fail in the operating-system loader before "
-            "the fail-open Discord backend can run. Supply the complete macOS framework "
-            "or PULSEFORGE_DISCORD_SDK_RUNTIME_LIBRARY."
+            "the fail-open Discord backend can run. Supply PULSEFORGE_DISCORD_SDK_RUNTIME_LIBRARY "
+            "or, on macOS Social SDK 1.10+, the complete discord_partner_sdk.framework bundle."
         )
     endif()
 
