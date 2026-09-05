@@ -835,7 +835,9 @@ if(PULSEFORGE_BUILD_APP)
             TARGET pulseforge POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory
                 "$<TARGET_BUNDLE_CONTENT_DIR:pulseforge>/Frameworks"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "$<TARGET_BUNDLE_CONTENT_DIR:pulseforge>/Frameworks/discord_partner_sdk.framework"
+            COMMAND /usr/bin/ditto
                 "${_pulseforge_discord_framework}"
                 "$<TARGET_BUNDLE_CONTENT_DIR:pulseforge>/Frameworks/discord_partner_sdk.framework"
             COMMENT "Embedding Discord Social SDK framework in PulseForge.app"
