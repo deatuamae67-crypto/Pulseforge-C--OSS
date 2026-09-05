@@ -79,7 +79,6 @@ jobs:
           ln -s A "$framework/Versions/Current"
           ln -s Versions/Current/discord_partner_sdk "$framework/discord_partner_sdk"
           ln -s Versions/Current/Headers "$framework/Headers"
-          ln -s Versions/Current/Frameworks "$framework/Frameworks"
           ln -s Versions/Current/Resources "$framework/Resources"
 
           file "$version/discord_partner_sdk"
