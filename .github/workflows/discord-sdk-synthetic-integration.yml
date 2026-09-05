@@ -70,7 +70,7 @@ jobs:
             -DPULSEFORGE_DISCORD_APPLICATION_ID=1 \
             -DPULSEFORGE_BUILD_TESTS=ON \
             2>&1 | tee linux-discord-configure.log
-          grep -F 'PulseForge Discord Social SDK: desktop enabled' \
+          grep -F 'PulseForge Discord Social SDK: desktop shared-library enabled' \
             linux-discord-configure.log
           cmake --build --preset linux-release \
             --target pulseforge pulseforge_discord_presence_tests \

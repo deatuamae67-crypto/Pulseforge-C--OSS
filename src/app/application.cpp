@@ -1224,6 +1224,17 @@ private:
                 ) / 16.0
             );
         }
+        [[nodiscard]] double current_decimal_beat() const noexcept override {
+            return application_.gameplay_timing().beat_at(
+                application_.gameplay_song_time_ms()
+            );
+        }
+        [[nodiscard]] double current_decimal_step() const noexcept override {
+            return application_.gameplay_timing().step_at(
+                application_.gameplay_song_time_ms()
+            );
+        }
+
         [[nodiscard]] bool get_property(
             std::string_view name,
             ScriptValue& value,
@@ -9301,6 +9312,16 @@ if (const auto selected_skin = resolve_note_skin_selection(
         // PULSEFORGE_P1_1_3_UI_INPUT_V1
         else if (name == "screenWidth") value = static_cast<double>(logical_width);
         else if (name == "screenHeight") value = static_cast<double>(logical_height);
+        else if (name == "bfHit" || name == "daHit") value = false;
+        else if (name == "mustHitSection") {
+            // The compact chart model intentionally does not retain Psych
+            // section objects. The automatic camera-turn tracker is the
+            // authoritative resolved singing owner during gameplay. Before
+            // the first singing event, default to the Psych/player side; this
+            // also matches Timeless' silent opening sections.
+            value = !script_auto_camera_owner_.has_value()
+                || *script_auto_camera_owner_ == NoteOwner::player;
+        }
         else if (name == "crochet" || name == "stepCrochet") {
             const double bpm = gameplay_timing().bpm_at(gameplay_song_time_ms());
             const double crochet = std::isfinite(bpm) && bpm > 0.0
@@ -10737,24 +10758,59 @@ if (const auto selected_skin = resolve_note_skin_selection(
         const double raw,
         const std::string_view easing
     ) noexcept {
+        // PULSEFORGE_1_0_0_PSYCH_EASING_FIDELITY_V1
+        // Psych/FlxEase names in the historical corpus vary in case
+        // (quadOut/quadout/quadinOut) and include quart/quint families. Keep
+        // lookup allocation-free because this runs once per live tween/frame.
+        const auto ease_is = [easing](const std::string_view expected) noexcept {
+            if (easing.size() != expected.size()) return false;
+            for (std::size_t index = 0U; index < easing.size(); ++index) {
+                const auto fold = [](const unsigned char value) noexcept {
+                    return value >= 'A' && value <= 'Z'
+                        ? static_cast<unsigned char>(value - 'A' + 'a')
+                        : value;
+                };
+                if (fold(static_cast<unsigned char>(easing[index]))
+                    != fold(static_cast<unsigned char>(expected[index]))) {
+                    return false;
+                }
+            }
+            return true;
+        };
         const double t = std::clamp(raw, 0.0, 1.0);
-        if (easing == "linear") return t;
-        if (easing == "quadIn") return t * t;
-        if (easing == "quadOut") return 1.0 - (1.0 - t) * (1.0 - t);
-        if (easing == "quadInOut") return t < 0.5
+        constexpr double pi = 3.14159265358979323846;
+        if (ease_is("linear")) return t;
+        if (ease_is("quadIn")) return t * t;
+        if (ease_is("quadOut")) return 1.0 - std::pow(1.0 - t, 2.0);
+        if (ease_is("quadInOut")) return t < 0.5
             ? 2.0 * t * t
             : 1.0 - std::pow(-2.0 * t + 2.0, 2.0) / 2.0;
-        if (easing == "cubeIn") return t * t * t;
-        if (easing == "cubeOut") return 1.0 - std::pow(1.0 - t, 3.0);
-        if (easing == "sineInOut") return -(std::cos(3.14159265358979323846 * t) - 1.0) * 0.5;
-        if (easing == "circIn" || easing == "CircIn") {
+        if (ease_is("cubeIn")) return t * t * t;
+        if (ease_is("cubeOut")) return 1.0 - std::pow(1.0 - t, 3.0);
+        if (ease_is("cubeInOut")) return t < 0.5
+            ? 4.0 * t * t * t
+            : 1.0 - std::pow(-2.0 * t + 2.0, 3.0) / 2.0;
+        if (ease_is("quartIn")) return std::pow(t, 4.0);
+        if (ease_is("quartOut")) return 1.0 - std::pow(1.0 - t, 4.0);
+        if (ease_is("quartInOut")) return t < 0.5
+            ? 8.0 * std::pow(t, 4.0)
+            : 1.0 - std::pow(-2.0 * t + 2.0, 4.0) / 2.0;
+        if (ease_is("quintIn")) return std::pow(t, 5.0);
+        if (ease_is("quintOut")) return 1.0 - std::pow(1.0 - t, 5.0);
+        if (ease_is("quintInOut")) return t < 0.5
+            ? 16.0 * std::pow(t, 5.0)
+            : 1.0 - std::pow(-2.0 * t + 2.0, 5.0) / 2.0;
+        if (ease_is("sineIn")) return 1.0 - std::cos((t * pi) * 0.5);
+        if (ease_is("sineOut")) return std::sin((t * pi) * 0.5);
+        if (ease_is("sineInOut")) return -(std::cos(pi * t) - 1.0) * 0.5;
+        if (ease_is("circIn")) {
             return 1.0 - std::sqrt(std::max(0.0, 1.0 - t * t));
         }
-        if (easing == "circOut" || easing == "CircOut") {
+        if (ease_is("circOut")) {
             const double shifted = t - 1.0;
             return std::sqrt(std::max(0.0, 1.0 - shifted * shifted));
         }
-        if (easing == "circInOut" || easing == "CircInOut") {
+        if (ease_is("circInOut")) {
             if (t < 0.5) {
                 const double doubled = 2.0 * t;
                 return (1.0 - std::sqrt(
@@ -11268,8 +11324,12 @@ if (name == "setBlendMode") {
         if (name == "setScrollFactor" || name == "setLuaSpriteScrollFactor") {
             std::string_view tag;
             double x{1.0}, y{1.0};
-            if (!string_arg(0U, tag) || !number_arg(1U, x)) {
-                error = "setScrollFactor/setLuaSpriteScrollFactor expects tag, x, y";
+            if (!string_arg(0U, tag)) {
+                error = "setScrollFactor/setLuaSpriteScrollFactor expects a tag";
+                return false;
+            }
+            if (arguments.size() > 1U && !number_arg(1U, x)) {
+                error = "setScrollFactor/setLuaSpriteScrollFactor x must be a finite number";
                 return false;
             }
             if (arguments.size() > 2U) {
@@ -11997,6 +12057,38 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
             error.clear();
             return true;
         }
+        // PULSEFORGE_1_0_0_RESTRICTED_CALL_METHOD_V1
+        // Do not expose Haxe/native reflection. The historical corpus only
+        // needs getAnimationName() for character-state probes, so permit
+        // exactly those bounded read-only calls.
+        if (name == "callMethod") {
+            std::string_view method;
+            if (!string_arg(0U, method) || arguments.size() != 1U
+                || method.size() > 128U) {
+                error = "callMethod expects one bounded allow-listed method";
+                return false;
+            }
+            std::string_view tag;
+            if (method == "dad.getAnimationName") tag = "dad";
+            else if (method == "boyfriend.getAnimationName") tag = "boyfriend";
+            else if (method == "gf.getAnimationName") tag = "gf";
+            else {
+                error = "callMethod is restricted to character getAnimationName";
+                return false;
+            }
+            std::string animation{"idle"};
+            if (scene_ != nullptr) {
+                std::string resolved;
+                if (scene_->script_get_animation_name(
+                        tag, gameplay_song_time_ms(), resolved
+                    )) {
+                    animation = std::move(resolved);
+                }
+            }
+            result = std::move(animation);
+            error.clear();
+            return true;
+        }
         if (name == "getCharacterX" || name == "getCharacterY"
             || name == "setCharacterX" || name == "setCharacterY") {
             std::string_view requested;
@@ -12709,6 +12801,37 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
             return true;
         }
 
+        // PULSEFORGE_1_0_0_OVERKILL_GLITCH_COMPAT_V1
+        if (name == "addGlitchEffect") {
+            std::string_view tag;
+            double intensity{}, frequency{}, speed{};
+            if (!string_arg(0U, tag)) {
+                error = "addGlitchEffect expects a sprite tag";
+                return false;
+            }
+            if (arguments.size() > 1U && !number_arg(1U, intensity)) {
+                error = "addGlitchEffect intensity must be a finite number";
+                return false;
+            }
+            if (arguments.size() > 2U && !number_arg(2U, frequency)) {
+                error = "addGlitchEffect frequency must be a finite number";
+                return false;
+            }
+            if (arguments.size() > 3U && !number_arg(3U, speed)) {
+                error = "addGlitchEffect speed must be a finite number";
+                return false;
+            }
+            const double amplitude = std::clamp(intensity * 0.01, -0.12, 0.12);
+            if (scene_ == nullptr || !scene_->script_set_wavy_effect(
+                    tag, amplitude, frequency, speed
+                )) {
+                error = "addGlitchEffect sprite tag was not found";
+                return false;
+            }
+            error.clear();
+            return true;
+        }
+
         // PULSEFORGE_P1_1_11_WAVY_EFFECT_BRIDGE_V1
         // Legacy Psych-compatible semantics used by the mod corpus:
         // wavyEffect(tag, amplitudeFraction, spatialCycles, cyclesPerSecond).
@@ -12980,11 +13103,13 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
                 explicit_script_roots.push_back(root);
             }
         };
-        for (const auto& root : options_.content_roots) {
+        for (const auto& root : detail::select_psych_executable_roots(
+                 options_.content_roots,
+                 options_.selected_content_root,
+                 options_.selected_mod_root
+             )) {
             append_explicit_script_root(root);
         }
-        append_explicit_script_root(options_.selected_content_root);
-        append_explicit_script_root(options_.selected_mod_root);
         const auto expanded_script_roots = detail::resolve_psych_content_roots(
             explicit_script_roots,
             64U,

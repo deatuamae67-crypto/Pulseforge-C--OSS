@@ -371,6 +371,13 @@ public:
         bool horizontal,
         bool vertical
     ) noexcept;
+    // Restricted Psych callMethod compatibility: exposes only the
+    // resolved animation identifier for a known scene sprite/character.
+    [[nodiscard]] bool script_get_animation_name(
+        std::string_view tag,
+        double song_time_ms,
+        std::string& animation
+    ) const noexcept;
     [[nodiscard]] bool script_play_animation(
         std::string_view tag,
         std::string_view animation,

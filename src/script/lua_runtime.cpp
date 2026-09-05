@@ -220,6 +220,14 @@ std::int64_t GameplayLuaHost::current_section() const noexcept {
     );
 }
 
+double GameplayLuaHost::current_decimal_beat() const noexcept {
+    return session_.timing_map().beat_at(session_.song_time_ms());
+}
+
+double GameplayLuaHost::current_decimal_step() const noexcept {
+    return session_.timing_map().step_at(session_.song_time_ms());
+}
+
 bool GameplayLuaHost::get_property(
     const std::string_view name,
     ScriptValue& value,
@@ -252,6 +260,10 @@ bool GameplayLuaHost::get_property(
         value = current_step();
     } else if (matches(name, {"curSection"})) {
         value = current_section();
+    } else if (matches(name, {"curDecBeat"})) {
+        value = current_decimal_beat();
+    } else if (matches(name, {"curDecStep"})) {
+        value = current_decimal_step();
     } else if (matches(name, {"bpm", "curBpm"})) {
         value = session_.timing_map().bpm_at(session_.song_time_ms());
     } else if (matches(name, {"scrollSpeed"})) {
@@ -1511,6 +1523,56 @@ struct LuaRuntime::Impl {
     return 1;
 }
 
+[[nodiscard]] static int host_string_find_plain(lua_State* lua) noexcept {
+    auto* self = from_state(lua);
+    std::size_t value_length{}, needle_length{};
+    const char* value_data = lua_tolstring(lua, 1, &value_length);
+    const char* needle_data = lua_tolstring(lua, 2, &needle_length);
+    if (value_data == nullptr || needle_data == nullptr) {
+        lua_pushnil(lua);
+        return 1;
+    }
+
+    const std::size_t limit = self != nullptr
+        ? self->config.max_host_string_bytes
+        : 4'096U;
+    value_length = std::min(value_length, limit);
+    needle_length = std::min(needle_length, limit);
+    const std::string_view value{value_data, value_length};
+    const std::string_view needle{needle_data, needle_length};
+
+    lua_Integer initial = 1;
+    if (lua_gettop(lua) >= 3 && lua_isinteger(lua, 3)) {
+        initial = lua_tointeger(lua, 3);
+    }
+    std::size_t start = 0U;
+    if (initial < 0) {
+        const auto magnitude = static_cast<std::uint64_t>(-(initial + 1)) + 1U;
+        start = magnitude >= value.size()
+            ? 0U
+            : value.size() - static_cast<std::size_t>(magnitude);
+    } else if (initial > 1) {
+        const auto requested = static_cast<std::uint64_t>(initial - 1);
+        if (requested > value.size()) {
+            lua_pushnil(lua);
+            return 1;
+        }
+        start = static_cast<std::size_t>(requested);
+    }
+
+    const auto found = value.find(needle, start);
+    if (found == std::string_view::npos) {
+        lua_pushnil(lua);
+        return 1;
+    }
+    lua_pushinteger(lua, static_cast<lua_Integer>(found + 1U));
+    lua_pushinteger(
+        lua,
+        static_cast<lua_Integer>(found + needle.size())
+    );
+    return 2;
+}
+
 [[nodiscard]] static int host_string_trim(lua_State* lua) noexcept {
     auto* self = from_state(lua);
     std::size_t length{};
@@ -1872,6 +1934,10 @@ struct LuaRuntime::Impl {
             static_cast<lua_Integer>(self->host.current_section())
         );
         lua_setglobal(lua, "curSection");
+        lua_pushnumber(lua, self->host.current_decimal_beat());
+        lua_setglobal(lua, "curDecBeat");
+        lua_pushnumber(lua, self->host.current_decimal_step());
+        lua_setglobal(lua, "curDecStep");
 
         if (self->pending.update_beat) {
             lua_pushinteger(
@@ -2119,6 +2185,13 @@ struct LuaRuntime::Impl {
                 lua_pushnil(state);
                 lua_setfield(state, -2, name);
             }
+            // PULSEFORGE_1_0_0_SAFE_LITERAL_STRING_FIND_V1
+            // Psych corpus scripts use string.find for short animation-name
+            // probes. Re-expose only literal search: Lua patterns remain
+            // disabled so untrusted patterns cannot execute inside the C
+            // library outside the VM instruction budget.
+            lua_pushcfunction(state, &Impl::host_string_find_plain);
+            lua_setfield(state, -2, "find");
         }
         lua_pop(state, 1);
 
@@ -2277,6 +2350,8 @@ struct LuaRuntime::Impl {
                     || name == "startedCountdown"
                     || name == "inCutscene"
                     || name == "inGameOver"
+                    // PULSEFORGE_1_0_0_OVERKILL_TURN_GLOBAL_V1
+                    || name == "mustHitSection"
                     || name.starts_with("defaultPlayerStrumX")
                     || name.starts_with("defaultPlayerStrumY")
                     || name.starts_with("defaultOpponentStrumX")
@@ -2326,7 +2401,7 @@ struct LuaRuntime::Impl {
             "loadGraphic", "precacheImage", "setBlendMode",
             "addLuaSprite", "removeLuaSprite", "luaSpriteExists",
             "getPropertyLuaSprite", "setPropertyLuaSprite",
-            "setScrollFactor", "scaleObject",
+            "setScrollFactor", "setLuaSpriteScrollFactor", "scaleObject",
             "setGraphicSize", "updateHitbox", "setObjectCamera",
             "setObjectOrder", "getObjectOrder", "screenCenter",
             "characterPlayAnim", "playAnim", "objectPlayAnimation",
@@ -2362,14 +2437,14 @@ struct LuaRuntime::Impl {
             "setCharacterX", "setCharacterY",
             "getMidpointX", "getMidpointY",
             "getGraphicMidpointX", "getGraphicMidpointY",
-            "getMouseX", "getMouseY",
+            "getMouseX", "getMouseY", "callMethod",
             // PULSEFORGE_P1_1_12_SHADER_API_RESTORE_V1
             "initLuaShader", "setSpriteShader", "removeSpriteShader",
             "setShaderFloat", "setShaderInt", "setShaderBool",
             "setShaderFloatArray", "setShaderIntArray",
             "getShaderFloat",
             // PULSEFORGE_P1_1_2_STAGE_UNBLOCK_V1
-            "wavyEffect", "close",
+            "wavyEffect", "addGlitchEffect", "close",
         };
         for (const auto* function_name : compatibility_functions) {
             register_host_command(function_name);
@@ -2379,6 +2454,8 @@ struct LuaRuntime::Impl {
         // Explicit registration is intentional: the previous array-only
         // edit was present in source but wavyEffect was still nil at runtime.
         register_host_command("wavyEffect");
+        // PULSEFORGE_1_0_0_OVERKILL_GLITCH_COMPAT_V1
+        register_host_command("addGlitchEffect");
         register_host_command("close");
 
         // PULSEFORGE_P1_1_17_MODCHART_RUNTIME_HARD_REGISTER_V1
@@ -2464,6 +2541,10 @@ struct LuaRuntime::Impl {
         lua_setglobal(state, "curStep");
         lua_pushinteger(state, 0);
         lua_setglobal(state, "curSection");
+        lua_pushnumber(state, 0.0);
+        lua_setglobal(state, "curDecBeat");
+        lua_pushnumber(state, 0.0);
+        lua_setglobal(state, "curDecStep");
         lua_pushnumber(state, 0.0);
         lua_setglobal(state, "songPosition");
 

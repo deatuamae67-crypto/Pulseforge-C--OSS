@@ -52,7 +52,8 @@ int main(const int argument_count, char** arguments) {
             "maliciously large duration is capped at six hours"
         );
 
-        const bool decoded_probe = argument_count == 2;
+        const bool decoded_probe = argument_count == 2
+            && std::filesystem::is_regular_file(arguments[1]);
         // Both paths are deterministic and headless.  The argument form points
         // at the source movie so play_startup_intro can locate the bounded
         // decoded PNG/OGG sequence beside it; it does not exercise MFPlay.

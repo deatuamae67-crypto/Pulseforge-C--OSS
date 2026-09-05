@@ -5,7 +5,7 @@ release ABI is `arm64-v8a`, with Android API 21 as the minimum without Discord,
 API 24 when the Discord Social SDK is bundled, and API 35 as the target. Gradle
 builds `libSDL3.so` and PulseForge as `libmain.so`, then packages the Java
 bootstrap, native libraries and portable engine assets into one APK. The
-current delivery is `0.9.7` (`versionCode 90700`).
+current delivery is `1.0.0` (`versionCode 100000`).
 
 ## Build
 

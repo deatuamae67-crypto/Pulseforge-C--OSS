@@ -243,6 +243,81 @@ void test_stock_provider_can_be_disabled_for_script_discovery() {
     remove_tree(root);
 }
 
+void test_selected_mod_isolates_executable_scripts() {
+    const auto root = temp_root();
+    const auto base_assets = root / "assets";
+    const auto mods = root / "mods";
+    const auto sibling = mods / "unrelated-mod";
+    const auto selected_mod = mods / "drive-pack-screboot-demo";
+    const auto selected_content = selected_mod
+        / "SCReboot_Demo" / "bin" / "assets" / "shared" / "data";
+
+    mkdir(base_assets);
+    mkdir(sibling / "scripts");
+    mkdir(selected_content);
+
+    const std::vector content_roots{base_assets, mods, sibling};
+    const auto executable = pulseforge::detail::select_psych_executable_roots(
+        content_roots,
+        selected_content,
+        selected_mod
+    );
+
+    require(
+        executable.size() == 2U,
+        "selected content + mod are the only executable roots"
+    );
+    require(
+        key(executable[0]) == key(selected_content),
+        "selected content keeps precedence order"
+    );
+    require(
+        key(executable[1]) == key(selected_mod),
+        "selected mod remains highest precedence"
+    );
+    for (const auto& path : executable) {
+        require(
+            key(path) != key(sibling),
+            "unrelated sibling Lua cannot enter selected SC:R runtime"
+        );
+    }
+
+    const auto resolved = pulseforge::detail::resolve_psych_content_roots(
+        executable,
+        64U,
+        false
+    );
+    require(!resolved.roots.empty(), "selected SC:R executable roots resolve");
+    for (const auto& path : resolved.roots) {
+        require(
+            pulseforge::detail::psych_content_roots_detail::path_is_within(
+                path,
+                selected_mod
+            ),
+            "script-code fallback stays inside the selected SC:R mod"
+        );
+    }
+    remove_tree(root);
+}
+
+void test_direct_launch_keeps_explicit_script_roots() {
+    const auto root = temp_root();
+    const auto first = root / "first";
+    const auto second = root / "second";
+    mkdir(first);
+    mkdir(second);
+    const std::vector content_roots{first, second};
+    const auto executable = pulseforge::detail::select_psych_executable_roots(
+        content_roots,
+        {},
+        {}
+    );
+    require(executable.size() == 2U, "direct CLI launch retains explicit roots");
+    require(key(executable[0]) == key(first), "direct root order first");
+    require(key(executable[1]) == key(second), "direct root order second");
+    remove_tree(root);
+}
+
 void test_stock_provider_tie_break_is_deterministic() {
     const auto root = temp_root();
     const auto game = root / "game";
@@ -276,6 +351,8 @@ int main() {
         test_assets_data_layer_is_mounted();
         test_complete_sibling_stock_provider_is_lowest();
         test_stock_provider_can_be_disabled_for_script_discovery();
+        test_selected_mod_isolates_executable_scripts();
+        test_direct_launch_keeps_explicit_script_roots();
         test_stock_provider_tie_break_is_deterministic();
         std::cout << "[PASS] Generic Psych content-root + stock-provider resolver\n";
         return 0;

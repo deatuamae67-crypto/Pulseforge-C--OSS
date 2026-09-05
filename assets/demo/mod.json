@@ -1,0 +1,11 @@
+{
+  "id": "org.pulseforge.demo",
+  "name": "Neon Circuit Demo",
+  "version": "1.0.0",
+  "engineApi": "1",
+  "license": "CC0-1.0",
+  "entryChart": "chart.json",
+  "scripts": ["script.lua"],
+  "description": "Original procedural content supplied to verify PulseForge without proprietary FNF assets."
+}
+

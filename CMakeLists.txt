@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     PulseForge
-    VERSION 0.9.7
+    VERSION 1.0.0
     DESCRIPTION "A deterministic, low-latency C++ rhythm-game engine"
     LANGUAGES C CXX
 )
@@ -755,7 +755,7 @@ if(PULSEFORGE_BUILD_APP)
         set_target_properties(pulseforge PROPERTIES
             MACOSX_BUNDLE_BUNDLE_NAME "PulseForge"
             MACOSX_BUNDLE_GUI_IDENTIFIER "org.pulseforge.engine"
-            MACOSX_BUNDLE_BUNDLE_VERSION "90700"
+            MACOSX_BUNDLE_BUNDLE_VERSION "100000"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         )
     endif()

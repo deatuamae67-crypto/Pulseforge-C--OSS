@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "pulseforge_version": "1.0.0",
+  "source": {
+    "drive_mods_folder_id": "1pAnpn__0pfFe1pMtS-XyenPP5peqIU46",
+    "mods_list_sha256": "5eafeac677f4e70082db88a5f71f950107fbede576a20acb37ccbe1f40d8e2bb",
+    "engine_full_filelist_sha256": "37476e5fa488c6bc3b24c511d114dd95b0acb56c31a77217d51154a87515a549",
+    "inventory_basis": "modsList.txt plus direct Drive mods-root audit for runnable unlisted content",
+    "excluded_non_mod_directories": [
+      ".autochart-staging",
+      "Hellbreaker Remake FLP"
+    ]
+  },
+  "mod_count": 29,
+  "enabled_by_default_count": 27,
+  "file_count": 19585,
+  "unpacked_bytes": 15019576859,
+  "mods": [
+    {
+      "id": "drive-library-2026-04-30",
+      "enabled_by_default": true,
+      "drive_folder_id": "1PTa0ldHNt0reXMOhnz6vTJVt5RkokHu0",
+      "file_count": 592,
+      "unpacked_bytes": 389579119,
+      "path_size_inventory_sha256": "7ad585b809f48a670eb79d502604a9c2765abda0fc4cfcd107d1acd75920cff1"
+    },
+    {
+      "id": "mr-shash-recovered",
+      "enabled_by_default": true,
+      "drive_folder_id": "1JXQZUnuOo9klZb9vg9OReaVIn55VGMQL",
+      "file_count": 16,
+      "unpacked_bytes": 149594831,
+      "path_size_inventory_sha256": "d8b75b78c343e4e0963d5a3828e0fa810548df9d4803728b07e5d8ed325a96db"
+    },
+    {
+      "id": "js-engine-dorklysonic",
+      "enabled_by_default": true,
+      "drive_folder_id": "1ELZMQUVXuAe-V43QeUheKgPY5CxAPPrW",
+      "file_count": 41,
+      "unpacked_bytes": 3492318,
+      "path_size_inventory_sha256": "a4ff0f3cc5cdbe4ab868dd31acf3626f17587b29f12f9977414b6ebe70cf8a87"
+    },
+    {
+      "id": "pulseforge-created",
+      "enabled_by_default": true,
+      "drive_folder_id": "1d-a6q9C9AkxJUITKtZsk0wlNpqhXDYa-",
+      "file_count": 12,
+      "unpacked_bytes": 388710226,
+      "path_size_inventory_sha256": "66aeaf366bb79cedfe97fe6be75fbe690211e4ca291b60a173b8877d08b47d43"
+    },
+    {
+      "id": "drive-loose-charts-2026-08-01",
+      "enabled_by_default": true,
+      "drive_folder_id": "1sl3Dyd56Co6nuykyXx1Eb3MKGi_-3fZ7",
+      "file_count": 34,
+      "unpacked_bytes": 721246229,
+      "path_size_inventory_sha256": "c46d65b195eab985437dc46a593599fc109831eaf9cd165ed3036955a0896f29"
+    },
+    {
+      "id": "drive-batata-static",
+      "enabled_by_default": true,
+      "drive_folder_id": "1NgkaKdmunL9J81RnS1nE5HHUngDs63iV",
+      "file_count": 17,
+      "unpacked_bytes": 1703938152,
+      "path_size_inventory_sha256": "d5a701c582746e753a44619069f6cf0e4643065d09da0e80fd226c273a3ed4b4"
+    },
+    {
+      "id": "drive-pack-denpaex",
+      "enabled_by_default": true,
+      "drive_folder_id": "1jfE3oKE_onhN4OAKX7rQPxwtXBSKtRfL",
+      "file_count": 1199,
+      "unpacked_bytes": 254631623,
+      "path_size_inventory_sha256": "fd9807ca1a9ece73d11f39e7d7c52cfe986effd82bd7734c219ce0e5f1d5ce30"
+    },
+    {
+      "id": "drive-pack-fnf-js-engine-windows",
+      "enabled_by_default": true,
+      "drive_folder_id": "1spqt0yKLzmPyHRm5khs-w2lEor_89cQT",
+      "file_count": 1351,
+      "unpacked_bytes": 481992046,
+      "path_size_inventory_sha256": "acc708778fb1aefafbecfafedbf6024a697c88a407bff24fdb0b3288eefba301"
+    },
+    {
+      "id": "drive-pack-h-slice-js-0-2-4-windows",
+      "enabled_by_default": true,
+      "drive_folder_id": "1QOCRFk5iJzmNCudLEX4JRyFUw3nZk_7m",
+      "file_count": 1929,
+      "unpacked_bytes": 593871715,
+      "path_size_inventory_sha256": "3ca7d937be543dd46f1a9d9cfd9195814389720ee089b431dbc2b2e79b1789ed"
+    },
+    {
+      "id": "drive-pack-h-slice-0-2-3-windows",
+      "enabled_by_default": true,
+      "drive_folder_id": "1g0oPwr9ey4vFgjlH701N-fETz5yeD_3c",
+      "file_count": 1928,
+      "unpacked_bytes": 593846242,
+      "path_size_inventory_sha256": "14ae5395d5cb52f88c1799ea713889b9a5107ee2ad8b7ab5f90fdb49a987ff9c"
+    },
+    {
+      "id": "drive-pack-christmasred-edition",
+      "enabled_by_default": true,
+      "drive_folder_id": "1_Z0ZzstG7rhDkqOfdQOvaEva96ssAQ3N",
+      "file_count": 1317,
+      "unpacked_bytes": 851092276,
+      "path_size_inventory_sha256": "55b92aa2d710c6b73a40ac159e54f078cf88b2662e5d6d211b0e1ed4f65be90f"
+    },
+    {
+      "id": "drive-pack-vs-dinnerbambi-9e405",
+      "enabled_by_default": true,
+      "drive_folder_id": "1k5TR9OSyS3m5R2iiJfmvKwraiLjmcLkE",
+      "file_count": 731,
+      "unpacked_bytes": 346161509,
+      "path_size_inventory_sha256": "af3c40d2be45277f0f7526ef1dbcb7bb3efb9b03fecc810d19a9344a681995ff"
+    },
+    {
+      "id": "drive-pack-hortas-edition-v3-16d89",
+      "enabled_by_default": true,
+      "drive_folder_id": "1x0tlkEQM7vbc8XQnNFyUvcaMP0N3c6LX",
+      "file_count": 1482,
+      "unpacked_bytes": 1256632059,
+      "path_size_inventory_sha256": "0a9d312919927c44502c9de794bb5ac7a5d482d643943edee7bdd0995aa88d4b"
+    },
+    {
+      "id": "drive-pack-files",
+      "enabled_by_default": true,
+      "drive_folder_id": "1_ZYbZRVLr2TQpTy-yPnOWsS323PcBASG",
+      "file_count": 51,
+      "unpacked_bytes": 2390312362,
+      "path_size_inventory_sha256": "b639908bbffa2a7ad8818824ca7eac92a29c08b343828dfcde7b68a6571dcc77"
+    },
+    {
+      "id": "drive-pack-disable-sustains-legacy",
+      "enabled_by_default": true,
+      "drive_folder_id": "1nmrnSGijljg_u8Se9xZ9V9KItVJ1gMtx",
+      "file_count": 712,
+      "unpacked_bytes": 177125667,
+      "path_size_inventory_sha256": "b56932f5d454bcde40437104b16c672fee4664b8bfa052580a7973cbbe612c80"
+    },
+    {
+      "id": "drive-pack-screboot-demo",
+      "enabled_by_default": true,
+      "drive_folder_id": "1s40Q-khRW33tvM9RsEdQ0gOgB6rTONkg",
+      "file_count": 1288,
+      "unpacked_bytes": 592464073,
+      "path_size_inventory_sha256": "5fd24bdfb3a5544cb22ce67486efe39b7e4e140d90fa56a7a493cb67a10d4131"
+    },
+    {
+      "id": "drive-2026-08-22-ez-edition",
+      "enabled_by_default": true,
+      "drive_folder_id": "1b7PQfq2p97xSJJEQfloCb2EHr8laBSPX",
+      "file_count": 674,
+      "unpacked_bytes": 279964464,
+      "path_size_inventory_sha256": "e0192ee89be2aefc0cf609b9e0401677e770670a0df18ba2f44bff1045e2b047"
+    },
+    {
+      "id": "drive-2026-08-22-dek-v1",
+      "enabled_by_default": true,
+      "drive_folder_id": "1W0eTRv8bJgNke38YA0iJKoZTErkqksGD",
+      "file_count": 417,
+      "unpacked_bytes": 241118272,
+      "path_size_inventory_sha256": "e269bf55e990179d0f95490e6b16af9898c724c4010990813f3b2b7befe16ef7"
+    },
+    {
+      "id": "drive-2026-08-22-dek-v2-finale",
+      "enabled_by_default": true,
+      "drive_folder_id": "1boHh8HtatjRrPYCjn9xMI0QFCbDxoYtA",
+      "file_count": 951,
+      "unpacked_bytes": 1153345941,
+      "path_size_inventory_sha256": "28bb4ac838a3ec17a029906538e2e23ea0a222e25873057ba1a9224b22bbdabc"
+    },
+    {
+      "id": "drive-2026-08-22-dek-v2-demo",
+      "enabled_by_default": false,
+      "drive_folder_id": "18OLGtIwI20KP0ZRrvtlaD_sFIlfDIq7Z",
+      "file_count": 558,
+      "unpacked_bytes": 337381878,
+      "path_size_inventory_sha256": "61ff890177d4bc0a5cd4a6b9c1944b37dccfcb8d9e4b4d4b46216859db022bef"
+    },
+    {
+      "id": "drive-2026-08-22-dek-v2-dev-unverified",
+      "enabled_by_default": false,
+      "drive_folder_id": "1Yla_a-mYRA5vDBOeS5Me2jTnuHJGvcau",
+      "file_count": 575,
+      "unpacked_bytes": 344260382,
+      "path_size_inventory_sha256": "ea7e5f9fa761ed7221be85107d57706c42da54ba9e3b64dc02c15888a3118f7e"
+    },
+    {
+      "id": "drive-2026-08-22-vs-yerep-v2",
+      "enabled_by_default": true,
+      "drive_folder_id": "1DgQeakx07MucA13_2juqnuAgqFb8766X",
+      "file_count": 1379,
+      "unpacked_bytes": 504322079,
+      "path_size_inventory_sha256": "ab68ad7edf9f60114d021ed752e367ee8b5f5be590ca89dd5b94b4c619025fac"
+    },
+    {
+      "id": "drive-2026-08-22-vs-everamii",
+      "enabled_by_default": true,
+      "drive_folder_id": "1Xns4TsZdDCKhClqbGwGU702nk8ciwrjP",
+      "file_count": 1092,
+      "unpacked_bytes": 254502864,
+      "path_size_inventory_sha256": "2da89d98f01663a3dd8ce3954e4db2a7c938553402c5b030698c5410e3078989"
+    },
+    {
+      "id": "drive-2026-08-22-vs-bambi-b-side-9k",
+      "enabled_by_default": true,
+      "drive_folder_id": "1rAiZ5Ry5ISyJ_dPQqGSsDIzDqQqhdvN9",
+      "file_count": 396,
+      "unpacked_bytes": 137192805,
+      "path_size_inventory_sha256": "3090037b01d34f333601d690af4d4888a3a83afc1187b1a3747883703f732296"
+    },
+    {
+      "id": "drive-2026-08-22-evil-unfairness",
+      "enabled_by_default": true,
+      "drive_folder_id": "1tOD7BIA6jbeeFC1zKcDJQh4YTiC_QNzw",
+      "file_count": 405,
+      "unpacked_bytes": 144705828,
+      "path_size_inventory_sha256": "34d91a65835e91ab593e74a006a58767665673e10b15509aff47ca328f4ac642"
+    },
+    {
+      "id": "drive-2026-08-22-evil-tsukareta-b-side",
+      "enabled_by_default": true,
+      "drive_folder_id": "1kun7MefPcpLqDchsm8j0zKWkpRoiTMt-",
+      "file_count": 393,
+      "unpacked_bytes": 134693528,
+      "path_size_inventory_sha256": "d8eb2dab3133b8516faaecd9d46a3b909f71b2ee725fb4fd7aaf911353e18871"
+    },
+    {
+      "id": "m-r-vs-dave-bambi-fantrack-reupload",
+      "enabled_by_default": true,
+      "drive_folder_id": "1WD3k9iuF6QNVUmy4UyJRtsNuJorHqbFL",
+      "file_count": 7,
+      "unpacked_bytes": 3402847,
+      "path_size_inventory_sha256": "c07f14d4c7cc05421b57615224d4bbdc5d6e3b9c0834aab3b2faaf2941a34294"
+    },
+    {
+      "id": "taimuresu-spam-amplified",
+      "enabled_by_default": true,
+      "drive_folder_id": "14MFlkrbN6sRJwnqSTwMobRJ5NVoc_VHK",
+      "file_count": 36,
+      "unpacked_bytes": 589994065,
+      "path_size_inventory_sha256": "f57064b2755eff10c4c1567a3af786b40f632faaa666603db2eb7023726c783c",
+      "discovery": "drive-root-audit",
+      "notes": "Runnable Psych-family mod containing Taimuresu_overkill_mode / timeless stage."
+    },
+    {
+      "id": "charts-feitos-no-flp",
+      "enabled_by_default": true,
+      "drive_folder_id": "1Z-g_itHvEMiPnP7XB4Z9Adhu6G4S-Xnp",
+      "file_count": 2,
+      "unpacked_bytes": 1459,
+      "path_size_inventory_sha256": "d0e44b598435c84211f99e044c02528a446ebad708b8b3a5596b148210309f84",
+      "discovery": "drive-root-audit",
+      "notes": "Runnable mod root with mod.json and data directory."
+    }
+  ]
+}

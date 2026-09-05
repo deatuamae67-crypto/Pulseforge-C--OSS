@@ -120,6 +120,95 @@ public:
     std::vector<Invocation> invocations;
 };
 
+class OverkillCompatHost final : public pulseforge::LuaHostInterface {
+public:
+    [[nodiscard]] double song_position_ms() const noexcept override { return 750.0; }
+    [[nodiscard]] std::int64_t current_beat() const noexcept override { return 3; }
+    [[nodiscard]] std::int64_t current_step() const noexcept override { return 12; }
+    [[nodiscard]] std::int64_t current_section() const noexcept override { return 0; }
+    [[nodiscard]] double current_decimal_beat() const noexcept override { return 3.125; }
+    [[nodiscard]] double current_decimal_step() const noexcept override { return 12.5; }
+    [[nodiscard]] bool get_property(
+        std::string_view name,
+        pulseforge::ScriptValue& value,
+        std::string& error
+    ) const override {
+        if (name == "mustHitSection") {
+            value = true;
+            error.clear();
+            return true;
+        }
+        error = "unused";
+        return false;
+    }
+    [[nodiscard]] bool set_property(std::string_view, const pulseforge::ScriptValue&, std::string& error) override {
+        error.clear(); return true;
+    }
+    [[nodiscard]] bool add_score(std::int64_t, std::string& error) override { error.clear(); return true; }
+    [[nodiscard]] bool set_health(double, std::string& error) override { error.clear(); return true; }
+    [[nodiscard]] bool trigger_event(pulseforge::ScriptEventRequest, std::string& error) override { error.clear(); return true; }
+    void debug_print(std::string_view) override {}
+    [[nodiscard]] bool invoke_function(
+        std::string_view name,
+        std::span<const pulseforge::ScriptValue>,
+        pulseforge::ScriptValue& result,
+        std::string& error
+    ) override {
+        if (name == "addGlitchEffect") {
+            glitch_called = true;
+            result = true;
+            error.clear();
+            return true;
+        }
+        if (name == "setLuaSpriteScrollFactor") {
+            scroll_alias_called = true;
+            result = true;
+            error.clear();
+            return true;
+        }
+        if (name == "callMethod") {
+            method_called = true;
+            result = std::string{"singLEFT"};
+            error.clear();
+            return true;
+        }
+        error = "unexpected command";
+        return false;
+    }
+    bool glitch_called{};
+    bool scroll_alias_called{};
+    bool method_called{};
+};
+
+void test_overkill_compat_surface() {
+    OverkillCompatHost host;
+    pulseforge::LuaRuntime runtime(host);
+    constexpr auto source = R"lua(
+        function onCreate()
+            assert(type(curDecBeat) == 'number')
+            assert(type(curDecStep) == 'number')
+            assert(math.abs(curDecBeat - 3.125) < 0.000001)
+            assert(math.abs(curDecStep - 12.5) < 0.000001)
+            assert(mustHitSection == true)
+            assert(type(string.find) == 'function')
+            local first, last = string.find(callMethod('dad.getAnimationName'), 'sing')
+            assert(first == 1 and last == 4)
+            assert(string.find('singLEFT', '.') == nil)
+            assert(addGlitchEffect('bg', 2.25, 5, 0.1) == true)
+            assert(setLuaSpriteScrollFactor('bg', 0.5, 0.5) == true)
+        end
+    )lua";
+    require(runtime.load_script(source, "@overkill_compat.lua"),
+            "Overkill compatibility fixture loads");
+    require(runtime.on_create().succeeded(),
+            "Overkill compatibility fixture completes onCreate");
+    require(host.glitch_called, "addGlitchEffect reached the bounded host bridge");
+    require(host.scroll_alias_called,
+            "setLuaSpriteScrollFactor reached the bounded host bridge");
+    require(host.method_called,
+            "restricted callMethod reached the bounded host bridge");
+}
+
 class RealNoteTypeCorpusHost final : public pulseforge::LuaHostInterface {
 public:
     struct NotePrototype final {
@@ -383,7 +472,10 @@ void test_sandbox_and_callbacks() {
             assert(table.move == nil)
             assert(table.concat == nil)
             assert(string.dump == nil)
-            assert(string.find == nil)
+            assert(type(string.find) == 'function')
+            local findStart, findEnd = string.find('abc', 'b')
+            assert(findStart == 2 and findEnd == 2)
+            assert(string.find('abc', '.') == nil)
             assert(string.match == nil)
             assert(string.gmatch == nil)
             assert(string.gsub == nil)
@@ -1419,6 +1511,7 @@ int main() {
         std::cout << "[PASS] Lua sandbox and callbacks\n";
         test_real_custom_notetype_corpus();
         std::cout << "[PASS] real custom NoteType corpus\n";
+        test_overkill_compat_surface();
         test_shader_array_bridge();
         std::cout << "[PASS] Lua shader array bridge\n";
         test_start_countdown_lifecycle();

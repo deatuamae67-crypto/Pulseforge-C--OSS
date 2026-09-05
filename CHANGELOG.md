@@ -2,6 +2,25 @@
 
 All notable public PulseForge changes are documented in this file.
 
+## [1.0.0] - 2026-09-05
+
+### Definitive release
+
+- Promotes PulseForge to the stable `1.0.0` release line; `0.9.7` is retained as the preceding pre-release.
+- Validates against a complete 29-mod historical compatibility corpus without bloating Git history with approximately 15.0 GB of static third-party content; a Drive-root audit recovered two runnable mods omitted from the historical `modsList.txt`. Public OSS release assets contain the engine/platform packages, while third-party mod redistribution remains separate and license-dependent.
+- Adds a versioned mod-corpus manifest with Drive provenance, default enablement, file counts, unpacked byte counts and deterministic path/size inventory hashes.
+
+### Fixed
+
+- Adds Overkill/Timeless Lua compatibility: `addGlitchEffect` receives a bounded renderer-native fallback; `setScrollFactor(tag)` and legacy `setLuaSpriteScrollFactor` follow Psych semantics; fractional `curDecBeat`/`curDecStep` and resolved `mustHitSection` are available; a bounded literal-only `string.find` and allow-listed character `getAnimationName` bridge prevent the original scripts from aborting without exposing general Lua patterns or native reflection; Psych easing names are case-insensitive and include quad/cube/quart/quint/sine/circ families for modchart fidelity.
+- Isolates executable Psych/Denpa/SC:R Lua discovery to the selected content/mod roots. Unrelated sibling mods can no longer inject `onStartCountdown()` / `Function_Stop` into the active SC:R chart and freeze gameplay at `t=0`.
+- Keeps broad fallback discovery for non-executable content while explicitly disabling sibling stock-provider injection for executable script discovery.
+
+### Validation
+
+- Adds a deterministic regression that models the nested `drive-pack-screboot-demo/SCReboot_Demo/bin/assets/shared/data` layout and proves sibling script roots are excluded.
+- Direct CLI launches without a catalog-selected mod retain the existing explicit-root behavior.
+
 ## [0.9.7] - 2026-09-04
 
 ### Added
