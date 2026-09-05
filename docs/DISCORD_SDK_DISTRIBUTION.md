@@ -45,10 +45,10 @@ PulseForge release packages therefore treat the runtime as a required integrated
 
 - Windows: `discord_partner_sdk.dll` beside `pulseforge.exe` and `pulseforge-cli.exe`.
 - Linux: `libdiscord_partner_sdk.so` beside the executable, with an `$ORIGIN` runtime search path.
-- macOS: the inspected Social SDK 1.10.19337 package contains **both** a universal `libdiscord_partner_sdk.dylib` and `discord_partner_sdk.framework` (`x86_64 + arm64`). PulseForge's currently validated automatic CMake path uses the packaged `.dylib`; its install name is `@rpath/libdiscord_partner_sdk.dylib` and PulseForge supplies a bundle-local runtime search path. Native framework linking/embedding remains tracked separately in issue #42 as a packaging enhancement, not as a prerequisite for using the current authorized 1.10.19337 SDK on macOS.
+- macOS: Discord's 1.10 release line officially distributes the SDK as `discord_partner_sdk.framework`. The inspected 1.10.19337 package also contains a universal `libdiscord_partner_sdk.dylib` (`x86_64 + arm64`), and the current PulseForge CMake path can use that dylib for private compatibility/build smoke tests. **Do not treat that compatibility path as the canonical 1.10 production package.** Production macOS 1.10 packaging follows the framework distribution and is tracked in issue #42.
 - Android: `discord_partner_sdk.aar` is consumed through Gradle/Prefab and its native runtime is packaged into the APK.
 
-If the framework path is deliberately selected after #42 is implemented, the complete `discord_partner_sdk.framework` bundle must be preserved inside `pulseforge.app/Contents/Frameworks` and resolved through `@rpath`. Copying only the framework executable is invalid because the inspected 1.10.19337 framework contains its own `Frameworks/libdiscord_krisp.dylib` dependency.
+For the macOS 1.10 production path, preserve the complete `discord_partner_sdk.framework` bundle inside `pulseforge.app/Contents/Frameworks` and resolve it through `@rpath`. Copying only the framework executable is invalid: the inspected 1.10.19337 framework bundles `Frameworks/libdiscord_krisp.dylib` plus Krisp model resources under `Resources/Krisp`, and Discord's 1.10 release notes explicitly identify framework packaging as the new macOS signing/notarization path with Krisp bundled inside.
 
 A Discord-enabled release must never be published if the corresponding runtime dependency is missing.
 
