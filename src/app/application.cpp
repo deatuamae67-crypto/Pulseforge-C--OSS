@@ -9313,6 +9313,15 @@ if (const auto selected_skin = resolve_note_skin_selection(
         else if (name == "screenWidth") value = static_cast<double>(logical_width);
         else if (name == "screenHeight") value = static_cast<double>(logical_height);
         else if (name == "bfHit" || name == "daHit") value = false;
+        else if (name == "mustHitSection") {
+            // The compact chart model intentionally does not retain Psych
+            // section objects. The automatic camera-turn tracker is the
+            // authoritative resolved singing owner during gameplay. Before
+            // the first singing event, default to the Psych/player side; this
+            // also matches Timeless' silent opening sections.
+            value = !script_auto_camera_owner_.has_value()
+                || *script_auto_camera_owner_ == NoteOwner::player;
+        }
         else if (name == "crochet" || name == "stepCrochet") {
             const double bpm = gameplay_timing().bpm_at(gameplay_song_time_ms());
             const double crochet = std::isfinite(bpm) && bpm > 0.0
@@ -12010,6 +12019,38 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
             // onEndSong is produced by the authoritative session event flow.
             script_force_song_ended_ = true;
             result = true;
+            error.clear();
+            return true;
+        }
+        // PULSEFORGE_1_0_0_RESTRICTED_CALL_METHOD_V1
+        // Do not expose Haxe/native reflection. The historical corpus only
+        // needs getAnimationName() for character-state probes, so permit
+        // exactly those bounded read-only calls.
+        if (name == "callMethod") {
+            std::string_view method;
+            if (!string_arg(0U, method) || arguments.size() != 1U
+                || method.size() > 128U) {
+                error = "callMethod expects one bounded allow-listed method";
+                return false;
+            }
+            std::string_view tag;
+            if (method == "dad.getAnimationName") tag = "dad";
+            else if (method == "boyfriend.getAnimationName") tag = "boyfriend";
+            else if (method == "gf.getAnimationName") tag = "gf";
+            else {
+                error = "callMethod is restricted to character getAnimationName";
+                return false;
+            }
+            std::string animation{"idle"};
+            if (scene_ != nullptr) {
+                std::string resolved;
+                if (scene_->script_get_animation_name(
+                        tag, gameplay_song_time_ms(), resolved
+                    )) {
+                    animation = std::move(resolved);
+                }
+            }
+            result = std::move(animation);
             error.clear();
             return true;
         }

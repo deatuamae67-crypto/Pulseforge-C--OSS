@@ -5208,6 +5208,26 @@ struct RuntimeScene::Implementation {
         return true;
     }
 
+    [[nodiscard]] bool script_get_animation_name(
+        const std::string_view tag,
+        const double song_time_ms,
+        std::string& animation
+    ) const noexcept {
+        const auto* sprite = find_script_sprite(tag);
+        if (sprite == nullptr) return false;
+        const bool transient_active = sprite->transient_animation
+                < sprite->animations.size()
+            && std::isfinite(song_time_ms)
+            && song_time_ms + 0.001 >= sprite->transient_started_ms
+            && song_time_ms < sprite->transient_until_ms;
+        const std::size_t index = transient_active
+            ? sprite->transient_animation
+            : sprite->default_animation;
+        if (index >= sprite->animations.size()) return false;
+        animation = sprite->animations[index].id;
+        return true;
+    }
+
     [[nodiscard]] bool script_play_animation(
         const std::string_view tag,
         const std::string_view animation,
@@ -5816,6 +5836,17 @@ bool RuntimeScene::script_screen_center(
 ) noexcept {
     return implementation_ != nullptr
         && implementation_->script_screen_center(tag, horizontal, vertical);
+}
+
+bool RuntimeScene::script_get_animation_name(
+    const std::string_view tag,
+    const double song_time_ms,
+    std::string& animation
+) const noexcept {
+    return implementation_ != nullptr
+        && implementation_->script_get_animation_name(
+            tag, song_time_ms, animation
+        );
 }
 
 bool RuntimeScene::script_play_animation(
