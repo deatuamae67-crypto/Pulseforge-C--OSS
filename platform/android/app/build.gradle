@@ -27,6 +27,7 @@ if (pulseForgeSettingsFile.isFile()) {
     }
 }
 def discordApplicationId = providers.gradleProperty('PULSEFORGE_DISCORD_APPLICATION_ID')
+    .orElse(providers.gradleProperty('discordApplicationId'))
     .orElse(settingsDiscordApplicationId).get()
 def bundledDiscordSdkAar = file('../../../third_party/discord_social_sdk/android/discord_partner_sdk.aar')
 def appLocalDiscordSdkAar = file('libs/discord_partner_sdk.aar')
@@ -66,7 +67,7 @@ tasks.register('preparePulseForgeAssets', Sync) {
 
 android {
     namespace = 'org.pulseforge.engine'
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = '28.2.13676358'
 
     defaultConfig {
