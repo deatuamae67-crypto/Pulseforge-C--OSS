@@ -14,16 +14,16 @@ Release CI must configure with:
 
 and must verify the packaged runtime before upload.
 
-Expected integrated runtime for currently validated paths:
+Expected integrated runtime for currently validated or explicitly gated paths:
 
 - Windows: `discord_partner_sdk.dll`
 - Linux: `libdiscord_partner_sdk.so`
-- macOS: `libdiscord_partner_sdk.dylib` from the current authorized Social SDK 1.10.19337 package, with a bundle-local runtime search path
+- macOS 1.10 production: complete `discord_partner_sdk.framework` bundle in `pulseforge.app/Contents/Frameworks`, resolved through `@rpath`
 - Android: Discord AAR/Prefab native runtime embedded by Gradle
 
-The inspected Social SDK 1.10.19337 macOS package also contains `discord_partner_sdk.framework`. Framework-native PulseForge linking/embedding is tracked in issue #42 as an optional packaging enhancement. It is **not** a prerequisite for a Discord-enabled macOS build while the same authorized SDK package provides the validated universal `.dylib` path.
+The inspected Social SDK 1.10.19337 macOS package also contains a universal `libdiscord_partner_sdk.dylib`. PulseForge's current CMake can use that dylib for private compatibility/build smoke tests, but Discord's 1.10 release notes define the framework as the macOS distribution path with the updated signing/notarization pipeline and bundled Krisp. Therefore the dylib compatibility path must not be used as evidence that a **production** macOS 1.10 package is complete.
 
-If #42's framework path is used, the complete framework must be embedded in `pulseforge.app/Contents/Frameworks` and resolved through `@rpath`; do not copy only the main framework executable because the real 1.10.19337 bundle contains its own nested `Frameworks/libdiscord_krisp.dylib` dependency.
+Production macOS 1.10 release readiness remains gated by issue #42. The complete framework must be embedded, not only its main executable: the real 1.10.19337 bundle includes `Frameworks/libdiscord_krisp.dylib` and Krisp model resources under `Resources/Krisp`.
 
 The raw Discord SDK archive, framework, xcframework, DLL, SO, dylib or AAR must not be uploaded as a standalone public artifact.
 
