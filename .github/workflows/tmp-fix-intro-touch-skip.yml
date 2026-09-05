@@ -134,30 +134,38 @@ jobs:
               raise SystemExit(f"Expected one fallback-loop anchor, found {text.count(fallback_anchor)}")
           text = text.replace(fallback_anchor, fallback_replacement, 1)
 
-          if text.count('is_skip_event(event)') != 2:
-              raise SystemExit(f"Expected two skip calls, found {text.count('is_skip_event(event)')}")
+          native_anchor = "    bool timed_out = false;\n    while (!callback->done()) {"
+          native_replacement = "    bool timed_out = false;\n    SkipInputState skip_input;\n    while (!callback->done()) {"
+          if text.count(native_anchor) != 1:
+              raise SystemExit(f"Expected one native-loop anchor, found {text.count(native_anchor)}")
+          text = text.replace(native_anchor, native_replacement, 1)
+
+          if text.count('is_skip_event(event)') != 3:
+              raise SystemExit(f"Expected three skip calls, found {text.count('is_skip_event(event)')}")
           text = text.replace('is_skip_event(event)', 'skip_input.consume(event)')
 
           old_hint = '"PRESS ENTER OR SPACE TO SKIP"'
           new_hint = '"TAP OR PRESS ENTER OR SPACE TO SKIP"'
-          if text.count(old_hint) != 1:
-              raise SystemExit(f"Expected one skip hint, found {text.count(old_hint)}")
-          text = text.replace(old_hint, new_hint, 1)
+          if text.count(old_hint) != 3:
+              raise SystemExit(f"Expected three skip hints, found {text.count(old_hint)}")
+          text = text.replace(old_hint, new_hint)
 
           path.write_text(text, encoding="utf-8", newline="\n")
 
           verified = path.read_text(encoding="utf-8")
           checks = {
               'case SDL_EVENT_FINGER_UP:': 1,
-              'skip_input.consume(event)': 2,
-              'SkipInputState skip_input;': 2,
+              'skip_input.consume(event)': 3,
+              'SkipInputState skip_input;': 3,
               'SDL_EVENT_FINGER_CANCELED': 1,
-              'TAP OR PRESS ENTER OR SPACE TO SKIP': 1,
+              'TAP OR PRESS ENTER OR SPACE TO SKIP': 3,
           }
           for token, expected in checks.items():
               actual = verified.count(token)
               if actual != expected:
                   raise SystemExit(f"Verification failed for {token!r}: expected {expected}, found {actual}")
+          if 'is_skip_event(event)' in verified:
+              raise SystemExit("Legacy skip helper call remains after patch")
 
       - name: Stage and constrain source fix
         shell: bash
