@@ -12,7 +12,20 @@ The project-local SDK directory remains ignored by Git:
 third_party/discord_social_sdk/
 ```
 
-Developers can stage an authorized SDK archive with:
+Before staging a private SDK archive, audit it in place with the standard-library-only inspector:
+
+```bash
+python3 scripts/inspect-discord-social-sdk.py \
+  --sdk /path/to/DiscordSocialSdk-1.10.19337.zip \
+  --expect-version 1.10.19337 \
+  --require all \
+  --deep \
+  --hash
+```
+
+The auditor reads ZIP/TAR archives or extracted directories without copying SDK contents into the repository. It reports the detected version, headers, platform inputs, PE/ELF/Mach-O architectures, Android Prefab/ABI metadata and SHA-256 values for matched SDK artifacts. Omit `--require all` when auditing a platform-specific download; use repeated `--require windows`, `--require linux`, `--require macos` or `--require android` gates instead.
+
+Developers can then stage an authorized SDK archive with:
 
 ```powershell
 .\scripts\setup-discord-social-sdk.ps1 -SdkPath C:\Downloads\discord_social_sdk.zip
