@@ -1560,10 +1560,10 @@ if(PULSEFORGE_BUILD_APP)
         install(TARGETS pulseforge_cli RUNTIME DESTINATION bin)
     endif()
     if(PULSEFORGE_DISCORD_SOCIAL_SDK_FRAMEWORK_ACTIVE)
-        install(
-            DIRECTORY "${_pulseforge_discord_framework}"
-            DESTINATION "$<TARGET_BUNDLE_DIR_NAME:pulseforge>/Contents/Frameworks"
-        )
+        # The framework is embedded by the pulseforge POST_BUILD rule above.
+        # install(TARGETS pulseforge BUNDLE ...) installs that complete app
+        # bundle, including framework symlinks and nested Krisp resources.
+        # Installing the source framework again would duplicate symlinks.
     elseif(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE
         AND NOT ANDROID
         AND _pulseforge_discord_runtime
