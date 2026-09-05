@@ -32,8 +32,10 @@ PulseForge release packages therefore treat the runtime as a required integrated
 
 - Windows: `discord_partner_sdk.dll` beside `pulseforge.exe` and `pulseforge-cli.exe`.
 - Linux: `libdiscord_partner_sdk.so` beside the executable, with an `$ORIGIN` runtime search path.
-- macOS: Social SDK 1.10 packages the runtime as `discord_partner_sdk.framework`; a framework-enabled PulseForge package must embed it inside `PulseForge.app/Contents/Frameworks` and resolve it through a bundle-local `@rpath`. Older authorized SDK archives may expose `libdiscord_partner_sdk.dylib`; that legacy layout remains a separate compatibility path until removed deliberately.
+- macOS: Discord Social SDK 1.10 packages the runtime as `discord_partner_sdk.framework`, but framework-based PulseForge linking/embedding is **not currently build-ready**. Until issue #42 is completed against an authorized framework package, only the older `libdiscord_partner_sdk.dylib` layout is a validated PulseForge compatibility path on macOS.
 - Android: `discord_partner_sdk.aar` is consumed through Gradle/Prefab and its native runtime is packaged into the APK.
+
+Once #42 is completed, a Social SDK 1.10 macOS package must embed `discord_partner_sdk.framework` inside `PulseForge.app/Contents/Frameworks`, resolve it through a bundle-local `@rpath`, and validate the final signed bundle. Do not label a current framework-only macOS build as Discord-enabled before that validation exists.
 
 A Discord-enabled release must never be published if the corresponding runtime dependency is missing.
 
