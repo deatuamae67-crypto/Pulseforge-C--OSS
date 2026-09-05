@@ -580,7 +580,10 @@ if(PULSEFORGE_BUILD_APP)
             # 1.10 framework distribution when the complete bundle is present.
             if(NOT _pulseforge_discord_framework
                 AND NOT PULSEFORGE_DISCORD_SDK_LIBRARY
-                AND IS_DIRECTORY "${_pulseforge_discord_default_framework}")
+                AND IS_DIRECTORY "${_pulseforge_discord_default_framework}"
+                AND EXISTS "${_pulseforge_discord_default_framework}/Versions/A/discord_partner_sdk"
+                AND EXISTS "${_pulseforge_discord_default_framework}/Versions/A/Headers/discordpp.h"
+                AND EXISTS "${_pulseforge_discord_default_framework}/Versions/A/Headers/cdiscord.h")
                 set(_pulseforge_discord_framework
                     "${_pulseforge_discord_default_framework}"
                 )
