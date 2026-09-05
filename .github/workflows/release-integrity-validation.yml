@@ -5,7 +5,6 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/publish-release.yml'
       - '.github/workflows/release-integrity-validation.yml'
       - 'docs/RELEASE_0.9.7_ASSET_MANIFEST.json'
       - 'docs/RELEASE_0.9.7_PROVENANCE.md'
@@ -13,7 +12,6 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/publish-release.yml'
       - '.github/workflows/release-integrity-validation.yml'
       - 'docs/RELEASE_0.9.7_ASSET_MANIFEST.json'
       - 'docs/RELEASE_0.9.7_PROVENANCE.md'
@@ -35,6 +33,10 @@ concurrency:
 env:
   GH_TOKEN: ${{ github.token }}
   MANIFEST: docs/RELEASE_0.9.7_ASSET_MANIFEST.json
+  FINAL_SOURCE_SHA: 8e603b240c8c11945da70b03a42e93b7babf763f
+  FINAL_RUN_ID: '33989617582'
+  RELEASE_ID: '382859979'
+  RELEASE_TAG: v0.9.7
 
 jobs:
   validate-release-integrity:
@@ -52,15 +54,15 @@ jobs:
           set -euo pipefail
           test -f "$MANIFEST"
 
-          jq -e '
+          jq -e --arg source "$FINAL_SOURCE_SHA" --argjson run "$FINAL_RUN_ID" --argjson release "$RELEASE_ID" --arg tag "$RELEASE_TAG" '
             .schema_version == 1
             and .pulseforge_version == "0.9.7"
-            and .tag == "v0.9.7"
-            and .release_id == 382859979
-            and .release_target_sha == "b1e7b048a63118299c5fad795f2b4c607f931a86"
-            and .source_run_id == 33891158742
+            and .tag == $tag
+            and .release_id == $release
+            and .release_target_sha == $source
+            and .source_run_id == $run
             and .source_workflow_path == ".github/workflows/release-artifacts.yml"
-            and .source_head_sha == "6e49caed8f7abbe5f2104632d48bdc93f4baa3b1"
+            and .source_head_sha == $source
             and (.assets | length) == 10
             and ([.assets[].name] | unique | length) == 10
             and all(.assets[];
@@ -72,81 +74,68 @@ jobs:
             )
           ' "$MANIFEST" >/dev/null
 
-      - name: Validate source run provenance
+      - name: Validate final source run provenance
         shell: bash
         run: |
           set -euo pipefail
-          run_id="$(jq -r '.source_run_id' "$MANIFEST")"
-          expected_path="$(jq -r '.source_workflow_path' "$MANIFEST")"
-          expected_sha="$(jq -r '.source_head_sha' "$MANIFEST")"
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FINAL_RUN_ID")"
 
-          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
-          status="$(jq -r '.status' <<<"$run_json")"
-          conclusion="$(jq -r '.conclusion' <<<"$run_json")"
-          workflow_path="$(jq -r '.path' <<<"$run_json")"
-          head_sha="$(jq -r '.head_sha' <<<"$run_json")"
+          [[ "$(jq -r '.status' <<<"$run_json")" == 'completed' ]] || {
+            echo 'Final release-artifact run is not completed.' >&2
+            exit 1
+          }
+          [[ "$(jq -r '.conclusion' <<<"$run_json")" == 'success' ]] || {
+            echo 'Final release-artifact run did not succeed.' >&2
+            exit 1
+          }
+          [[ "$(jq -r '.path' <<<"$run_json")" == '.github/workflows/release-artifacts.yml' ]] || {
+            echo 'Unexpected final source workflow path.' >&2
+            exit 1
+          }
+          [[ "$(jq -r '.head_branch' <<<"$run_json")" == 'main' ]] || {
+            echo 'Final artifact run was not produced from main.' >&2
+            exit 1
+          }
+          [[ "$(jq -r '.head_sha' <<<"$run_json")" == "$FINAL_SOURCE_SHA" ]] || {
+            echo 'Final artifact run source SHA mismatch.' >&2
+            exit 1
+          }
+          [[ "$(jq -r '.event' <<<"$run_json")" == 'push' ]] || {
+            echo 'Final artifact run was not a main push run.' >&2
+            exit 1
+          }
 
-          [[ "$status" == 'completed' ]] || {
-            echo "Release-artifact run is not completed: $status" >&2
-            exit 1
-          }
-          [[ "$conclusion" == 'success' ]] || {
-            echo "Release-artifact run conclusion is $conclusion" >&2
-            exit 1
-          }
-          [[ "$workflow_path" == "$expected_path" ]] || {
-            echo "Unexpected workflow path: $workflow_path" >&2
-            exit 1
-          }
-          [[ "$head_sha" == "$expected_sha" ]] || {
-            echo "Unexpected source SHA: $head_sha" >&2
-            exit 1
-          }
-
-      - name: Probe GitHub Release visibility
-        id: release
+      - name: Fetch published GitHub Release
         shell: bash
         run: |
           set -euo pipefail
-          release_id="$(jq -r '.release_id' "$MANIFEST")"
-          set +e
-          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
-            > /tmp/pulseforge-release.json \
-            2> /tmp/pulseforge-release-error.txt
-          rc=$?
-          set -e
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > /tmp/pulseforge-release.json
 
-          if [[ "$rc" == '0' ]]; then
-            echo 'accessible=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if grep -q 'HTTP 403' /tmp/pulseforge-release-error.txt; then
-            echo 'accessible=false' >> "$GITHUB_OUTPUT"
-            echo 'Draft Release metadata is not exposed to this read-only GITHUB_TOKEN; continuing with the reviewed manifest, source-run provenance and tag-state checks.'
-            exit 0
-          fi
-
-          cat /tmp/pulseforge-release-error.txt >&2
-          exit "$rc"
-
-      - name: Validate visible GitHub Release against durable manifest
-        if: steps.release.outputs.accessible == 'true'
+      - name: Validate published Release against durable manifest
         shell: bash
         run: |
           set -euo pipefail
           release_json="$(cat /tmp/pulseforge-release.json)"
-          expected_tag="$(jq -r '.tag' "$MANIFEST")"
-          expected_target="$(jq -r '.release_target_sha' "$MANIFEST")"
-          actual_tag="$(jq -r '.tag_name' <<<"$release_json")"
-          actual_target="$(jq -r '.target_commitish' <<<"$release_json")"
 
-          [[ "$actual_tag" == "$expected_tag" ]] || {
-            echo "Release tag mismatch: release=$actual_tag expected=$expected_tag" >&2
+          [[ "$(jq -r '.id' <<<"$release_json")" == "$RELEASE_ID" ]]
+          [[ "$(jq -r '.tag_name' <<<"$release_json")" == "$RELEASE_TAG" ]] || {
+            echo 'Release tag mismatch.' >&2
             exit 1
           }
-          [[ "$actual_target" == "$expected_target" ]] || {
-            echo "Release target mismatch: release=$actual_target expected=$expected_target" >&2
+          [[ "$(jq -r '.target_commitish' <<<"$release_json")" == "$FINAL_SOURCE_SHA" ]] || {
+            echo 'Release target mismatch.' >&2
+            exit 1
+          }
+          [[ "$(jq -r '.draft' <<<"$release_json")" == 'false' ]] || {
+            echo 'v0.9.7 unexpectedly returned to draft state.' >&2
+            exit 1
+          }
+          [[ "$(jq -r '.prerelease' <<<"$release_json")" == 'false' ]] || {
+            echo 'v0.9.7 unexpectedly became a prerelease.' >&2
+            exit 1
+          }
+          [[ -n "$(jq -r '.published_at // empty' <<<"$release_json")" ]] || {
+            echo 'v0.9.7 has no publication timestamp.' >&2
             exit 1
           }
 
@@ -161,88 +150,47 @@ jobs:
           jq -r '.assets[].name' "$MANIFEST" | sort > /tmp/pulseforge-manifest-assets.txt
           jq -r '.assets[].name' <<<"$release_json" | sort > /tmp/pulseforge-release-assets.txt
           diff -u /tmp/pulseforge-manifest-assets.txt /tmp/pulseforge-release-assets.txt || {
-            echo 'Release asset names do not exactly match the durable manifest.' >&2
+            echo 'Published Release asset names do not exactly match the durable manifest.' >&2
             exit 1
           }
 
           while IFS=$'\t' read -r name expected_size expected_digest; do
             asset_json="$(jq -c --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json")"
             [[ -n "$asset_json" ]] || {
-              echo "Missing release asset: $name" >&2
+              echo "Missing published Release asset: $name" >&2
               exit 1
             }
-
-            state="$(jq -r '.state' <<<"$asset_json")"
-            actual_size="$(jq -r '.size' <<<"$asset_json")"
-            actual_digest="$(jq -r '.digest // empty' <<<"$asset_json")"
-
-            [[ "$state" == 'uploaded' ]] || {
-              echo "Release asset $name is not fully uploaded: $state" >&2
+            [[ "$(jq -r '.state' <<<"$asset_json")" == 'uploaded' ]] || {
+              echo "Published Release asset $name is not fully uploaded." >&2
               exit 1
             }
-            [[ "$actual_size" == "$expected_size" ]] || {
-              echo "Release asset $name size mismatch: release=$actual_size manifest=$expected_size" >&2
+            [[ "$(jq -r '.size' <<<"$asset_json")" == "$expected_size" ]] || {
+              echo "Published Release asset $name size mismatch." >&2
               exit 1
             }
-            [[ "$actual_digest" == "$expected_digest" ]] || {
-              echo "Release asset $name digest mismatch: release=$actual_digest manifest=$expected_digest" >&2
+            [[ "$(jq -r '.digest // empty' <<<"$asset_json")" == "$expected_digest" ]] || {
+              echo "Published Release asset $name digest mismatch." >&2
               exit 1
             }
           done < <(jq -r '.assets[] | [.name, (.size_bytes | tostring), .digest] | @tsv' "$MANIFEST")
 
-          draft="$(jq -r '.draft' <<<"$release_json")"
-          prerelease="$(jq -r '.prerelease' <<<"$release_json")"
-          echo "Visible Release asset integrity verified (draft=$draft, prerelease=$prerelease)."
-
-      - name: Validate tag and publication state
+      - name: Validate exact published tag target
         shell: bash
         run: |
           set -euo pipefail
-          tag="$(jq -r '.tag' "$MANIFEST")"
-          expected_target="$(jq -r '.release_target_sha' "$MANIFEST")"
-          refs_json="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag")"
-          ref_count="$(jq 'length' <<<"$refs_json")"
+          ref_json="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG")"
+          object_type="$(jq -r '.object.type' <<<"$ref_json")"
+          object_sha="$(jq -r '.object.sha' <<<"$ref_json")"
 
-          if [[ "$ref_count" == '0' ]]; then
-            if [[ "${{ steps.release.outputs.accessible }}" == 'true' ]]; then
-              draft="$(jq -r '.draft' /tmp/pulseforge-release.json)"
-              [[ "$draft" == 'true' ]] || {
-                echo "Visible published release $tag has no Git tag ref." >&2
-                exit 1
-              }
-              echo 'Visible draft has no materialized Git tag yet; this is valid.'
-            else
-              echo 'Read-only token cannot inspect the draft and no Git tag is materialized; publication remains gated by publish-release.yml live draft verification.'
-            fi
-            exit 0
-          fi
-
-          [[ "$ref_count" == '1' ]] || {
-            echo "Expected one exact tag ref for $tag, found $ref_count." >&2
-            exit 1
-          }
-
-          if [[ "${{ steps.release.outputs.accessible }}" != 'true' ]]; then
-            echo "Tag $tag is materialized but the expected Release is not readable with the read-only token; refusing an ambiguous publication state." >&2
-            exit 1
-          fi
-
-          draft="$(jq -r '.draft' /tmp/pulseforge-release.json)"
-          [[ "$draft" == 'false' ]] || {
-            echo "Tag $tag is materialized while the Release is still marked draft." >&2
-            exit 1
-          }
-
-          object_type="$(jq -r '.[0].object.type' <<<"$refs_json")"
-          object_sha="$(jq -r '.[0].object.sha' <<<"$refs_json")"
           if [[ "$object_type" == 'tag' ]]; then
             tag_json="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
             object_type="$(jq -r '.object.type' <<<"$tag_json")"
             object_sha="$(jq -r '.object.sha' <<<"$tag_json")"
           fi
 
-          [[ "$object_type" == 'commit' && "$object_sha" == "$expected_target" ]] || {
-            echo "Tag $tag resolves to $object_type $object_sha, expected commit $expected_target." >&2
+          [[ "$object_type" == 'commit' && "$object_sha" == "$FINAL_SOURCE_SHA" ]] || {
+            echo "$RELEASE_TAG resolves to $object_type $object_sha; expected commit $FINAL_SOURCE_SHA." >&2
             exit 1
           }
-          echo "Tag $tag resolves to the expected release target."
+
+          echo "PulseForge $RELEASE_TAG published integrity verified at $FINAL_SOURCE_SHA."
