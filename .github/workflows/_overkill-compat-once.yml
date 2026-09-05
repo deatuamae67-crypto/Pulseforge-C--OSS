@@ -1,0 +1,66 @@
+name: Validate Overkill compatibility patch once
+
+on:
+  push:
+    branches:
+      - release/v1.0.0-final
+    paths:
+      - '.github/workflows/_overkill-compat-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: release/v1.0.0-final
+          fetch-depth: 1
+
+      - name: Apply exact compatibility patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_overkill_compat.py
+          git diff --check
+          grep -R --line-number --fixed-strings 'PULSEFORGE_1_0_0_OVERKILL_GLITCH_COMPAT_V1' src
+          grep -R --line-number --fixed-strings 'curDecBeat' include/pulseforge/lua_runtime.hpp src/script/lua_runtime.cpp src/app/application.cpp
+
+      - name: Configure focused test build
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build
+          cmake -S . -B out/build/overkill-compat -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULSEFORGE_BUILD_APP=OFF \
+            -DPULSEFORGE_BUILD_TESTS=ON \
+            -DPULSEFORGE_BUILD_AUTOCHART=OFF \
+            -DPULSEFORGE_ENABLE_LUA=ON
+          cmake --build out/build/overkill-compat --target \
+            pulseforge_lua_tests pulseforge_psych_content_root_tests --parallel 2
+
+      - name: Run Lua and SC:R regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./out/build/overkill-compat/pulseforge_lua_tests
+          ./out/build/overkill-compat/pulseforge_psych_content_root_tests
+
+      - name: Commit validated source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add include/pulseforge/lua_runtime.hpp \
+            src/script/lua_runtime.cpp src/app/application.cpp \
+            tests/lua_test.cpp CHANGELOG.md docs/RELEASE_NOTES_1.0.0.md
+          git diff --cached --quiet && { echo 'No compatibility changes produced.' >&2; exit 1; }
+          git commit -m 'fix(lua): restore Overkill Timeless compatibility'
+          git push origin HEAD:release/v1.0.0-final
