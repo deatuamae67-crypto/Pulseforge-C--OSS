@@ -32,10 +32,12 @@ PulseForge release packages therefore treat the runtime as a required integrated
 
 - Windows: `discord_partner_sdk.dll` beside `pulseforge.exe` and `pulseforge-cli.exe`.
 - Linux: `libdiscord_partner_sdk.so` beside the executable, with an `$ORIGIN` runtime search path.
-- macOS: `libdiscord_partner_sdk.dylib` beside the executable/bundle payload, with an `@loader_path` runtime search path.
+- macOS: Social SDK 1.10 packages the runtime as `discord_partner_sdk.framework`; a framework-enabled PulseForge package must embed it inside `PulseForge.app/Contents/Frameworks` and resolve it through a bundle-local `@rpath`. Older authorized SDK archives may expose `libdiscord_partner_sdk.dylib`; that legacy layout remains a separate compatibility path until removed deliberately.
 - Android: `discord_partner_sdk.aar` is consumed through Gradle/Prefab and its native runtime is packaged into the APK.
 
 A Discord-enabled release must never be published if the corresponding runtime dependency is missing.
+
+Raw Apple SDK bundles such as `discord_partner_sdk.framework` or an SDK-provided `.xcframework` are private SDK inputs just like the raw DLL/SO/AAR and must not be committed to the public source repository.
 
 ## CI and release secrets
 
@@ -53,10 +55,11 @@ The downloaded SDK archive must only be used as an input to the build. Do not up
 
 Discord connectivity, account state, authentication failures, rate limits and Discord being closed must never terminate gameplay or prevent PulseForge from starting.
 
-This is distinct from a missing loader dependency: if PulseForge is linked against the Discord shared library but the runtime DLL/SO/dylib was omitted from the application package, the operating-system loader can fail before PulseForge's own fail-open code executes. Packaging validation therefore prevents such a build from being released.
+This is distinct from a missing loader dependency: if PulseForge is linked against the Discord shared library but the platform runtime was omitted from the application package, the operating-system loader can fail before PulseForge's own fail-open code executes. Packaging validation therefore prevents such a build from being released.
 
 ## Official references
 
 - Discord Social SDK Terms: https://support-dev.discord.com/hc/en-us/articles/30225844245271-Discord-Social-SDK-Terms
-- Discord Social SDK C++ getting started: https://docs.discord.com/developers/discord-social-sdk/getting-started/using-c%2B%2B
+- Discord Social SDK installation: https://discord.com/developers/docs/social-sdk/installation.html
+- Discord Social SDK release notes: https://discord.com/developers/docs/social-sdk/release_notes.html
 - Discord Social SDK documentation: https://discord.com/developers/docs/social-sdk/index.html
