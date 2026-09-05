@@ -1,0 +1,203 @@
+name: Publish PulseForge v0.9.7 final (one-shot)
+
+on:
+  push:
+    branches:
+      - release/publish-v0.9.7-final
+    paths:
+      - .github/workflows/_publish-v0.9.7-final-once.yml
+
+permissions:
+  actions: read
+  contents: write
+
+env:
+  SOURCE_SHA: 8e603b240c8c11945da70b03a42e93b7babf763f
+  RUN_ID: '33989617582'
+  RELEASE_ID: '382859979'
+  TAG: v0.9.7
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Restrict one-shot publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_ACTOR" == "$GITHUB_REPOSITORY_OWNER" ]] || {
+            echo 'Only the repository owner may run this publisher.' >&2
+            exit 1
+          }
+          [[ "$GITHUB_REF" == 'refs/heads/release/publish-v0.9.7-final' ]] || {
+            echo "Unexpected ref: $GITHUB_REF" >&2
+            exit 1
+          }
+
+      - name: Validate main, tag and final artifact run provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          [[ "$main_sha" == "$SOURCE_SHA" ]] || {
+            echo "main moved: $main_sha; expected $SOURCE_SHA" >&2
+            exit 1
+          }
+
+          tag_json="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")"
+          tag_type="$(jq -r '.object.type' <<<"$tag_json")"
+          tag_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          [[ "$tag_type" == 'commit' && "$tag_sha" == "$SOURCE_SHA" ]] || {
+            echo "$TAG resolves to $tag_type $tag_sha; expected commit $SOURCE_SHA" >&2
+            exit 1
+          }
+
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+          [[ "$(jq -r '.status' <<<"$run_json")" == 'completed' ]]
+          [[ "$(jq -r '.conclusion' <<<"$run_json")" == 'success' ]]
+          [[ "$(jq -r '.path' <<<"$run_json")" == '.github/workflows/release-artifacts.yml' ]]
+          [[ "$(jq -r '.head_branch' <<<"$run_json")" == 'main' ]]
+          [[ "$(jq -r '.head_sha' <<<"$run_json")" == "$SOURCE_SHA" ]]
+          [[ "$(jq -r '.event' <<<"$run_json")" == 'push' ]]
+
+      - name: Download final release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf release-artifacts
+          mkdir -p release-artifacts
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir release-artifacts
+
+      - name: Verify exact final packages and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/expected.tsv <<'EOF'
+          PulseForge-v0.9.7-Android-arm64-test-signed.apk	4560637	5b19402892265fafea3feadfd7b08458edd9638f4bd535103ce843d1ed78009a
+          PulseForge-v0.9.7-Android-arm64-test-signed.SHA256SUMS.txt	114	805f7519d6351daf1096c6651dc48af1fe90e5199f5a4ebe4c47b8aff7831363
+          PulseForge-v0.9.7-Linux-x86_64.tar.gz	4931763	a6ecc06d9a3a89d17a6976dcdc239be344f1108ba2e2d6791edd4aad5da34bec
+          PulseForge-v0.9.7-Linux-x86_64.SHA256SUMS.txt	104	f328b8e3a329aef05c361e38dc6fcb6b27311de722d591dc139566c1904b8df9
+          PulseForge-v0.9.7-macOS-arm64.tar.gz	3635767	90c570528d3d8b5c3e40793c3bcb3f8aeb8a88d5ca35c10bad200e17fc0bc797
+          PulseForge-v0.9.7-macOS-arm64.SHA256SUMS.txt	103	aa985f70e2e96b79b7e85a831e33a7951e2e4bc2005ef908b4f9f504933d30a2
+          PulseForge-v0.9.7-macOS-x86_64.tar.gz	4154575	1a0126735fb7d4e867afa9693d1eb8e2a8866013d3629035b03c52830de1c7b5
+          PulseForge-v0.9.7-macOS-x86_64.SHA256SUMS.txt	104	12fa4bbeae9226b9d0df8cc0f060141f631904745fa92c3ff44d199745adfbcf
+          PulseForge-v0.9.7-Windows-x86_64.zip	7495270	f6e31ca373e1bcd33584b3893b7fd17522fcc56d064ca329a2ef4e9df1c4b61c
+          PulseForge-v0.9.7-Windows-x86_64.SHA256SUMS.txt	104	337680861943c54f019e97415fb37b24b1b661f5b0ee096baeb7cdd25b738ce6
+          EOF
+          sed -i 's/^          //' /tmp/expected.tsv
+
+          mapfile -t release_files < <(
+            find release-artifacts -type f \
+              \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' -o -name '*SHA256SUMS.txt' \) \
+              | sort
+          )
+          [[ "${#release_files[@]}" == '10' ]] || {
+            echo "Expected 10 release files, found ${#release_files[@]}." >&2
+            exit 1
+          }
+
+          while IFS=$'\t' read -r name expected_size expected_sha; do
+            mapfile -t matches < <(find release-artifacts -type f -name "$name")
+            [[ "${#matches[@]}" == '1' ]] || {
+              echo "Expected exactly one $name, found ${#matches[@]}." >&2
+              exit 1
+            }
+            file="${matches[0]}"
+            actual_size="$(stat -c '%s' "$file")"
+            actual_sha="$(sha256sum "$file" | awk '{print $1}')"
+            [[ "$actual_size" == "$expected_size" ]] || {
+              echo "$name size mismatch: $actual_size != $expected_size" >&2
+              exit 1
+            }
+            [[ "$actual_sha" == "$expected_sha" ]] || {
+              echo "$name SHA-256 mismatch: $actual_sha != $expected_sha" >&2
+              exit 1
+            }
+          done < /tmp/expected.tsv
+
+          for sum in release-artifacts/*/*SHA256SUMS.txt; do
+            (cd "$(dirname "$sum")" && sha256sum -c "$(basename "$sum")")
+          done
+
+      - name: Validate reviewed draft before replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          [[ "$(jq -r '.id' <<<"$release_json")" == "$RELEASE_ID" ]]
+          [[ "$(jq -r '.tag_name' <<<"$release_json")" == "$TAG" ]]
+          [[ "$(jq -r '.draft' <<<"$release_json")" == 'true' ]] || {
+            echo 'Expected the reviewed release to still be a draft before asset replacement.' >&2
+            exit 1
+          }
+          [[ "$(jq '.assets | length' <<<"$release_json")" == '10' ]] || {
+            echo 'Expected exactly 10 reviewed draft assets before replacement.' >&2
+            exit 1
+          }
+          jq -r '.assets[].name' <<<"$release_json" | sort > /tmp/current-assets.txt
+          cut -f1 /tmp/expected.tsv | sort > /tmp/expected-assets.txt
+          diff -u /tmp/expected-assets.txt /tmp/current-assets.txt
+
+      - name: Replace old draft assets with final run assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(
+            while IFS=$'\t' read -r name _; do
+              find release-artifacts -type f -name "$name" -print
+            done < /tmp/expected.tsv
+          )
+          [[ "${#files[@]}" == '10' ]]
+          gh release upload "$TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Verify final draft assets before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          [[ "$(jq -r '.draft' <<<"$release_json")" == 'true' ]]
+          [[ "$(jq '.assets | length' <<<"$release_json")" == '10' ]]
+
+          while IFS=$'\t' read -r name expected_size expected_sha; do
+            asset="$(jq -c --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json")"
+            [[ -n "$asset" ]] || { echo "Missing release asset $name" >&2; exit 1; }
+            [[ "$(jq -r '.state' <<<"$asset")" == 'uploaded' ]]
+            [[ "$(jq -r '.size' <<<"$asset")" == "$expected_size" ]]
+            [[ "$(jq -r '.digest' <<<"$asset")" == "sha256:$expected_sha" ]] || {
+              echo "Release digest mismatch for $name" >&2
+              exit 1
+            }
+          done < /tmp/expected.tsv
+
+      - name: Publish regular v0.9.7 release at final source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F target_commitish="$SOURCE_SHA" \
+            -F draft=false \
+            -F prerelease=false >/dev/null
+
+      - name: Final publication verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          [[ "$(jq -r '.draft' <<<"$release_json")" == 'false' ]]
+          [[ "$(jq -r '.prerelease' <<<"$release_json")" == 'false' ]]
+          [[ "$(jq -r '.tag_name' <<<"$release_json")" == "$TAG" ]]
+          [[ "$(jq -r '.target_commitish' <<<"$release_json")" == "$SOURCE_SHA" ]]
+          [[ "$(jq '.assets | length' <<<"$release_json")" == '10' ]]
+          [[ -n "$(jq -r '.published_at // empty' <<<"$release_json")" ]]
+
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
+          [[ "$tag_sha" == "$SOURCE_SHA" ]]
+
+          while IFS=$'\t' read -r name expected_size expected_sha; do
+            asset="$(jq -c --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release_json")"
+            [[ "$(jq -r '.size' <<<"$asset")" == "$expected_size" ]]
+            [[ "$(jq -r '.digest' <<<"$asset")" == "sha256:$expected_sha" ]]
+          done < /tmp/expected.tsv
+
+          echo "PulseForge $TAG published from $SOURCE_SHA using final artifact run $RUN_ID."
