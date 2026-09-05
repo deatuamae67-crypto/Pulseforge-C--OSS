@@ -206,6 +206,13 @@ public:
         const TouchSettings& settings,
         const InputBindings& bindings
     ) {
+        // Reconfiguration can happen after a binding/touch-settings edit or
+        // after the SDL window is handed between launcher and gameplay. Release
+        // synthetic actions with the OLD key map before replacing it so no lane
+        // or UI action can remain latched across that boundary.
+        if (platform_active_) {
+            cancel_all(SDL_GetTicksNS());
+        }
         window_ = window;
         renderer_ = renderer;
         settings_ = settings;

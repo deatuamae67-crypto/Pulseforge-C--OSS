@@ -125,10 +125,11 @@ void draw_text(
 }
 
 [[nodiscard]] bool is_skip_event(const SDL_Event& event) noexcept {
-    return event.type == SDL_EVENT_KEY_DOWN
-        && (event.key.scancode == SDL_SCANCODE_RETURN
-            || event.key.scancode == SDL_SCANCODE_KP_ENTER
-            || event.key.scancode == SDL_SCANCODE_SPACE);
+    return event.type == SDL_EVENT_FINGER_UP
+        || (event.type == SDL_EVENT_KEY_DOWN
+            && (event.key.scancode == SDL_SCANCODE_RETURN
+                || event.key.scancode == SDL_SCANCODE_KP_ENTER
+                || event.key.scancode == SDL_SCANCODE_SPACE));
 }
 
 [[nodiscard]] std::optional<std::vector<stbi_uc>> read_bounded_binary(
