@@ -1,90 +1,92 @@
 # PulseForge 0.9.7 release provenance
 
-This document records the build, validation and publication provenance for the first public PulseForge 0.9.7 OSS release candidate.
+This document records the final build, validation and publication provenance for the public PulseForge 0.9.7 OSS release.
 
-## Source state
+## Final source state
 
-- Integration PR: #25
-- Merge commit on `main`: `fe100c6f5ff5c69aff85ecf760696d5f0c5fd8d5`
-- Last engine/build-source head with both PR validation matrices completed successfully: `fbb9ee22350a939071595721f5d6a35909d41a6d`
-- Cross-platform build validation run: `33884590462` — success
-- Deterministic core tests run: `33884590622` — success
-- Release-workflow commit used for the preferred package set: `6e49caed8f7abbe5f2104632d48bdc93f4baa3b1`
+- Final release commit on `main`: `8e603b240c8c11945da70b03a42e93b7babf763f`
+- Git tag: `v0.9.7`, resolving to that exact commit
+- GitHub Release ID: `382859979`
+- GitHub Release target: `8e603b240c8c11945da70b03a42e93b7babf763f`
+- Publication state: regular public release (`draft=false`, `prerelease=false`)
+- Published: 5 September 2026
 
-The changes between the validated source head and the merge were limited to repository documentation and `.github` maintenance/CI files; there were no changes to `src/`, `include/`, `tests/`, `CMakeLists.txt`, `CMakePresets.json`, `platform/android/`, `assets/`, or `third_party/`.
+The final source includes the merged production macOS Discord-framework packaging work (#45) and the public synthetic Discord SDK integration validation (#46). No proprietary Discord SDK binary, AAR, framework, credential, token or keystore is committed to the public repository.
 
-The release-workflow commit changes only the macOS Intel runner label from `macos-15-intel` to `macos-26-intel`; it does not change PulseForge engine or build inputs. Documentation, governance and release-publication workflow commits after that point likewise do not alter the generated engine binaries.
+## Validation gates
 
-## Preferred `main` release-artifact run
+The final head of #46 passed the required pull-request validation matrix before merge:
 
-Release-artifact run `33891158742` targets commit `6e49caed8f7abbe5f2104632d48bdc93f4baa3b1` on `main` and completed successfully for all five supported release targets.
+- PulseForge cross-platform build validation — success
+- PulseForge deterministic core tests — success
+- PulseForge OSS boundary validation — success
+- PulseForge synthetic Discord SDK integration validation — success
 
-Each package-level SHA-256 file was independently rechecked after downloading the GitHub Actions artifact:
+After #45 and #46 were merged, the final `main` commit was built again by the release-artifact workflow.
 
-| Target | Package | SHA-256 | Status |
-| --- | --- | --- | --- |
-| Windows x86_64 | `PulseForge-v0.9.7-Windows-x86_64.zip` | `b70d5adf35fd2b071b54b0711e91215985feb41fd1bf78b5b8f5d16d444291df` | verified |
-| Linux x86_64 | `PulseForge-v0.9.7-Linux-x86_64.tar.gz` | `e9063dda68e7f6e5c1a5692d5718883b458d1855819fe5a7815f7928483a36ce` | verified |
-| macOS x86_64 | `PulseForge-v0.9.7-macOS-x86_64.tar.gz` | `de7a93432316b12f6e60a21398c4adec51dc43527863ce1c1d2ecbcff25c5b1d` | verified |
-| macOS arm64 | `PulseForge-v0.9.7-macOS-arm64.tar.gz` | `aebfea49ac288c93343776df759bfacb71d837057bf5deefd5263df74562204e` | verified |
-| Android arm64 | `PulseForge-v0.9.7-Android-arm64-test-signed.apk` | `848e0b42ee581ac801260eb81828d6f17ec5d5925b154546cb7fb906f41a2a18` | verified |
+## Final release-artifact run
 
-Independent package evidence also confirms:
+Release-artifact run `33989617582` targets commit `8e603b240c8c11945da70b03a42e93b7babf763f` on `main` and completed successfully for all five supported release targets.
 
-- Windows contains both `bin/pulseforge.exe` and `bin/pulseforge-cli.exe`.
-- Linux is an x86-64 ELF executable and the recorded `ldd` output contains no unresolved shared libraries.
-- macOS x86_64 is a Mach-O 64-bit `x86_64` executable and passed the workflow's ad-hoc signing/codesign verification.
-- macOS arm64 is a Mach-O 64-bit `arm64` executable and passed the workflow's ad-hoc signing/codesign verification.
-- Android identifies as `org.pulseforge.engine`, `versionCode=90700`, `versionName=0.9.7`, `minSdkVersion=21`, `targetSdkVersion=35`, with native code `arm64-v8a`; the CI artifact is deliberately test-signed.
+The five GitHub Actions artifact containers are retained until 5 October 2026. The published GitHub Release assets and `docs/RELEASE_0.9.7_ASSET_MANIFEST.json` are the durable distribution/integrity record.
 
-The preferred current package set therefore no longer depends on the earlier macOS x86_64 fallback.
+Each package-level `SHA256SUMS.txt` was rechecked against its package before publication, and the live published Release was then revalidated by asset name, byte size and GitHub SHA-256 digest.
 
-## Durable asset-integrity record
+| Target | Package | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| Windows x86_64 | `PulseForge-v0.9.7-Windows-x86_64.zip` | 7,495,270 | `f6e31ca373e1bcd33584b3893b7fd17522fcc56d064ca329a2ef4e9df1c4b61c` |
+| Linux x86_64 | `PulseForge-v0.9.7-Linux-x86_64.tar.gz` | 4,931,763 | `a6ecc06d9a3a89d17a6976dcdc239be344f1108ba2e2d6791edd4aad5da34bec` |
+| macOS x86_64 | `PulseForge-v0.9.7-macOS-x86_64.tar.gz` | 4,154,575 | `1a0126735fb7d4e867afa9693d1eb8e2a8866013d3629035b03c52830de1c7b5` |
+| macOS arm64 | `PulseForge-v0.9.7-macOS-arm64.tar.gz` | 3,635,767 | `90c570528d3d8b5c3e40793c3bcb3f8aeb8a88d5ca35c10bad200e17fc0bc797` |
+| Android arm64, test-signed | `PulseForge-v0.9.7-Android-arm64-test-signed.apk` | 4,560,637 | `5b19402892265fafea3feadfd7b08458edd9638f4bd535103ce843d1ed78009a` |
 
-GitHub Actions artifact retention is finite. The five workflow artifacts from run `33891158742` are currently retained until 4 October 2026; after that point the workflow ZIPs may no longer be downloadable even though the reviewed GitHub Release assets remain intact.
+The corresponding checksum-file digests are recorded in `docs/RELEASE_0.9.7_ASSET_MANIFEST.json` together with all ten exact asset sizes.
 
-`docs/RELEASE_0.9.7_ASSET_MANIFEST.json` is therefore the durable integrity record for the reviewed `v0.9.7` package set. It records:
+## Platform evidence
+
+- Windows packages the PulseForge executables produced by the final MSVC release build.
+- Linux is built as the x86_64 release package and its packaging validation checks the installed executable and runtime dependencies.
+- macOS x86_64 and arm64 packages are produced on their native architecture runners and go through the repository's packaging/signing validation. The public OSS package remains usable without redistributing Discord's proprietary SDK.
+- Android is `org.pulseforge.engine`, `versionCode=90700`, `versionName=0.9.7`, `targetSdk=35`, `compileSdk=36`, native ABI `arm64-v8a`. The public no-SDK build uses `minSdk=21`; a Discord-SDK-enabled private build requires `minSdk=24`. The published CI APK is deliberately test-signed.
+
+## Discord SDK boundary
+
+The release source supports optional Discord Social SDK integration but the public repository and ordinary OSS release artifacts do not redistribute the proprietary SDK.
+
+Public synthetic integration tests exercise the SDK-enabled build paths without shipping Discord SDK code. Real private-SDK validation remains tracked separately for:
+
+- Android AAR integration (#30)
+- macOS framework integration (#42)
+- Windows/Linux desktop runtime integration (#43)
+
+Those private validation tickets are not publication provenance for the no-SDK OSS package and therefore remain open until tested against the privately supplied SDK package.
+
+## Durable integrity record
+
+`docs/RELEASE_0.9.7_ASSET_MANIFEST.json` records:
 
 - release ID `382859979`;
-- release target `b1e7b048a63118299c5fad795f2b4c607f931a86`;
-- source run `33891158742` and its workflow/source SHA;
-- the exact ten reviewed Release asset names;
-- each asset's exact byte size;
-- each asset's GitHub SHA-256 digest.
+- release target `8e603b240c8c11945da70b03a42e93b7babf763f`;
+- source release-artifact run `33989617582`;
+- final source SHA `8e603b240c8c11945da70b03a42e93b7babf763f`;
+- all ten published asset names, exact byte sizes and GitHub SHA-256 digests.
 
-Before this manifest was committed, all ten current GitHub Release assets were independently cross-checked against the files extracted directly from run `33891158742`: names, byte sizes and SHA-256 values matched 10/10.
+`.github/workflows/release-integrity-validation.yml` is the read-only integrity verifier for this published state. It must not mutate the release.
 
-The read-only `.github/workflows/release-integrity-validation.yml` workflow has only `actions: read` and `contents: read` permissions and cannot publish or mutate a release. With those deliberately restricted permissions, GitHub does not expose private draft-Release metadata to the workflow token. While `v0.9.7` remains a draft, this workflow therefore validates the reviewed manifest, successful source-run provenance and the expected absence of a materialized `v0.9.7` tag. It refuses an ambiguous state where the tag exists but the expected Release remains unreadable to the read-only token.
+## Publication sequence
 
-The live draft itself is validated inside the controlled publisher immediately before any publication change. That publisher has the `contents: write` permission required for release publication and requires all ten attached draft assets to match the reviewed manifest exactly by name, upload state, byte size and GitHub SHA-256 digest. Once the Release is publicly visible, the read-only integrity workflow can also validate those Release assets directly and requires the materialized Git tag to resolve to the expected release target.
+Publication followed the required guarded sequence: final PR checks green → merge → final `main` → final release-artifact run → verified package/checksum set → `v0.9.7` at the final source SHA → replacement of the stale draft assets with the final run assets → live draft digest verification → publication → post-publication tag/target/asset verification.
 
-The controlled publisher still downloads and re-hashes the Actions artifacts while all five remain retained. After those artifacts expire, it may use the reviewed durable manifest only to validate an already-existing release whose ten assets still match exactly. The manifest is verification evidence only: it is never used to reconstruct package bytes. If the existing draft is deleted after the Actions artifacts become unavailable, the publisher refuses to recreate it.
+The first one-shot publication attempt failed safely before any mutation because the GitHub CLI token environment was not exported. After adding the workflow token, the second run (`33990522815`) completed all provenance, package-hash, draft-asset, publication and post-publication checks successfully.
 
-## Historical macOS x86_64 fallback
+## Historical pre-final package set
 
-Before `macos-26-intel` capacity was used successfully, release-artifact run `33883728198` provided a validated macOS x86_64 fallback built from commit `4063a05110be16f044809c58048ea9baae74f590` with unchanged engine/build inputs.
+Earlier release candidate provenance used release-artifact run `33891158742` and source `6e49caed8f7abbe5f2104632d48bdc93f4baa3b1`. That package set was superseded after later merges and must not be used as the final 0.9.7 distribution.
 
-That historical fallback remains documented for auditability only:
+The older macOS x86_64 fallback from run `33883728198` is likewise historical evidence only.
 
-- package: `PulseForge-v0.9.7-macOS-x86_64.tar.gz`
-- SHA-256: `a0c2a48dab31f9cafd0e2f60c48a682a994fe64967468eef8aac986b91d7a0c4`
-- architecture: Mach-O 64-bit `x86_64`
-- workflow result: successful build, ad-hoc signing, codesign verification and artifact upload
+## Distribution notes
 
-It should not be used for the final release when the complete preferred package set from run `33891158742` is available.
+The Android package is test-signed and the macOS packages use the repository's CI signing path; production store/notarized distribution may require platform-specific production credentials and signing infrastructure that are intentionally outside the OSS repository.
 
-## Distribution boundary
-
-These CI packages are public OSS/no-SDK builds unless the Discord Social SDK and its required platform runtime are explicitly supplied. They must not be represented as final Discord-enabled packages unless `docs/RELEASE_REQUIREMENTS.md` is satisfied.
-
-The current macOS packages do not link `discord_partner_sdk` in this OSS/no-SDK package set.
-
-The Android package is test-signed and the macOS packages are ad-hoc signed; production distribution requires the appropriate production signing/notarization process.
-
-## Publication status
-
-A GitHub Release draft named `PulseForge 0.9.7` exists as release ID `382859979` with reserved tag name `v0.9.7` and target commit `b1e7b048a63118299c5fad795f2b4c607f931a86`. It contains the five reviewed platform packages plus the five corresponding `SHA256SUMS.txt` files.
-
-The release remains a draft and has not been published publicly. The actual Git ref `refs/tags/v0.9.7` is not materialized while the release remains in this draft state.
-
-Reusable GitHub Release text is stored in `docs/RELEASE_NOTES_0.9.7.md`. Public publication is controlled by `.github/workflows/publish-release.yml`, which is owner-only, must be dispatched from `main`, validates the approved release-artifact run provenance, validates the durable asset manifest, validates the live draft asset set immediately before publication, and refuses direct public creation without a reviewed draft.
+Reusable release text is stored in `docs/RELEASE_NOTES_0.9.7.md`.
