@@ -1,0 +1,3 @@
+Validation-only trigger for PulseForge Android AGP 9.4 / Gradle 9.6 release-artifact packaging.
+This file is not consumed by Gradle, CMake, Android source sets, assets, or package staging.
+PR head validated: 1ffc50658a1e8d4079770afdbe9ccaac69e1e9d8
