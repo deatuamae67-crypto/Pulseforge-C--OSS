@@ -10758,24 +10758,59 @@ if (const auto selected_skin = resolve_note_skin_selection(
         const double raw,
         const std::string_view easing
     ) noexcept {
+        // PULSEFORGE_1_0_0_PSYCH_EASING_FIDELITY_V1
+        // Psych/FlxEase names in the historical corpus vary in case
+        // (quadOut/quadout/quadinOut) and include quart/quint families. Keep
+        // lookup allocation-free because this runs once per live tween/frame.
+        const auto ease_is = [easing](const std::string_view expected) noexcept {
+            if (easing.size() != expected.size()) return false;
+            for (std::size_t index = 0U; index < easing.size(); ++index) {
+                const auto fold = [](const unsigned char value) noexcept {
+                    return value >= 'A' && value <= 'Z'
+                        ? static_cast<unsigned char>(value - 'A' + 'a')
+                        : value;
+                };
+                if (fold(static_cast<unsigned char>(easing[index]))
+                    != fold(static_cast<unsigned char>(expected[index]))) {
+                    return false;
+                }
+            }
+            return true;
+        };
         const double t = std::clamp(raw, 0.0, 1.0);
-        if (easing == "linear") return t;
-        if (easing == "quadIn") return t * t;
-        if (easing == "quadOut") return 1.0 - (1.0 - t) * (1.0 - t);
-        if (easing == "quadInOut") return t < 0.5
+        constexpr double pi = 3.14159265358979323846;
+        if (ease_is("linear")) return t;
+        if (ease_is("quadIn")) return t * t;
+        if (ease_is("quadOut")) return 1.0 - std::pow(1.0 - t, 2.0);
+        if (ease_is("quadInOut")) return t < 0.5
             ? 2.0 * t * t
             : 1.0 - std::pow(-2.0 * t + 2.0, 2.0) / 2.0;
-        if (easing == "cubeIn") return t * t * t;
-        if (easing == "cubeOut") return 1.0 - std::pow(1.0 - t, 3.0);
-        if (easing == "sineInOut") return -(std::cos(3.14159265358979323846 * t) - 1.0) * 0.5;
-        if (easing == "circIn" || easing == "CircIn") {
+        if (ease_is("cubeIn")) return t * t * t;
+        if (ease_is("cubeOut")) return 1.0 - std::pow(1.0 - t, 3.0);
+        if (ease_is("cubeInOut")) return t < 0.5
+            ? 4.0 * t * t * t
+            : 1.0 - std::pow(-2.0 * t + 2.0, 3.0) / 2.0;
+        if (ease_is("quartIn")) return std::pow(t, 4.0);
+        if (ease_is("quartOut")) return 1.0 - std::pow(1.0 - t, 4.0);
+        if (ease_is("quartInOut")) return t < 0.5
+            ? 8.0 * std::pow(t, 4.0)
+            : 1.0 - std::pow(-2.0 * t + 2.0, 4.0) / 2.0;
+        if (ease_is("quintIn")) return std::pow(t, 5.0);
+        if (ease_is("quintOut")) return 1.0 - std::pow(1.0 - t, 5.0);
+        if (ease_is("quintInOut")) return t < 0.5
+            ? 16.0 * std::pow(t, 5.0)
+            : 1.0 - std::pow(-2.0 * t + 2.0, 5.0) / 2.0;
+        if (ease_is("sineIn")) return 1.0 - std::cos((t * pi) * 0.5);
+        if (ease_is("sineOut")) return std::sin((t * pi) * 0.5);
+        if (ease_is("sineInOut")) return -(std::cos(pi * t) - 1.0) * 0.5;
+        if (ease_is("circIn")) {
             return 1.0 - std::sqrt(std::max(0.0, 1.0 - t * t));
         }
-        if (easing == "circOut" || easing == "CircOut") {
+        if (ease_is("circOut")) {
             const double shifted = t - 1.0;
             return std::sqrt(std::max(0.0, 1.0 - shifted * shifted));
         }
-        if (easing == "circInOut" || easing == "CircInOut") {
+        if (ease_is("circInOut")) {
             if (t < 0.5) {
                 const double doubled = 2.0 * t;
                 return (1.0 - std::sqrt(

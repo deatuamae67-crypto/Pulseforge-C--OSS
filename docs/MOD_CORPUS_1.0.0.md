@@ -2,7 +2,7 @@
 
 The definitive 1.0.0 distribution contains **29 runnable mods**. Twenty-seven are recorded in the historical `modsList.txt`; a direct audit of the Drive `mods` root found two additional runnable roots that the list omitted: **`taimuresu spam amplified`** (which contains Overkill) and **`charts feitos no flp`**. The complete runnable corpus contains **19,585 files** and **15,019,576,859 unpacked bytes**.
 
-The public Git repository stores a deterministic inventory rather than committing roughly 15.0 GB of static content into Git history. The GitHub 1.0.0 release distributes the runnable content as separately checksummed assets sourced from the public read-only Drive corpus.
+The public Git repository stores a deterministic inventory rather than committing roughly 15.0 GB of static content into Git history. The historical Drive tree is used as an external compatibility/reference corpus. The public GitHub 1.0.0 release ships the OSS engine and its platform packages; third-party mod payloads are not automatically redistributed by the OSS release unless their redistribution rights are separately established.
 
 Two direct children of the Drive `mods` root are intentionally excluded because they are not runnable engine mods: `.autochart-staging` is transient AutoChart staging data, and `Hellbreaker Remake FLP` contains production/source material such as FLP/MIDI/audio rather than an installable mod tree.
 
