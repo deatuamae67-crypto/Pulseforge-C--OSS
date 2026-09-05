@@ -1,0 +1,75 @@
+name: Temporary Android touch integration fix
+
+on:
+  push:
+    branches:
+      - feature/android-touch-port
+    paths:
+      - .github/workflows/tmp-fix-android-touch-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: feature/android-touch-port
+          fetch-depth: 1
+
+      - name: Apply exact integration fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("src/app/application.cpp")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = [
+              ("mobile_touch_controls()", "detail::mobile_touch_controls()", 11),
+              ("MobileTouchControlOptions{", "detail::MobileTouchControlOptions{", 1),
+              ("MobileTouchContext::", "detail::MobileTouchContext::", 5),
+              ("chart_ == nullptr", "!chart_.has_value()", 1),
+          ]
+
+          for old, new, expected in replacements:
+              found = text.count(old)
+              if found != expected:
+                  raise SystemExit(
+                      f"Refusing patch: expected {expected} occurrences of {old!r}, found {found}"
+                  )
+              text = text.replace(old, new)
+
+          path.write_text(text, encoding="utf-8", newline="\n")
+
+          verified = path.read_text(encoding="utf-8")
+          for old, new, expected in replacements:
+              if old in verified:
+                  raise SystemExit(f"Old token still present after patch: {old!r}")
+              if verified.count(new) != expected:
+                  raise SystemExit(
+                      f"Verification failed: expected {expected} occurrences of {new!r}, "
+                      f"found {verified.count(new)}"
+                  )
+
+      - name: Show and constrain diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          changed="$(git diff --name-only)"
+          test "$changed" = "src/app/application.cpp"
+          git diff -- src/app/application.cpp
+
+      - name: Commit source fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/application.cpp
+          git commit -m "fix: qualify mobile touch runtime integration"
+          git push origin HEAD:feature/android-touch-port
