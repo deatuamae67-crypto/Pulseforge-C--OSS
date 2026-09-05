@@ -33,6 +33,11 @@ jobs:
           set -euo pipefail
           chmod +x platform/android/gradlew
           cd platform/android
+          grep -F "getDefaultProguardFile('proguard-android-optimize.txt')" app/build.gradle
+          if grep -Fq "getDefaultProguardFile('proguard-android.txt')" app/build.gradle; then
+            echo 'Unsupported AGP 9 default ProGuard file remains.' >&2
+            exit 1
+          fi
           ./gradlew --no-daemon --stacktrace wrapper \
             --gradle-version 9.6.0 \
             --distribution-type bin
