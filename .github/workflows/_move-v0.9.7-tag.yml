@@ -1,0 +1,29 @@
+name: Move v0.9.7 tag
+
+on:
+  push:
+    branches:
+      - test/discord-sdk-synthetic-integration
+    paths:
+      - .github/workflows/_move-v0.9.7-tag.yml
+
+permissions:
+  contents: write
+
+jobs:
+  move-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Point v0.9.7 at merged main
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='8e603b240c8c11945da70b03a42e93b7babf763f'
+          git cat-file -e "${target}^{commit}"
+          git tag -f v0.9.7 "$target"
+          git push origin refs/tags/v0.9.7 --force
