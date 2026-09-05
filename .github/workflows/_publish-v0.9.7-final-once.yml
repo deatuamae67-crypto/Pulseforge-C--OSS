@@ -12,6 +12,7 @@ permissions:
   contents: write
 
 env:
+  GH_TOKEN: ${{ github.token }}
   SOURCE_SHA: 8e603b240c8c11945da70b03a42e93b7babf763f
   RUN_ID: '33989617582'
   RELEASE_ID: '382859979'
