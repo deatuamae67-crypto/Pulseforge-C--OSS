@@ -120,6 +120,61 @@ public:
     std::vector<Invocation> invocations;
 };
 
+class OverkillCompatHost final : public pulseforge::LuaHostInterface {
+public:
+    [[nodiscard]] double song_position_ms() const noexcept override { return 750.0; }
+    [[nodiscard]] std::int64_t current_beat() const noexcept override { return 3; }
+    [[nodiscard]] std::int64_t current_step() const noexcept override { return 12; }
+    [[nodiscard]] std::int64_t current_section() const noexcept override { return 0; }
+    [[nodiscard]] double current_decimal_beat() const noexcept override { return 3.125; }
+    [[nodiscard]] double current_decimal_step() const noexcept override { return 12.5; }
+    [[nodiscard]] bool get_property(std::string_view, pulseforge::ScriptValue&, std::string& error) const override {
+        error = "unused"; return false;
+    }
+    [[nodiscard]] bool set_property(std::string_view, const pulseforge::ScriptValue&, std::string& error) override {
+        error.clear(); return true;
+    }
+    [[nodiscard]] bool add_score(std::int64_t, std::string& error) override { error.clear(); return true; }
+    [[nodiscard]] bool set_health(double, std::string& error) override { error.clear(); return true; }
+    [[nodiscard]] bool trigger_event(pulseforge::ScriptEventRequest, std::string& error) override { error.clear(); return true; }
+    void debug_print(std::string_view) override {}
+    [[nodiscard]] bool invoke_function(
+        std::string_view name,
+        std::span<const pulseforge::ScriptValue>,
+        pulseforge::ScriptValue& result,
+        std::string& error
+    ) override {
+        if (name != "addGlitchEffect") {
+            error = "unexpected command";
+            return false;
+        }
+        glitch_called = true;
+        result = true;
+        error.clear();
+        return true;
+    }
+    bool glitch_called{};
+};
+
+void test_overkill_compat_surface() {
+    OverkillCompatHost host;
+    pulseforge::LuaRuntime runtime(host);
+    constexpr auto source = R"lua(
+        function onCreate()
+            assert(type(curDecBeat) == 'number')
+            assert(type(curDecStep) == 'number')
+            assert(math.abs(curDecBeat - 3.125) < 0.000001)
+            assert(math.abs(curDecStep - 12.5) < 0.000001)
+            assert(addGlitchEffect('bg', 2.25, 5, 0.1) == true)
+        end
+    )lua";
+    require(runtime.load_script(source, "@overkill_compat.lua"),
+            "Overkill compatibility fixture loads");
+    require(runtime.on_create().succeeded(),
+            "Overkill compatibility fixture completes onCreate");
+    require(host.glitch_called, "addGlitchEffect reached the bounded host bridge");
+}
+
 class RealNoteTypeCorpusHost final : public pulseforge::LuaHostInterface {
 public:
     struct NotePrototype final {
@@ -1419,6 +1474,7 @@ int main() {
         std::cout << "[PASS] Lua sandbox and callbacks\n";
         test_real_custom_notetype_corpus();
         std::cout << "[PASS] real custom NoteType corpus\n";
+        test_overkill_compat_surface();
         test_shader_array_bridge();
         std::cout << "[PASS] Lua shader array bridge\n";
         test_start_countdown_lifecycle();

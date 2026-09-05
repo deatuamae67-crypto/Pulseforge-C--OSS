@@ -220,6 +220,14 @@ std::int64_t GameplayLuaHost::current_section() const noexcept {
     );
 }
 
+double GameplayLuaHost::current_decimal_beat() const noexcept {
+    return session_.timing_map().beat_at(session_.song_time_ms());
+}
+
+double GameplayLuaHost::current_decimal_step() const noexcept {
+    return session_.timing_map().step_at(session_.song_time_ms());
+}
+
 bool GameplayLuaHost::get_property(
     const std::string_view name,
     ScriptValue& value,
@@ -252,6 +260,10 @@ bool GameplayLuaHost::get_property(
         value = current_step();
     } else if (matches(name, {"curSection"})) {
         value = current_section();
+    } else if (matches(name, {"curDecBeat"})) {
+        value = current_decimal_beat();
+    } else if (matches(name, {"curDecStep"})) {
+        value = current_decimal_step();
     } else if (matches(name, {"bpm", "curBpm"})) {
         value = session_.timing_map().bpm_at(session_.song_time_ms());
     } else if (matches(name, {"scrollSpeed"})) {
@@ -1872,6 +1884,10 @@ struct LuaRuntime::Impl {
             static_cast<lua_Integer>(self->host.current_section())
         );
         lua_setglobal(lua, "curSection");
+        lua_pushnumber(lua, self->host.current_decimal_beat());
+        lua_setglobal(lua, "curDecBeat");
+        lua_pushnumber(lua, self->host.current_decimal_step());
+        lua_setglobal(lua, "curDecStep");
 
         if (self->pending.update_beat) {
             lua_pushinteger(
@@ -2369,7 +2385,7 @@ struct LuaRuntime::Impl {
             "setShaderFloatArray", "setShaderIntArray",
             "getShaderFloat",
             // PULSEFORGE_P1_1_2_STAGE_UNBLOCK_V1
-            "wavyEffect", "close",
+            "wavyEffect", "addGlitchEffect", "close",
         };
         for (const auto* function_name : compatibility_functions) {
             register_host_command(function_name);
@@ -2379,6 +2395,8 @@ struct LuaRuntime::Impl {
         // Explicit registration is intentional: the previous array-only
         // edit was present in source but wavyEffect was still nil at runtime.
         register_host_command("wavyEffect");
+        // PULSEFORGE_1_0_0_OVERKILL_GLITCH_COMPAT_V1
+        register_host_command("addGlitchEffect");
         register_host_command("close");
 
         // PULSEFORGE_P1_1_17_MODCHART_RUNTIME_HARD_REGISTER_V1
@@ -2464,6 +2482,10 @@ struct LuaRuntime::Impl {
         lua_setglobal(state, "curStep");
         lua_pushinteger(state, 0);
         lua_setglobal(state, "curSection");
+        lua_pushnumber(state, 0.0);
+        lua_setglobal(state, "curDecBeat");
+        lua_pushnumber(state, 0.0);
+        lua_setglobal(state, "curDecStep");
         lua_pushnumber(state, 0.0);
         lua_setglobal(state, "songPosition");
 

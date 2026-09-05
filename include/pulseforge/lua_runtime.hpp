@@ -36,6 +36,13 @@ public:
     [[nodiscard]] virtual std::int64_t current_step() const noexcept = 0;
     [[nodiscard]] virtual std::int64_t current_section() const noexcept = 0;
 
+    [[nodiscard]] virtual double current_decimal_beat() const noexcept {
+        return static_cast<double>(current_beat());
+    }
+    [[nodiscard]] virtual double current_decimal_step() const noexcept {
+        return static_cast<double>(current_step());
+    }
+
     [[nodiscard]] virtual bool get_property(
         std::string_view name,
         ScriptValue& value,
@@ -117,6 +124,8 @@ public:
     [[nodiscard]] std::int64_t current_beat() const noexcept override;
     [[nodiscard]] std::int64_t current_step() const noexcept override;
     [[nodiscard]] std::int64_t current_section() const noexcept override;
+    [[nodiscard]] double current_decimal_beat() const noexcept override;
+    [[nodiscard]] double current_decimal_step() const noexcept override;
 
     [[nodiscard]] bool get_property(
         std::string_view name,

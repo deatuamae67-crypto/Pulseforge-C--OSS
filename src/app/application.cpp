@@ -1224,6 +1224,17 @@ private:
                 ) / 16.0
             );
         }
+        [[nodiscard]] double current_decimal_beat() const noexcept override {
+            return application_.gameplay_timing().beat_at(
+                application_.gameplay_song_time_ms()
+            );
+        }
+        [[nodiscard]] double current_decimal_step() const noexcept override {
+            return application_.gameplay_timing().step_at(
+                application_.gameplay_song_time_ms()
+            );
+        }
+
         [[nodiscard]] bool get_property(
             std::string_view name,
             ScriptValue& value,
@@ -9301,6 +9312,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
         // PULSEFORGE_P1_1_3_UI_INPUT_V1
         else if (name == "screenWidth") value = static_cast<double>(logical_width);
         else if (name == "screenHeight") value = static_cast<double>(logical_height);
+        else if (name == "bfHit" || name == "daHit") value = false;
         else if (name == "crochet" || name == "stepCrochet") {
             const double bpm = gameplay_timing().bpm_at(gameplay_song_time_ms());
             const double crochet = std::isfinite(bpm) && bpm > 0.0
@@ -11268,8 +11280,12 @@ if (name == "setBlendMode") {
         if (name == "setScrollFactor" || name == "setLuaSpriteScrollFactor") {
             std::string_view tag;
             double x{1.0}, y{1.0};
-            if (!string_arg(0U, tag) || !number_arg(1U, x)) {
-                error = "setScrollFactor/setLuaSpriteScrollFactor expects tag, x, y";
+            if (!string_arg(0U, tag)) {
+                error = "setScrollFactor/setLuaSpriteScrollFactor expects a tag";
+                return false;
+            }
+            if (arguments.size() > 1U && !number_arg(1U, x)) {
+                error = "setScrollFactor/setLuaSpriteScrollFactor x must be a finite number";
                 return false;
             }
             if (arguments.size() > 2U) {
@@ -12705,6 +12721,37 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
             static_cast<void>(scene_->script_set_wavy_effect(tag, 0.0, 0.0, 0.0));
             static_cast<void>(scene_->script_remove_shader(tag));
             result = true;
+            error.clear();
+            return true;
+        }
+
+        // PULSEFORGE_1_0_0_OVERKILL_GLITCH_COMPAT_V1
+        if (name == "addGlitchEffect") {
+            std::string_view tag;
+            double intensity{}, frequency{}, speed{};
+            if (!string_arg(0U, tag)) {
+                error = "addGlitchEffect expects a sprite tag";
+                return false;
+            }
+            if (arguments.size() > 1U && !number_arg(1U, intensity)) {
+                error = "addGlitchEffect intensity must be a finite number";
+                return false;
+            }
+            if (arguments.size() > 2U && !number_arg(2U, frequency)) {
+                error = "addGlitchEffect frequency must be a finite number";
+                return false;
+            }
+            if (arguments.size() > 3U && !number_arg(3U, speed)) {
+                error = "addGlitchEffect speed must be a finite number";
+                return false;
+            }
+            const double amplitude = std::clamp(intensity * 0.01, -0.12, 0.12);
+            if (scene_ == nullptr || !scene_->script_set_wavy_effect(
+                    tag, amplitude, frequency, speed
+                )) {
+                error = "addGlitchEffect sprite tag was not found";
+                return false;
+            }
             error.clear();
             return true;
         }

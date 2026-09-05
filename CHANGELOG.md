@@ -12,6 +12,7 @@ All notable public PulseForge changes are documented in this file.
 
 ### Fixed
 
+- Adds Overkill/Timeless Lua compatibility: `addGlitchEffect` receives a bounded renderer-native fallback, `setScrollFactor(tag)` accepts Psych's omitted factors, and fractional `curDecBeat`/`curDecStep` globals are available.
 - Isolates executable Psych/Denpa/SC:R Lua discovery to the selected content/mod roots. Unrelated sibling mods can no longer inject `onStartCountdown()` / `Function_Stop` into the active SC:R chart and freeze gameplay at `t=0`.
 - Keeps broad fallback discovery for non-executable content while explicitly disabling sibling stock-provider injection for executable script discovery.
 
