@@ -10,7 +10,7 @@ body:
     id: version
     attributes:
       label: PulseForge version or commit
-      placeholder: "0.9.7 / commit SHA"
+      placeholder: "1.0.0 / commit SHA"
     validations:
       required: true
   - type: dropdown

@@ -1,0 +1,15 @@
+# PulseForge 1.0.0
+
+PulseForge 1.0.0 is the definitive stable release following the 0.9.7 pre-release.
+
+## Highlights
+
+- Complete 27-pack authoritative engine mod corpus distributed as checksummed GitHub release content assets.
+- SC:R / SCReboot gameplay-start freeze fixed by isolating executable script discovery to the selected mod/content roots.
+- Existing cross-platform engine targets retained: Windows x86_64, Linux x86_64, macOS x86_64, macOS arm64 and Android arm64.
+- Huge-chart PFC1/streaming behavior retained; large source charts are not forced through materializing loaders or Git blobs.
+- Discord Social SDK remains an optional private dependency; proprietary SDK files are not redistributed in the OSS repository or public no-SDK builds.
+
+## Distribution
+
+The core platform packages and all mod-content packages are built/packaged from the final 1.0.0 source/provenance chain. Android CI output remains test-signed and macOS CI output remains ad-hoc signed unless separate production identities are supplied.

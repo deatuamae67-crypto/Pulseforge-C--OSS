@@ -74,8 +74,8 @@ android {
         applicationId = 'org.pulseforge.engine'
         minSdk = discordSdkEnabled ? 24 : 21
         targetSdk = 35
-        versionCode = 90700
-        versionName = '0.9.7'
+        versionCode = 100000
+        versionName = '1.0.0'
         manifestPlaceholders = [
             discordApplicationId: discordApplicationId,
             discordActivityEnabled: discordSdkEnabled.toString()

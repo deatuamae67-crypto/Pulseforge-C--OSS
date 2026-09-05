@@ -1,4 +1,4 @@
-# PulseForge C++ OSS 0.9.7
+# PulseForge C++ OSS 1.0.0
 
 [![Cross-platform build](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/build-validation.yml/badge.svg?branch=main)](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/build-validation.yml)
 [![Deterministic core tests](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/core-tests-validation.yml/badge.svg?branch=main)](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/actions/workflows/core-tests-validation.yml)

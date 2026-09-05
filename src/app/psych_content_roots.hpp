@@ -182,6 +182,49 @@ inline void append_asset_layers(
 
 }  // namespace psych_content_roots_detail
 
+// PULSEFORGE_1_0_0_SELECTED_SCRIPT_ROOT_ISOLATION_V1
+// Executable script discovery is deliberately narrower than visual/content
+// fallback discovery. When the launcher selected a concrete mod or content
+// root, only that selection may contribute Lua. This prevents an unrelated
+// sibling mod from returning Function_Stop from onStartCountdown() and holding
+// the active chart at t=0. Direct CLI launches without a catalog selection keep
+// the legacy caller-provided root set.
+[[nodiscard]] inline std::vector<std::filesystem::path>
+select_psych_executable_roots(
+    const std::span<const std::filesystem::path> content_roots,
+    const std::filesystem::path& selected_content_root,
+    const std::filesystem::path& selected_mod_root
+) {
+    using namespace psych_content_roots_detail;
+
+    std::vector<std::filesystem::path> result;
+    result.reserve(content_roots.size() + 2U);
+    std::unordered_set<std::string> keys;
+    keys.reserve(content_roots.size() * 2U + 5U);
+
+    const auto append = [&](const std::filesystem::path& candidate) {
+        if (candidate.empty()) return;
+        const auto normalized = normalize_path(candidate);
+        const auto candidate_key = path_key(normalized);
+        if (candidate_key.empty() || keys.contains(candidate_key)) return;
+        keys.insert(candidate_key);
+        result.push_back(normalized);
+    };
+
+    if (!selected_mod_root.empty()) {
+        append(selected_content_root);
+        append(selected_mod_root);
+        return result;
+    }
+    if (!selected_content_root.empty()) {
+        append(selected_content_root);
+        return result;
+    }
+
+    for (const auto& root : content_roots) append(root);
+    return result;
+}
+
 // Generic Psych/FNF layout expansion.
 // Supported companion layers:
 //   ONE complete sibling stock provider (lowest precedence), then

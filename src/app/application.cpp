@@ -12980,11 +12980,13 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
                 explicit_script_roots.push_back(root);
             }
         };
-        for (const auto& root : options_.content_roots) {
+        for (const auto& root : detail::select_psych_executable_roots(
+                 options_.content_roots,
+                 options_.selected_content_root,
+                 options_.selected_mod_root
+             )) {
             append_explicit_script_root(root);
         }
-        append_explicit_script_root(options_.selected_content_root);
-        append_explicit_script_root(options_.selected_mod_root);
         const auto expanded_script_roots = detail::resolve_psych_content_roots(
             explicit_script_roots,
             64U,

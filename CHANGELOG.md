@@ -2,6 +2,24 @@
 
 All notable public PulseForge changes are documented in this file.
 
+## [1.0.0] - 2026-09-05
+
+### Definitive release
+
+- Promotes PulseForge to the stable `1.0.0` release line; `0.9.7` is retained as the preceding pre-release.
+- Distributes the complete authoritative 27-pack engine mod corpus as separately verifiable release assets instead of bloating Git history with approximately 14.4 GB of static content.
+- Adds a versioned mod-corpus manifest with Drive provenance, default enablement, file counts, unpacked byte counts and deterministic path/size inventory hashes.
+
+### Fixed
+
+- Isolates executable Psych/Denpa/SC:R Lua discovery to the selected content/mod roots. Unrelated sibling mods can no longer inject `onStartCountdown()` / `Function_Stop` into the active SC:R chart and freeze gameplay at `t=0`.
+- Keeps broad fallback discovery for non-executable content while explicitly disabling sibling stock-provider injection for executable script discovery.
+
+### Validation
+
+- Adds a deterministic regression that models the nested `drive-pack-screboot-demo/SCReboot_Demo/bin/assets/shared/data` layout and proves sibling script roots are excluded.
+- Direct CLI launches without a catalog-selected mod retain the existing explicit-root behavior.
+
 ## [0.9.7] - 2026-09-04
 
 ### Added
