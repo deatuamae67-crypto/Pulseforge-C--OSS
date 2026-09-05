@@ -18,12 +18,12 @@ Expected integrated runtime for currently validated paths:
 
 - Windows: `discord_partner_sdk.dll`
 - Linux: `libdiscord_partner_sdk.so`
-- macOS legacy SDK layout: `libdiscord_partner_sdk.dylib` only when deliberately building against an older authorized archive
+- macOS: `libdiscord_partner_sdk.dylib` from the current authorized Social SDK 1.10.19337 package, with a bundle-local runtime search path
 - Android: Discord AAR/Prefab native runtime embedded by Gradle
 
-Discord Social SDK 1.10 changed macOS distribution to `discord_partner_sdk.framework`. That framework-based PulseForge path is **not release-ready yet** and is tracked in issue #42. After #42 is completed with the authorized framework, the required integrated layout will be `discord_partner_sdk.framework` embedded in `PulseForge.app/Contents/Frameworks` and resolved through a bundle-local `@rpath`.
+The inspected Social SDK 1.10.19337 macOS package also contains `discord_partner_sdk.framework`. Framework-native PulseForge linking/embedding is tracked in issue #42 as an optional packaging enhancement. It is **not** a prerequisite for a Discord-enabled macOS build while the same authorized SDK package provides the validated universal `.dylib` path.
 
-A framework-only macOS SDK must therefore not be treated as an activated/releasable Discord build merely because the setup script detects it.
+If #42's framework path is used, the complete framework must be embedded in `pulseforge.app/Contents/Frameworks` and resolved through `@rpath`; do not copy only the main framework executable because the real 1.10.19337 bundle contains its own nested `Frameworks/libdiscord_krisp.dylib` dependency.
 
 The raw Discord SDK archive, framework, xcframework, DLL, SO, dylib or AAR must not be uploaded as a standalone public artifact.
 
