@@ -1,0 +1,101 @@
+name: Temporary Android toolchain migration
+
+on:
+  push:
+    branches:
+      - maintenance/android-agp-9.4-gradle-9.6
+    paths:
+      - .github/workflows/tmp-android-toolchain-migrate.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout migration branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: maintenance/android-agp-9.4-gradle-9.6
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Regenerate Gradle 9.6 wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x platform/android/gradlew
+          cd platform/android
+          ./gradlew --no-daemon --stacktrace wrapper \
+            --gradle-version 9.6.0 \
+            --distribution-type bin
+          ./gradlew --no-daemon --version
+          sha256sum gradle/wrapper/gradle-wrapper.jar
+          test "$(sha256sum gradle/wrapper/gradle-wrapper.jar | awk '{print $1}')" = "497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7"
+          grep -F 'gradle-9.6.0-bin.zip' gradle/wrapper/gradle-wrapper.properties
+          grep -F 'distributionSha256Sum=bbaeb2fef8710818cf0e261201dab964c572f92b942812df0c3620d62a529a01' gradle/wrapper/gradle-wrapper.properties
+
+      - name: Update Android Build Tools in CI and packaging
+        shell: python
+        run: |
+          from pathlib import Path
+
+          paths = [
+              Path('.github/workflows/build-validation.yml'),
+              Path('.github/workflows/release-artifacts.yml'),
+          ]
+          replacements = {
+              "'build-tools;35.0.0'": "'build-tools;36.0.0'",
+              '/build-tools/35.0.0/': '/build-tools/36.0.0/',
+          }
+          for path in paths:
+              text = path.read_text(encoding='utf-8')
+              before = text
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              if text == before:
+                  raise SystemExit(f'No Android Build Tools change applied to {path}')
+              if 'build-tools;35.0.0' in text or '/build-tools/35.0.0/' in text:
+                  raise SystemExit(f'Legacy Build Tools 35 reference remains in {path}')
+              path.write_text(text, encoding='utf-8', newline='\n')
+
+      - name: Stage constrained migration outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -- \
+            platform/android/gradlew \
+            platform/android/gradlew.bat \
+            platform/android/gradle/wrapper/gradle-wrapper.jar \
+            platform/android/gradle/wrapper/gradle-wrapper.properties \
+            .github/workflows/build-validation.yml \
+            .github/workflows/release-artifacts.yml
+          git diff --cached --check
+          mapfile -t changed < <(git diff --cached --name-only | sort)
+          printf '%s\n' "${changed[@]}"
+          allowed=$(cat <<'EOF'
+.github/workflows/build-validation.yml
+.github/workflows/release-artifacts.yml
+platform/android/gradle/wrapper/gradle-wrapper.jar
+platform/android/gradle/wrapper/gradle-wrapper.properties
+platform/android/gradlew
+platform/android/gradlew.bat
+EOF
+          )
+          test "$(printf '%s\n' "${changed[@]}")" = "$allowed"
+
+      - name: Commit regenerated wrapper and Build Tools update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build(android): regenerate Gradle 9.6 wrapper and CI tools"
+          git push origin HEAD:maintenance/android-agp-9.4-gradle-9.6
