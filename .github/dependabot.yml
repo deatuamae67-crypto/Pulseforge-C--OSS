@@ -16,8 +16,23 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      android-build-dependencies:
+      android-toolchain:
+        patterns:
+          - "com.android.tools.build:gradle"
+          - "gradle-wrapper"
+        update-types:
+          - "minor"
+          - "patch"
+      android-libraries:
         patterns:
           - "*"
         exclude-patterns:
+          - "com.android.tools.build:gradle"
           - "gradle-wrapper"
+    ignore:
+      - dependency-name: "com.android.tools.build:gradle"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "gradle-wrapper"
+        update-types:
+          - "version-update:semver-major"
