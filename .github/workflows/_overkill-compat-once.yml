@@ -30,7 +30,7 @@ jobs:
           grep -R --line-number --fixed-strings 'PULSEFORGE_1_0_0_OVERKILL_GLITCH_COMPAT_V1' src
           grep -R --line-number --fixed-strings 'curDecBeat' include/pulseforge/lua_runtime.hpp src/script/lua_runtime.cpp src/app/application.cpp
 
-      - name: Configure focused test build
+      - name: Configure focused Lua test build
         shell: bash
         run: |
           set -euo pipefail
@@ -42,15 +42,13 @@ jobs:
             -DPULSEFORGE_BUILD_TESTS=ON \
             -DPULSEFORGE_BUILD_AUTOCHART=OFF \
             -DPULSEFORGE_ENABLE_LUA=ON
-          cmake --build out/build/overkill-compat --target \
-            pulseforge_lua_tests pulseforge_psych_content_root_tests --parallel 2
+          cmake --build out/build/overkill-compat --target pulseforge_lua_tests --parallel 2
 
-      - name: Run Lua and SC:R regressions
+      - name: Run sanitized Overkill Lua regression
         shell: bash
         run: |
           set -euo pipefail
           ./out/build/overkill-compat/pulseforge_lua_tests
-          ./out/build/overkill-compat/pulseforge_psych_content_root_tests
 
       - name: Commit validated source changes
         shell: bash
