@@ -1,0 +1,342 @@
+name: PulseForge synthetic Discord SDK integration validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - CMakeLists.txt
+      - src/app/discord_presence.cpp
+      - src/app/discord_presence.hpp
+      - platform/android/**
+      - scripts/generate-discord-sdk-fixture.py
+      - .github/workflows/discord-sdk-synthetic-integration.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  linux-sdk-enabled:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 1
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
+
+      - name: Build synthetic Linux SDK runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$RUNNER_TEMP/discord-sdk-fixture"
+          python3 scripts/generate-discord-sdk-fixture.py --output "$sdk"
+          mkdir -p "$sdk/lib/release"
+          cc -shared -fPIC "$sdk/fixture_runtime.c" \
+            -Wl,-soname,libdiscord_partner_sdk.so \
+            -o "$sdk/lib/release/libdiscord_partner_sdk.so"
+          file "$sdk/lib/release/libdiscord_partner_sdk.so"
+
+      - name: Configure and build SDK-enabled Linux targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          sdk="$RUNNER_TEMP/discord-sdk-fixture"
+          cmake --preset linux-release \
+            -DPULSEFORGE_DISCORD_SDK_ROOT="$sdk" \
+            -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON \
+            -DPULSEFORGE_DISCORD_APPLICATION_ID=1 \
+            -DPULSEFORGE_BUILD_TESTS=ON \
+            2>&1 | tee linux-discord-configure.log
+          grep -F 'PulseForge Discord Social SDK: desktop enabled' \
+            linux-discord-configure.log
+          cmake --build --preset linux-release \
+            --target pulseforge pulseforge_discord_presence_tests \
+            2>&1 | tee linux-discord-build.log
+
+      - name: Verify Linux loader dependency and focused behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$RUNNER_TEMP/discord-sdk-fixture"
+          exe="out/build/linux-release/pulseforge"
+          test -x "$exe"
+          test -f "$(dirname "$exe")/libdiscord_partner_sdk.so"
+          readelf -d "$exe" | tee linux-discord-dynamic.txt
+          grep -F 'libdiscord_partner_sdk.so' linux-discord-dynamic.txt
+          grep -E '\$ORIGIN|ORIGIN' linux-discord-dynamic.txt
+          LD_LIBRARY_PATH="$sdk/lib/release:${LD_LIBRARY_PATH:-}" \
+            ctest --test-dir out/build/linux-release \
+              -R '^pulseforge\.discord_presence$' \
+              --output-on-failure --no-tests=error \
+              2>&1 | tee linux-discord-test.log
+
+  windows-sdk-enabled:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 1
+
+      - name: Build synthetic Windows SDK runtime and import library
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = Join-Path $env:RUNNER_TEMP 'discord-sdk-fixture'
+          python scripts/generate-discord-sdk-fixture.py --output $sdk
+          $fixture = Join-Path $env:RUNNER_TEMP 'discord-sdk-runtime-project'
+          New-Item -ItemType Directory -Force -Path $fixture | Out-Null
+          @'
+          cmake_minimum_required(VERSION 3.24)
+          project(DiscordSdkFixture LANGUAGES C)
+          add_library(discord_partner_sdk SHARED "${FIXTURE_SOURCE}")
+          set_target_properties(discord_partner_sdk PROPERTIES
+              OUTPUT_NAME "discord_partner_sdk"
+              RUNTIME_OUTPUT_DIRECTORY_RELEASE "${SDK_BIN}"
+              ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${SDK_LIB}"
+          )
+          '@ | Set-Content -Encoding UTF8 (Join-Path $fixture 'CMakeLists.txt')
+          $source = (Join-Path $sdk 'fixture_runtime.c').Replace('\','/')
+          $bin = (Join-Path $sdk 'bin/release').Replace('\','/')
+          $lib = (Join-Path $sdk 'lib/release').Replace('\','/')
+          cmake -S $fixture -B (Join-Path $fixture 'build') -A x64 `
+            "-DFIXTURE_SOURCE=$source" "-DSDK_BIN=$bin" "-DSDK_LIB=$lib"
+          cmake --build (Join-Path $fixture 'build') --config Release
+          Get-Item (Join-Path $sdk 'bin/release/discord_partner_sdk.dll')
+          Get-Item (Join-Path $sdk 'lib/release/discord_partner_sdk.lib')
+
+      - name: Configure and build SDK-enabled Windows targets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = Join-Path $env:RUNNER_TEMP 'discord-sdk-fixture'
+          cmake --preset windows-msvc `
+            "-DPULSEFORGE_DISCORD_SDK_ROOT=$sdk" `
+            -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON `
+            -DPULSEFORGE_DISCORD_APPLICATION_ID=1 `
+            -DPULSEFORGE_BUILD_TESTS=ON 2>&1 |
+            Tee-Object -FilePath windows-discord-configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Select-String -Path windows-discord-configure.log `
+            -SimpleMatch 'PulseForge Discord Social SDK: desktop shared-library enabled'
+          cmake --build --preset windows-release `
+            --target pulseforge_cli pulseforge_discord_presence_tests 2>&1 |
+            Tee-Object -FilePath windows-discord-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Windows loader dependency and focused behavior
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = Join-Path $env:RUNNER_TEMP 'discord-sdk-fixture'
+          $exe = Get-ChildItem out/build/msvc -Recurse -Filter pulseforge-cli.exe |
+            Select-Object -First 1
+          if ($null -eq $exe) { throw 'pulseforge-cli.exe not found' }
+          $packagedDll = Join-Path $exe.DirectoryName 'discord_partner_sdk.dll'
+          if (-not (Test-Path $packagedDll)) { throw 'Discord fixture DLL was not packaged beside pulseforge-cli.exe' }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw 'vswhere.exe not found' }
+          $vsPath = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vsPath) { throw 'Visual Studio C++ installation not found' }
+          $dumpbin = Get-ChildItem (Join-Path $vsPath 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe') |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $dumpbin) { throw 'dumpbin.exe not found' }
+          & $dumpbin.FullName /DEPENDENTS $exe.FullName |
+            Tee-Object -FilePath windows-discord-dependents.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Select-String -Path windows-discord-dependents.txt -SimpleMatch 'discord_partner_sdk.dll'
+          $env:PATH = (Join-Path $sdk 'bin/release') + ';' + $env:PATH
+          ctest --test-dir out/build/msvc -C Release `
+            -R '^pulseforge\.discord_presence$' `
+            --output-on-failure --no-tests=error 2>&1 |
+            Tee-Object -FilePath windows-discord-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  android-sdk-enabled:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      - name: Install Android SDK, NDK and CMake
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager \
+            'platforms;android-35' \
+            'build-tools;36.0.0' \
+            'ndk;28.2.13676358' \
+            'cmake;3.31.6'
+
+      - name: Build synthetic Prefab AAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$RUNNER_TEMP/discord-sdk-fixture"
+          aar_root="$RUNNER_TEMP/discord-aar-root"
+          aar="$RUNNER_TEMP/discord_partner_sdk-fixture.aar"
+          python3 scripts/generate-discord-sdk-fixture.py --output "$sdk"
+          rm -rf "$aar_root" "$aar"
+          mkdir -p \
+            "$aar_root/prefab/modules/discord_partner_sdk/include" \
+            "$aar_root/prefab/modules/discord_partner_sdk/libs/android.arm64-v8a" \
+            "$aar_root/jni/arm64-v8a"
+          cp "$sdk/include/discordpp.h" "$sdk/include/cdiscord.h" \
+            "$aar_root/prefab/modules/discord_partner_sdk/include/"
+
+          ndk="$ANDROID_HOME/ndk/28.2.13676358"
+          cc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          "$cc" -shared -fPIC "$sdk/fixture_runtime.c" \
+            -Wl,-soname,libdiscord_partner_sdk.so \
+            -o "$aar_root/prefab/modules/discord_partner_sdk/libs/android.arm64-v8a/libdiscord_partner_sdk.so"
+          cp "$aar_root/prefab/modules/discord_partner_sdk/libs/android.arm64-v8a/libdiscord_partner_sdk.so" \
+            "$aar_root/jni/arm64-v8a/libdiscord_partner_sdk.so"
+
+          cat > "$aar_root/AndroidManifest.xml" <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.pulseforge.ci.discordfixture" />
+          EOF
+          cat > "$aar_root/prefab/prefab.json" <<'EOF'
+          {
+            "schema_version": 2,
+            "name": "discord_partner_sdk",
+            "version": "1.10.19337",
+            "dependencies": []
+          }
+          EOF
+          cat > "$aar_root/prefab/modules/discord_partner_sdk/module.json" <<'EOF'
+          {
+            "export_libraries": [],
+            "library_name": "libdiscord_partner_sdk"
+          }
+          EOF
+          cat > "$aar_root/prefab/modules/discord_partner_sdk/libs/android.arm64-v8a/abi.json" <<'EOF'
+          {
+            "abi": "arm64-v8a",
+            "api": 21,
+            "ndk": 27,
+            "stl": "none",
+            "static": false
+          }
+          EOF
+
+          java_src="$RUNNER_TEMP/discord-java-src/com/discord/socialsdk"
+          java_classes="$RUNNER_TEMP/discord-java-classes"
+          mkdir -p "$java_src" "$java_classes"
+          cat > "$java_src/DiscordSocialSdkInit.java" <<'EOF'
+          package com.discord.socialsdk;
+          public final class DiscordSocialSdkInit {
+              private DiscordSocialSdkInit() {}
+              public static void setEngineActivity(android.app.Activity activity) {}
+          }
+          EOF
+          cat > "$java_src/AuthenticationActivity.java" <<'EOF'
+          package com.discord.socialsdk;
+          public class AuthenticationActivity extends android.app.Activity {
+              public static void authorize(android.app.Activity activity, String scheme) {}
+          }
+          EOF
+          javac -source 8 -target 8 \
+            -cp "$ANDROID_HOME/platforms/android-35/android.jar" \
+            -d "$java_classes" \
+            "$java_src/DiscordSocialSdkInit.java" \
+            "$java_src/AuthenticationActivity.java"
+          jar cf "$aar_root/classes.jar" -C "$java_classes" .
+
+          python3 - "$aar_root" "$aar" <<'PY'
+          import pathlib, sys, zipfile
+          root = pathlib.Path(sys.argv[1])
+          output = pathlib.Path(sys.argv[2])
+          with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+              for path in sorted(root.rglob('*')):
+                  if path.is_file():
+                      zf.write(path, path.relative_to(root).as_posix())
+          PY
+          unzip -l "$aar"
+
+      - name: Assemble real PulseForge Discord-enabled APK path
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          aar="$RUNNER_TEMP/discord_partner_sdk-fixture.aar"
+          android_build_root="$RUNNER_TEMP/pulseforge-android-build"
+          chmod +x platform/android/gradlew
+          cd platform/android
+          ./gradlew --no-daemon --stacktrace \
+            -PPULSEFORGE_ANDROID_BUILD_ROOT="$android_build_root" \
+            -PPULSEFORGE_DISCORD_SDK_AAR="$aar" \
+            -PdiscordApplicationId=1 \
+            assembleRelease \
+            2>&1 | tee "$GITHUB_WORKSPACE/android-discord-sdk-build.log"
+
+      - name: Verify Android APK native dependency, Prefab activation and Java surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find "$RUNNER_TEMP/pulseforge-android-build/gradle" -type f -name '*release*.apk' | head -n1)"
+          if [[ -z "$apk" ]]; then
+            echo 'Release APK not found.' >&2
+            exit 1
+          fi
+          unzip -l "$apk" | tee android-discord-apk-list.txt
+          grep -F 'lib/arm64-v8a/libmain.so' android-discord-apk-list.txt
+          grep -F 'lib/arm64-v8a/libdiscord_partner_sdk.so' android-discord-apk-list.txt
+
+          extract="$RUNNER_TEMP/android-discord-apk"
+          rm -rf "$extract"
+          mkdir -p "$extract"
+          unzip -q "$apk" 'lib/arm64-v8a/libmain.so' -d "$extract"
+          readelf -d "$extract/lib/arm64-v8a/libmain.so" | tee android-discord-main-dynamic.txt
+          grep -F 'libdiscord_partner_sdk.so' android-discord-main-dynamic.txt
+
+          apkanalyzer manifest min-sdk "$apk" | tee android-discord-min-sdk.txt
+          grep -Fx '24' android-discord-min-sdk.txt
+          apkanalyzer manifest print "$apk" | tee android-discord-manifest.txt
+          grep -F 'com.discord.socialsdk.AuthenticationActivity' android-discord-manifest.txt
+          grep -F 'discord-1' android-discord-manifest.txt
+
+          unzip -p "$apk" 'classes*.dex' | strings | \
+            grep -F 'Lcom/discord/socialsdk/DiscordSocialSdkInit;' >/dev/null
