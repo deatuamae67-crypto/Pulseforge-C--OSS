@@ -111,7 +111,11 @@ try {
     Write-Host ''
     Write-Host 'Next: set a real Discord Application ID either in assets/settings.json or at configure time:'
     Write-Host '  cmake -S . -B build -DPULSEFORGE_DISCORD_APPLICATION_ID=123456789012345678'
-    Write-Host 'PulseForge will auto-detect this SDK root on the next CMake configure.'
+    if ($null -ne $macFramework -and -not (Test-Path $macDylib)) {
+        Write-Host 'Note: the Social SDK 1.10 macOS framework was staged successfully, but PulseForge framework linking/embedding must be validated before using this package for a Discord-enabled macOS build.' -ForegroundColor Yellow
+    } else {
+        Write-Host 'PulseForge auto-detects the currently supported desktop library layout on the next CMake configure.'
+    }
 
     if ($OpenDeveloperPortal) {
         Start-Process 'https://discord.com/developers/applications'
