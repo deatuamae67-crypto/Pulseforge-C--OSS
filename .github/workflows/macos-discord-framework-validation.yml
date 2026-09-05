@@ -128,9 +128,8 @@ jobs:
             BUILD_RPATH "@executable_path/../Frameworks")
           set_property(TARGET fixture APPEND PROPERTY
             INSTALL_RPATH "@executable_path/../Frameworks")
-          # install(TARGETS ... BUNDLE) installs the complete built app bundle,
-          # including the already embedded framework and its symlinks. A second
-          # install(DIRECTORY framework ...) would duplicate those symlinks.
+          # The BUNDLE install carries the complete already-built .app tree,
+          # including the embedded framework and its Apple symlink layout.
           install(TARGETS fixture BUNDLE DESTINATION .)
           EOF
 
