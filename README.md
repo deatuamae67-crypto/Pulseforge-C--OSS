@@ -42,8 +42,8 @@ updates must be signed with the project owner's persistent private keystore.
 
 Local Windows builds use CMake 3.24+, Visual Studio 2022/2026 and the
 `windows-msvc` preset. Linux and macOS use Ninja through their named presets.
-Android requires JDK 17, SDK 35, Build Tools 35.0.0, NDK 28.2.13676358 and
-CMake 3.31.6.
+Android uses Android Gradle Plugin 9.4.0 with the Gradle 9.6.0 wrapper and
+requires JDK 17, SDK 35, Build Tools 36.0.0, NDK 28.2.13676358 and CMake 3.31.6.
 
 ```text
 cmake --preset windows-msvc

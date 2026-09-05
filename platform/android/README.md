@@ -1,15 +1,17 @@
 # PulseForge Android
 
 This directory is an SDL3/Gradle host for the production C++ runtime. The
-release ABI is `arm64-v8a`, with Android API 21 as the minimum without Discord, API 24 when the Discord Social SDK is bundled, and API 35 as the
-target. Gradle builds `libSDL3.so` and PulseForge as `libmain.so`, then packages
-the Java bootstrap, native libraries and portable engine assets into one APK.
-The current delivery is `0.9.7` (`versionCode 90700`).
+release ABI is `arm64-v8a`, with Android API 21 as the minimum without Discord,
+API 24 when the Discord Social SDK is bundled, and API 35 as the target. Gradle
+builds `libSDL3.so` and PulseForge as `libmain.so`, then packages the Java
+bootstrap, native libraries and portable engine assets into one APK. The
+current delivery is `0.9.7` (`versionCode 90700`).
 
 ## Build
 
-Install JDK 17 plus Android SDK platform 35, Build Tools 35.0.0, CMake 3.31.6
-and NDK 28.2.13676358. Then run from the repository root. On Windows:
+The Android project uses Android Gradle Plugin 9.4.0 with the Gradle 9.6.0
+wrapper. Install JDK 17 plus Android SDK platform 35, Build Tools 36.0.0, CMake
+3.31.6 and NDK 28.2.13676358. Then run from the repository root. On Windows:
 
 ```powershell
 .\scripts\build-android-release.ps1
