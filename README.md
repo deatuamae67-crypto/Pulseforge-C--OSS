@@ -14,9 +14,9 @@ responsive input and predictable gameplay. Judgement is kept independent from
 rendering FPS, while charts are normalized into a canonical runtime model that
 can be consumed either conventionally or through the PFC1 streaming pipeline.
 
-The project is designed to remain useful as it evolves: release-specific notes
-live under [`docs/`](docs/) and on the GitHub Releases page, while this README
-describes the engine itself rather than a single version.
+This README describes the engine itself rather than a particular release.
+Version-specific changes, compatibility snapshots and provenance records live
+under [`docs/`](docs/) and on the [GitHub Releases](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/releases) page.
 
 ## Highlights
 
@@ -51,9 +51,9 @@ describes the engine itself rather than a single version.
 
 Prebuilt packages and checksums are published on the
 [Releases](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/releases)
-page. Android CI packages use an ephemeral testing certificate unless a
-separate production signing identity is supplied; macOS CI packaging is
-similarly distinct from production notarization.
+page. Android CI packages use a testing certificate unless a separate
+production signing identity is supplied; macOS CI packaging is similarly
+distinct from production notarization.
 
 ## Content and mod support
 
@@ -63,12 +63,10 @@ Lua callbacks, supported Psych-style helpers, media routing and gameplay
 startup behavior without requiring third-party mods to be committed to this
 repository.
 
-The historical compatibility corpus is tracked through deterministic manifests
-and regression fixtures rather than mirroring third-party payloads. See:
-
-- [`docs/MOD_COMPATIBILITY_CORPUS_1.0.0.md`](docs/MOD_COMPATIBILITY_CORPUS_1.0.0.md)
-- [`docs/DEVCORE_COMPLETENESS_1.0.0.md`](docs/DEVCORE_COMPLETENESS_1.0.0.md)
-- [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md)
+Historical compatibility corpora are tracked through deterministic manifests
+and regression fixtures rather than mirroring third-party payloads. Current and
+past compatibility records are kept in [`docs/`](docs/); the public/private
+boundary is defined in [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md).
 
 Menu/pause music, startup intros, credit portraits and visualizer media remain
 supported as local extension points. Commercial music, videos, proprietary SDK
@@ -79,7 +77,7 @@ relicensed by PulseForge.
 
 ### Windows
 
-Requirements include CMake 3.24+ and a supported Visual Studio C++ toolchain.
+Use the supported Visual Studio C++ toolchain and the repository CMake preset:
 
 ```text
 cmake --preset windows-msvc
@@ -89,7 +87,7 @@ cmake --build --preset windows-release
 ### Linux
 
 The Linux preset uses Ninja and the platform development libraries required by
-SDL3.
+SDL3:
 
 ```text
 cmake --preset linux-release
@@ -105,8 +103,9 @@ cmake --build --preset macos-release
 
 ### Android
 
-The Android project uses the Gradle wrapper under `platform/android/` with JDK
-17, Android SDK 35, Build Tools 36.0.0, NDK 28.2.13676358 and CMake 3.31.6.
+The Android project uses the Gradle wrapper under `platform/android/`. Required
+SDK, NDK, CMake, Gradle and JDK versions are maintained in the Android project
+and release requirements rather than duplicated here.
 
 Dependencies used by the native build are pinned, and fetched archives are
 hash-checked during configuration.
@@ -149,14 +148,14 @@ The public repository intentionally excludes secrets, signing identities,
 proprietary Discord SDK packages, commercial media, private mod collections,
 build caches and historical backup payloads.
 
-See [`THIRD_PARTY.md`](THIRD_PARTY.md) and
-[`docs/RELEASE_REQUIREMENTS.md`](docs/RELEASE_REQUIREMENTS.md) for the detailed
-redistribution and release boundary.
+See [`THIRD_PARTY.md`](THIRD_PARTY.md), [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md)
+and [`docs/RELEASE_REQUIREMENTS.md`](docs/RELEASE_REQUIREMENTS.md) for the
+detailed redistribution and release boundary.
 
 ## Releases and development
 
 - **Downloads:** [GitHub Releases](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/releases)
-- **Release notes:** [`docs/`](docs/)
+- **Documentation:** [`docs/`](docs/)
 - **Issues:** [GitHub Issues](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/issues)
 - **Source:** [`main`](https://github.com/deatuamae67-crypto/Pulseforge-C--OSS/tree/main)
 
