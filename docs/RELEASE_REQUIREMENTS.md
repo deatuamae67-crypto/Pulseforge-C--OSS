@@ -14,13 +14,16 @@ Release CI must configure with:
 
 and must verify the packaged runtime before upload.
 
-Expected integrated runtime:
+Expected integrated runtime for currently validated paths:
 
 - Windows: `discord_partner_sdk.dll`
 - Linux: `libdiscord_partner_sdk.so`
-- macOS Social SDK 1.10+: `discord_partner_sdk.framework` embedded in `PulseForge.app/Contents/Frameworks` and resolved through a bundle-local `@rpath`
 - macOS legacy SDK layout: `libdiscord_partner_sdk.dylib` only when deliberately building against an older authorized archive
 - Android: Discord AAR/Prefab native runtime embedded by Gradle
+
+Discord Social SDK 1.10 changed macOS distribution to `discord_partner_sdk.framework`. That framework-based PulseForge path is **not release-ready yet** and is tracked in issue #42. After #42 is completed with the authorized framework, the required integrated layout will be `discord_partner_sdk.framework` embedded in `PulseForge.app/Contents/Frameworks` and resolved through a bundle-local `@rpath`.
+
+A framework-only macOS SDK must therefore not be treated as an activated/releasable Discord build merely because the setup script detects it.
 
 The raw Discord SDK archive, framework, xcframework, DLL, SO, dylib or AAR must not be uploaded as a standalone public artifact.
 
