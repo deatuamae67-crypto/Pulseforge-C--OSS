@@ -78,18 +78,16 @@ jobs:
             .github/workflows/build-validation.yml \
             .github/workflows/release-artifacts.yml
           git diff --cached --check
-          mapfile -t changed < <(git diff --cached --name-only | sort)
-          printf '%s\n' "${changed[@]}"
-          allowed=$(cat <<'EOF'
-.github/workflows/build-validation.yml
-.github/workflows/release-artifacts.yml
-platform/android/gradle/wrapper/gradle-wrapper.jar
-platform/android/gradle/wrapper/gradle-wrapper.properties
-platform/android/gradlew
-platform/android/gradlew.bat
-EOF
-          )
-          test "$(printf '%s\n' "${changed[@]}")" = "$allowed"
+          actual="$(git diff --cached --name-only | sort)"
+          expected="$(printf '%s\n' \
+            '.github/workflows/build-validation.yml' \
+            '.github/workflows/release-artifacts.yml' \
+            'platform/android/gradle/wrapper/gradle-wrapper.jar' \
+            'platform/android/gradle/wrapper/gradle-wrapper.properties' \
+            'platform/android/gradlew' \
+            'platform/android/gradlew.bat')"
+          printf 'Staged migration outputs:\n%s\n' "$actual"
+          test "$actual" = "$expected"
 
       - name: Commit regenerated wrapper and Build Tools update
         shell: bash
