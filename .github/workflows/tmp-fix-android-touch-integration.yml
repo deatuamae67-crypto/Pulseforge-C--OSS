@@ -29,7 +29,7 @@ jobs:
           text = path.read_text(encoding="utf-8")
 
           replacements = [
-              ("mobile_touch_controls()", "detail::mobile_touch_controls()", 11),
+              ("mobile_touch_controls()", "detail::mobile_touch_controls()", 6),
               ("MobileTouchControlOptions{", "detail::MobileTouchControlOptions{", 1),
               ("MobileTouchContext::", "detail::MobileTouchContext::", 5),
               ("chart_ == nullptr", "!chart_.has_value()", 1),
