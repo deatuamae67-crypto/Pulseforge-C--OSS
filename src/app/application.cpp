@@ -2933,7 +2933,7 @@ private:
             SDL_LOGICAL_PRESENTATION_LETTERBOX
         );
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        mobile_touch_controls().configure(
+        detail::mobile_touch_controls().configure(
             window_,
             renderer_,
             options_.settings.touch,
@@ -2941,10 +2941,10 @@ private:
         );
         // Ready/error acknowledgement screens are menu-like. The first live
         // gameplay frame switches this to lane controls using chart_->key_count.
-        mobile_touch_controls().set_context(
+        detail::mobile_touch_controls().set_context(
             options_.offline_render.enabled
-                ? MobileTouchContext::disabled
-                : MobileTouchContext::menu,
+                ? detail::MobileTouchContext::disabled
+                : detail::MobileTouchContext::menu,
             chart_->key_count
         );
         const bool vsync_configured = SDL_SetRenderVSync(
@@ -3248,12 +3248,12 @@ if (const auto selected_skin = resolve_note_skin_selection(
             // Same SDL renderer is about to return to MenuSession. Preserve the
             // global router/event watch but release all gameplay lanes and put
             // it in menu mode until the launcher refreshes its settings.
-            mobile_touch_controls().set_context(MobileTouchContext::menu);
+            detail::mobile_touch_controls().set_context(detail::MobileTouchContext::menu);
             *return_platform_ = std::move(owned_platform_);
         } else {
             // No owner will adopt this SDL stack; detach the event watch before
             // renderer/window destruction and SDL_Quit.
-            mobile_touch_controls().shutdown();
+            detail::mobile_touch_controls().shutdown();
             owned_platform_.reset();
         }
         renderer_ = nullptr;
@@ -3352,14 +3352,14 @@ if (const auto selected_skin = resolve_note_skin_selection(
     }
 
     void sync_mobile_touch_context() noexcept {
-        if (chart_ == nullptr || options_.offline_render.enabled) {
-            mobile_touch_controls().set_context(MobileTouchContext::disabled);
+        if (!chart_.has_value() || options_.offline_render.enabled) {
+            detail::mobile_touch_controls().set_context(detail::MobileTouchContext::disabled);
             return;
         }
-        mobile_touch_controls().set_context(
+        detail::mobile_touch_controls().set_context(
             (paused_ || result_shown_)
-                ? MobileTouchContext::menu
-                : MobileTouchContext::gameplay,
+                ? detail::MobileTouchContext::menu
+                : detail::MobileTouchContext::gameplay,
             chart_->key_count
         );
     }
