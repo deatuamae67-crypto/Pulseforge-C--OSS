@@ -43,7 +43,8 @@ jobs:
             src/app/psych_content_roots.hpp src/app/application.cpp \
             tests/psych_content_roots_test.cpp \
             docs/MOD_CORPUS_1.0.0.json docs/MOD_CORPUS_1.0.0.md \
-            docs/RELEASE_NOTES_1.0.0.md mods/README.md
+            docs/RELEASE_NOTES_1.0.0.md
+          git add -f mods/README.md
           git diff --cached --quiet && { echo 'No prepared changes were produced.' >&2; exit 1; }
           git commit -m 'release: prepare PulseForge 1.0.0'
           git push origin HEAD:release/v1.0.0-final
