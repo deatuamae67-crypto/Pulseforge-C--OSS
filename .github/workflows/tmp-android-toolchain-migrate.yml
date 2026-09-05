@@ -1,4 +1,4 @@
-name: Temporary Android toolchain migration
+name: Temporary Android wrapper regeneration
 
 on:
   push:
@@ -8,10 +8,10 @@ on:
       - .github/workflows/tmp-android-toolchain-migrate.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  migrate:
+  regenerate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -27,7 +27,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Regenerate Gradle 9.6 wrapper
+      - name: Regenerate and verify Gradle 9.6 wrapper
         shell: bash
         run: |
           set -euo pipefail
@@ -42,36 +42,11 @@ jobs:
             --gradle-version 9.6.0 \
             --distribution-type bin
           ./gradlew --no-daemon --version
-          sha256sum gradle/wrapper/gradle-wrapper.jar
           test "$(sha256sum gradle/wrapper/gradle-wrapper.jar | awk '{print $1}')" = "497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7"
           grep -F 'gradle-9.6.0-bin.zip' gradle/wrapper/gradle-wrapper.properties
           grep -F 'distributionSha256Sum=bbaeb2fef8710818cf0e261201dab964c572f92b942812df0c3620d62a529a01' gradle/wrapper/gradle-wrapper.properties
 
-      - name: Update Android Build Tools in CI and packaging
-        shell: python
-        run: |
-          from pathlib import Path
-
-          paths = [
-              Path('.github/workflows/build-validation.yml'),
-              Path('.github/workflows/release-artifacts.yml'),
-          ]
-          replacements = {
-              "'build-tools;35.0.0'": "'build-tools;36.0.0'",
-              '/build-tools/35.0.0/': '/build-tools/36.0.0/',
-          }
-          for path in paths:
-              text = path.read_text(encoding='utf-8')
-              before = text
-              for old, new in replacements.items():
-                  text = text.replace(old, new)
-              if text == before:
-                  raise SystemExit(f'No Android Build Tools change applied to {path}')
-              if 'build-tools;35.0.0' in text or '/build-tools/35.0.0/' in text:
-                  raise SystemExit(f'Legacy Build Tools 35 reference remains in {path}')
-              path.write_text(text, encoding='utf-8', newline='\n')
-
-      - name: Validate constrained migration outputs
+      - name: Commit only generated wrapper files
         shell: bash
         run: |
           set -euo pipefail
@@ -79,31 +54,17 @@ jobs:
             platform/android/gradlew \
             platform/android/gradlew.bat \
             platform/android/gradle/wrapper/gradle-wrapper.jar \
-            platform/android/gradle/wrapper/gradle-wrapper.properties \
-            .github/workflows/build-validation.yml \
-            .github/workflows/release-artifacts.yml
+            platform/android/gradle/wrapper/gradle-wrapper.properties
           git diff --cached --check
           actual="$(git diff --cached --name-only | sort)"
           expected="$(printf '%s\n' \
-            '.github/workflows/build-validation.yml' \
-            '.github/workflows/release-artifacts.yml' \
             'platform/android/gradle/wrapper/gradle-wrapper.jar' \
             'platform/android/gradle/wrapper/gradle-wrapper.properties' \
             'platform/android/gradlew' \
             'platform/android/gradlew.bat')"
-          printf 'Validated migration outputs:\n%s\n' "$actual"
+          printf 'Generated wrapper outputs:\n%s\n' "$actual"
           test "$actual" = "$expected"
-
-      - name: Upload validated migration outputs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: android-toolchain-migration-outputs
-          path: |
-            .github/workflows/build-validation.yml
-            .github/workflows/release-artifacts.yml
-            platform/android/gradlew
-            platform/android/gradlew.bat
-            platform/android/gradle/wrapper/gradle-wrapper.jar
-            platform/android/gradle/wrapper/gradle-wrapper.properties
-          if-no-files-found: error
-          retention-days: 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build(android): regenerate Gradle 9.6 wrapper"
+          git push origin HEAD:maintenance/android-agp-9.4-gradle-9.6
