@@ -1,0 +1,52 @@
+name: Finalize PulseForge 1.0.0 mod corpus once
+
+on:
+  push:
+    branches:
+      - release/v1.0.0-final
+    paths:
+      - '.github/workflows/_finalize-mod-corpus-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: release/v1.0.0-final
+          fetch-depth: 1
+
+      - name: Apply audited corpus metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/finalize_mod_corpus_1_0_0.py
+          git diff --check
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('docs/MOD_CORPUS_1.0.0.json').read_text())
+          assert m['mod_count'] == 29
+          assert m['file_count'] == 19585
+          assert m['unpacked_bytes'] == 15019576859
+          assert any(x['id']=='taimuresu-spam-amplified' for x in m['mods'])
+          assert any(x['id']=='charts-feitos-no-flp' for x in m['mods'])
+          print('validated', m['mod_count'], m['file_count'], m['unpacked_bytes'])
+          PY
+
+      - name: Commit audited corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/MOD_CORPUS_1.0.0.json docs/MOD_CORPUS_1.0.0.md \
+            docs/RELEASE_NOTES_1.0.0.md CHANGELOG.md
+          git add -f mods/README.md
+          git commit -m 'docs(release): finalize complete 29-mod corpus'
+          git push origin HEAD:release/v1.0.0-final
