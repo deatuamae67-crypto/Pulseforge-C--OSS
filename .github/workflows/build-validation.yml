@@ -39,6 +39,16 @@ jobs:
           cmake --build --preset windows-release 2>&1 | Tee-Object -FilePath windows-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Validate mobile touch controls
+        shell: pwsh
+        run: |
+          cmake --preset windows-msvc -DPULSEFORGE_BUILD_TESTS=ON 2>&1 | Tee-Object -FilePath windows-touch-configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build --preset windows-release --target pulseforge_mobile_touch_controls_tests 2>&1 | Tee-Object -FilePath windows-touch-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir out/build/msvc -C Release -R '^pulseforge\.mobile_touch_controls$' --output-on-failure --no-tests=error 2>&1 | Tee-Object -FilePath windows-touch-test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Inspect Windows binaries
         shell: pwsh
         run: |
@@ -54,6 +64,9 @@ jobs:
           path: |
             windows-configure.log
             windows-build.log
+            windows-touch-configure.log
+            windows-touch-build.log
+            windows-touch-test.log
           if-no-files-found: ignore
           retention-days: 14
 
@@ -92,6 +105,15 @@ jobs:
           set -o pipefail
           cmake --build --preset linux-release 2>&1 | tee linux-build.log
 
+      - name: Validate mobile touch controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          cmake --preset linux-release -DPULSEFORGE_BUILD_TESTS=ON 2>&1 | tee linux-touch-configure.log
+          cmake --build --preset linux-release --target pulseforge_mobile_touch_controls_tests 2>&1 | tee linux-touch-build.log
+          ctest --test-dir out/build/linux-release -R '^pulseforge\.mobile_touch_controls$' --output-on-failure --no-tests=error 2>&1 | tee linux-touch-test.log
+
       - name: Inspect Linux binaries
         shell: bash
         run: |
@@ -105,6 +127,9 @@ jobs:
           path: |
             linux-configure.log
             linux-build.log
+            linux-touch-configure.log
+            linux-touch-build.log
+            linux-touch-test.log
           if-no-files-found: ignore
           retention-days: 14
 
@@ -150,6 +175,17 @@ jobs:
           set -o pipefail
           cmake --build --preset macos-release 2>&1 | tee macos-build.log
 
+      - name: Validate mobile touch controls
+        shell: bash
+        env:
+          CMAKE_OSX_ARCHITECTURES: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES="${CMAKE_OSX_ARCHITECTURES}" -DPULSEFORGE_BUILD_TESTS=ON 2>&1 | tee macos-touch-configure.log
+          cmake --build --preset macos-release --target pulseforge_mobile_touch_controls_tests 2>&1 | tee macos-touch-build.log
+          ctest --test-dir out/build/macos-release -R '^pulseforge\.mobile_touch_controls$' --output-on-failure --no-tests=error 2>&1 | tee macos-touch-test.log
+
       - name: Inspect macOS binaries
         shell: bash
         run: |
@@ -163,6 +199,9 @@ jobs:
           path: |
             macos-configure.log
             macos-build.log
+            macos-touch-configure.log
+            macos-touch-build.log
+            macos-touch-test.log
           if-no-files-found: ignore
           retention-days: 14
 
