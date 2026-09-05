@@ -4,12 +4,17 @@
   "source": {
     "drive_mods_folder_id": "1pAnpn__0pfFe1pMtS-XyenPP5peqIU46",
     "mods_list_sha256": "5eafeac677f4e70082db88a5f71f950107fbede576a20acb37ccbe1f40d8e2bb",
-    "engine_full_filelist_sha256": "37476e5fa488c6bc3b24c511d114dd95b0acb56c31a77217d51154a87515a549"
+    "engine_full_filelist_sha256": "37476e5fa488c6bc3b24c511d114dd95b0acb56c31a77217d51154a87515a549",
+    "inventory_basis": "modsList.txt plus direct Drive mods-root audit for runnable unlisted content",
+    "excluded_non_mod_directories": [
+      ".autochart-staging",
+      "Hellbreaker Remake FLP"
+    ]
   },
-  "mod_count": 27,
-  "enabled_by_default_count": 25,
-  "file_count": 19547,
-  "unpacked_bytes": 14429581335,
+  "mod_count": 29,
+  "enabled_by_default_count": 27,
+  "file_count": 19585,
+  "unpacked_bytes": 15019576859,
   "mods": [
     {
       "id": "drive-library-2026-04-30",
@@ -226,6 +231,26 @@
       "file_count": 7,
       "unpacked_bytes": 3402847,
       "path_size_inventory_sha256": "c07f14d4c7cc05421b57615224d4bbdc5d6e3b9c0834aab3b2faaf2941a34294"
+    },
+    {
+      "id": "taimuresu-spam-amplified",
+      "enabled_by_default": true,
+      "drive_folder_id": "14MFlkrbN6sRJwnqSTwMobRJ5NVoc_VHK",
+      "file_count": 36,
+      "unpacked_bytes": 589994065,
+      "path_size_inventory_sha256": "f57064b2755eff10c4c1567a3af786b40f632faaa666603db2eb7023726c783c",
+      "discovery": "drive-root-audit",
+      "notes": "Runnable Psych-family mod containing Taimuresu_overkill_mode / timeless stage."
+    },
+    {
+      "id": "charts-feitos-no-flp",
+      "enabled_by_default": true,
+      "drive_folder_id": "1Z-g_itHvEMiPnP7XB4Z9Adhu6G4S-Xnp",
+      "file_count": 2,
+      "unpacked_bytes": 1459,
+      "path_size_inventory_sha256": "d0e44b598435c84211f99e044c02528a446ebad708b8b3a5596b148210309f84",
+      "discovery": "drive-root-audit",
+      "notes": "Runnable mod root with mod.json and data directory."
     }
   ]
 }

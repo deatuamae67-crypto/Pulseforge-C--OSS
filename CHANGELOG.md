@@ -7,7 +7,7 @@ All notable public PulseForge changes are documented in this file.
 ### Definitive release
 
 - Promotes PulseForge to the stable `1.0.0` release line; `0.9.7` is retained as the preceding pre-release.
-- Distributes the complete authoritative 27-pack engine mod corpus as separately verifiable release assets instead of bloating Git history with approximately 14.4 GB of static content.
+- Distributes the complete 29-mod runnable engine corpus as separately verifiable release assets instead of bloating Git history with approximately 15.0 GB of static content; a Drive-root audit recovered two runnable mods omitted from the historical `modsList.txt`.
 - Adds a versioned mod-corpus manifest with Drive provenance, default enablement, file counts, unpacked byte counts and deterministic path/size inventory hashes.
 
 ### Fixed
