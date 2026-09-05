@@ -145,6 +145,9 @@ jobs:
               third_party/discord_social_sdk/*)
                 violations+=("$path :: raw Discord Social SDK input must not be tracked")
                 ;;
+              *discord_partner_sdk.framework/*|*discord_partner_sdk.xcframework/*)
+                violations+=("$path :: Discord Social SDK Apple framework bundle must not be redistributed in the OSS repository")
+                ;;
             esac
 
             case "$base" in

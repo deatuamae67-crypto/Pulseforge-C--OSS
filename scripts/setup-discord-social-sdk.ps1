@@ -62,6 +62,8 @@ try {
     $windowsDll = Join-Path $destinationFull 'bin\release\discord_partner_sdk.dll'
     $linuxSo = Join-Path $destinationFull 'lib\release\libdiscord_partner_sdk.so'
     $macDylib = Join-Path $destinationFull 'lib\release\libdiscord_partner_sdk.dylib'
+    $macFramework = Get-ChildItem -LiteralPath $destinationFull -Recurse -Directory -Filter 'discord_partner_sdk.framework' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
 
     if (-not (Test-Path -LiteralPath (Join-Path $include 'discordpp.h'))) {
         throw 'Installed SDK validation failed: include\discordpp.h is missing.'
@@ -91,8 +93,12 @@ try {
     Write-Host ("  Windows import library: {0}" -f (Test-Path $windowsLib))
     Write-Host ("  Windows runtime DLL:   {0}" -f (Test-Path $windowsDll))
     Write-Host ("  Linux shared library:  {0}" -f (Test-Path $linuxSo))
-    Write-Host ("  macOS dylib:            {0}" -f (Test-Path $macDylib))
+    Write-Host ("  macOS 1.10+ framework: {0}" -f ($null -ne $macFramework))
+    Write-Host ("  macOS legacy dylib:    {0}" -f (Test-Path $macDylib))
     Write-Host ("  Android AAR:            {0}" -f (Test-Path (Join-Path $destinationFull 'android\discord_partner_sdk.aar')))
+    if ($null -ne $macFramework) {
+        Write-Host ("  macOS framework path:   {0}" -f $macFramework.FullName.Substring($destinationFull.Length + 1))
+    }
     Write-Host ''
 
     Get-ChildItem -LiteralPath $destinationFull -Recurse -File |
@@ -105,7 +111,11 @@ try {
     Write-Host ''
     Write-Host 'Next: set a real Discord Application ID either in assets/settings.json or at configure time:'
     Write-Host '  cmake -S . -B build -DPULSEFORGE_DISCORD_APPLICATION_ID=123456789012345678'
-    Write-Host 'PulseForge will auto-detect this SDK root on the next CMake configure.'
+    if ($null -ne $macFramework -and -not (Test-Path $macDylib)) {
+        Write-Host 'Note: the Social SDK 1.10 macOS framework was staged successfully, but PulseForge framework linking/embedding must be validated before using this package for a Discord-enabled macOS build.' -ForegroundColor Yellow
+    } else {
+        Write-Host 'PulseForge auto-detects the currently supported desktop library layout on the next CMake configure.'
+    }
 
     if ($OpenDeveloperPortal) {
         Start-Process 'https://discord.com/developers/applications'
