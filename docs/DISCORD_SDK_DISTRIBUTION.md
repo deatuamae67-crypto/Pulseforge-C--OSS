@@ -45,10 +45,10 @@ PulseForge release packages therefore treat the runtime as a required integrated
 
 - Windows: `discord_partner_sdk.dll` beside `pulseforge.exe` and `pulseforge-cli.exe`.
 - Linux: `libdiscord_partner_sdk.so` beside the executable, with an `$ORIGIN` runtime search path.
-- macOS: Discord Social SDK 1.10 packages the runtime as `discord_partner_sdk.framework`, but framework-based PulseForge linking/embedding is **not currently build-ready**. Until issue #42 is completed against an authorized framework package, only the older `libdiscord_partner_sdk.dylib` layout is a validated PulseForge compatibility path on macOS.
+- macOS: the inspected Social SDK 1.10.19337 package contains **both** a universal `libdiscord_partner_sdk.dylib` and `discord_partner_sdk.framework` (`x86_64 + arm64`). PulseForge's currently validated automatic CMake path uses the packaged `.dylib`; its install name is `@rpath/libdiscord_partner_sdk.dylib` and PulseForge supplies a bundle-local runtime search path. Native framework linking/embedding remains tracked separately in issue #42 as a packaging enhancement, not as a prerequisite for using the current authorized 1.10.19337 SDK on macOS.
 - Android: `discord_partner_sdk.aar` is consumed through Gradle/Prefab and its native runtime is packaged into the APK.
 
-Once #42 is completed, a Social SDK 1.10 macOS package must embed `discord_partner_sdk.framework` inside `PulseForge.app/Contents/Frameworks`, resolve it through a bundle-local `@rpath`, and validate the final signed bundle. Do not label a current framework-only macOS build as Discord-enabled before that validation exists.
+If the framework path is deliberately selected after #42 is implemented, the complete `discord_partner_sdk.framework` bundle must be preserved inside `pulseforge.app/Contents/Frameworks` and resolved through `@rpath`. Copying only the framework executable is invalid because the inspected 1.10.19337 framework contains its own `Frameworks/libdiscord_krisp.dylib` dependency.
 
 A Discord-enabled release must never be published if the corresponding runtime dependency is missing.
 
