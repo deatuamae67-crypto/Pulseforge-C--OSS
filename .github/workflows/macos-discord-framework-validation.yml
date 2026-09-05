@@ -1,0 +1,232 @@
+name: PulseForge macOS Discord framework packaging validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - CMakeLists.txt
+      - .github/workflows/macos-discord-framework-validation.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  framework-packaging:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Build synthetic Social SDK framework
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$RUNNER_TEMP/discord-sdk"
+          framework="$sdk/lib/release/discord_partner_sdk.framework"
+          version="$framework/Versions/A"
+          mkdir -p "$version/Headers" "$version/Frameworks" "$version/Resources/Krisp"
+
+          cat > "$RUNNER_TEMP/discord_stub.c" <<'EOF'
+          extern int discord_krisp_synthetic(void);
+          int discord_partner_sdk_synthetic(void) {
+              return 19336 + discord_krisp_synthetic();
+          }
+          EOF
+          cat > "$RUNNER_TEMP/krisp_stub.c" <<'EOF'
+          int discord_krisp_synthetic(void) { return 1; }
+          EOF
+
+          clang -dynamiclib -arch "${{ matrix.arch }}" \
+            -Wl,-install_name,@loader_path/Frameworks/libdiscord_krisp.dylib \
+            "$RUNNER_TEMP/krisp_stub.c" -o "$version/Frameworks/libdiscord_krisp.dylib"
+          clang -dynamiclib -arch "${{ matrix.arch }}" \
+            -Wl,-install_name,@rpath/discord_partner_sdk.framework/Versions/A/discord_partner_sdk \
+            "$RUNNER_TEMP/discord_stub.c" \
+            "$version/Frameworks/libdiscord_krisp.dylib" \
+            -o "$version/discord_partner_sdk"
+
+          printf '%s\n' '#pragma once' > "$version/Headers/discordpp.h"
+          printf '%s\n' '#pragma once' > "$version/Headers/cdiscord.h"
+          printf '%s\n' 'synthetic-krisp-model' > "$version/Resources/Krisp/model.kef"
+          cat > "$version/Resources/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>discord_partner_sdk</string>
+            <key>CFBundleIdentifier</key><string>org.pulseforge.synthetic.discord</string>
+            <key>CFBundlePackageType</key><string>FMWK</string>
+            <key>CFBundleVersion</key><string>1.10.19337</string>
+          </dict></plist>
+          EOF
+
+          ln -s A "$framework/Versions/Current"
+          ln -s Versions/Current/discord_partner_sdk "$framework/discord_partner_sdk"
+          ln -s Versions/Current/Headers "$framework/Headers"
+          ln -s Versions/Current/Resources "$framework/Resources"
+
+          file "$version/discord_partner_sdk"
+          otool -D "$version/discord_partner_sdk"
+          otool -L "$version/discord_partner_sdk" | tee "$RUNNER_TEMP/discord-framework-loads.txt"
+          grep -F '@loader_path/Frameworks/libdiscord_krisp.dylib' \
+            "$RUNNER_TEMP/discord-framework-loads.txt"
+
+      - name: Configure PulseForge through the real framework path
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$RUNNER_TEMP/discord-sdk"
+          cmake -S . -B "$RUNNER_TEMP/pulseforge-framework-configure" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULSEFORGE_DISCORD_SDK_ROOT="$sdk" \
+            -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON \
+            -DPULSEFORGE_BUILD_TESTS=OFF \
+            -DPULSEFORGE_BUILD_AUTOCHART=OFF \
+            -DPULSEFORGE_ENABLE_LUA=OFF \
+            -DPULSEFORGE_ENABLE_IPO=OFF \
+            2>&1 | tee "$RUNNER_TEMP/pulseforge-framework-configure.log"
+          grep -F "PulseForge Discord Social SDK: macOS framework enabled" \
+            "$RUNNER_TEMP/pulseforge-framework-configure.log"
+
+      - name: Validate incomplete framework falls back to standalone dylib
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="$RUNNER_TEMP/discord-sdk-fallback"
+          mkdir -p "$sdk/include" "$sdk/lib/release/discord_partner_sdk.framework"
+          printf '%s\n' '#pragma once' > "$sdk/include/discordpp.h"
+          printf '%s\n' '#pragma once' > "$sdk/include/cdiscord.h"
+          clang -dynamiclib -arch "${{ matrix.arch }}" \
+            -Wl,-install_name,@rpath/libdiscord_partner_sdk.dylib \
+            "$RUNNER_TEMP/discord_stub.c" \
+            "$RUNNER_TEMP/discord-sdk/lib/release/discord_partner_sdk.framework/Versions/A/Frameworks/libdiscord_krisp.dylib" \
+            -o "$sdk/lib/release/libdiscord_partner_sdk.dylib"
+
+          cmake -S . -B "$RUNNER_TEMP/pulseforge-dylib-fallback-configure" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULSEFORGE_DISCORD_SDK_ROOT="$sdk" \
+            -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON \
+            -DPULSEFORGE_BUILD_TESTS=OFF \
+            -DPULSEFORGE_BUILD_AUTOCHART=OFF \
+            -DPULSEFORGE_ENABLE_LUA=OFF \
+            -DPULSEFORGE_ENABLE_IPO=OFF \
+            2>&1 | tee "$RUNNER_TEMP/pulseforge-dylib-fallback.log"
+          grep -F "PulseForge Discord Social SDK: desktop shared-library enabled" \
+            "$RUNNER_TEMP/pulseforge-dylib-fallback.log"
+
+      - name: Validate native framework link, embedding and install semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/framework-fixture"
+          framework="$RUNNER_TEMP/discord-sdk/lib/release/discord_partner_sdk.framework"
+          mkdir -p "$fixture"
+          cat > "$fixture/main.c" <<'EOF'
+          extern int discord_partner_sdk_synthetic(void);
+          int main(void) { return discord_partner_sdk_synthetic() == 19337 ? 0 : 1; }
+          EOF
+          cat > "$fixture/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.24)
+          project(PulseForgeDiscordFrameworkFixture LANGUAGES C)
+          if(NOT DEFINED DISCORD_FRAMEWORK)
+            message(FATAL_ERROR "DISCORD_FRAMEWORK is required")
+          endif()
+          add_executable(fixture MACOSX_BUNDLE main.c)
+          target_link_libraries(fixture PRIVATE "${DISCORD_FRAMEWORK}")
+          add_custom_command(TARGET fixture POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+              "$<TARGET_BUNDLE_CONTENT_DIR:fixture>/Frameworks"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf
+              "$<TARGET_BUNDLE_CONTENT_DIR:fixture>/Frameworks/discord_partner_sdk.framework"
+            COMMAND /usr/bin/ditto
+              "${DISCORD_FRAMEWORK}"
+              "$<TARGET_BUNDLE_CONTENT_DIR:fixture>/Frameworks/discord_partner_sdk.framework"
+            VERBATIM
+          )
+          set_property(TARGET fixture APPEND PROPERTY
+            BUILD_RPATH "@executable_path/../Frameworks")
+          set_property(TARGET fixture APPEND PROPERTY
+            INSTALL_RPATH "@executable_path/../Frameworks")
+          # The BUNDLE install carries the complete already-built .app tree,
+          # including the embedded framework and its Apple symlink layout.
+          install(TARGETS fixture BUNDLE DESTINATION .)
+          EOF
+
+          cmake -S "$fixture" -B "$fixture/build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDISCORD_FRAMEWORK="$framework"
+          cmake --build "$fixture/build"
+
+          app="$fixture/build/fixture.app"
+          embedded="$app/Contents/Frameworks/discord_partner_sdk.framework"
+          test -L "$embedded/Versions/Current"
+          test "$(readlink "$embedded/Versions/Current")" = "A"
+          test -L "$embedded/Headers"
+          test "$(readlink "$embedded/Headers")" = "Versions/Current/Headers"
+          test -L "$embedded/Resources"
+          test "$(readlink "$embedded/Resources")" = "Versions/Current/Resources"
+          test -L "$embedded/discord_partner_sdk"
+          test "$(readlink "$embedded/discord_partner_sdk")" = "Versions/Current/discord_partner_sdk"
+          test -f "$embedded/Versions/A/Frameworks/libdiscord_krisp.dylib"
+          test -f "$embedded/Versions/A/Resources/Krisp/model.kef"
+          otool -L "$app/Contents/MacOS/fixture" | tee "$RUNNER_TEMP/fixture-otool.txt"
+          grep -F '@rpath/discord_partner_sdk.framework/Versions/A/discord_partner_sdk' \
+            "$RUNNER_TEMP/fixture-otool.txt"
+          # This execution crosses both dynamic-library edges: app -> Discord
+          # framework -> nested Krisp dylib. Missing nested packaging therefore
+          # fails at the loader instead of merely passing a file-presence check.
+          "$app/Contents/MacOS/fixture"
+
+          cmake --install "$fixture/build" --prefix "$fixture/install"
+          installed="$fixture/install/fixture.app"
+          installed_framework="$installed/Contents/Frameworks/discord_partner_sdk.framework"
+          test -L "$installed_framework/Versions/Current"
+          test "$(readlink "$installed_framework/Versions/Current")" = "A"
+          test -L "$installed_framework/Headers"
+          test "$(readlink "$installed_framework/Headers")" = "Versions/Current/Headers"
+          test -L "$installed_framework/Resources"
+          test "$(readlink "$installed_framework/Resources")" = "Versions/Current/Resources"
+          test -L "$installed_framework/discord_partner_sdk"
+          test "$(readlink "$installed_framework/discord_partner_sdk")" = "Versions/Current/discord_partner_sdk"
+          test -f "$installed_framework/Versions/A/discord_partner_sdk"
+          test -f "$installed_framework/Versions/A/Frameworks/libdiscord_krisp.dylib"
+          test -f "$installed_framework/Versions/A/Resources/Krisp/model.kef"
+          "$installed/Contents/MacOS/fixture"
+
+          # Sign nested code inside-out: nested Krisp dylib, then the containing
+          # framework bundle, then the app. This mirrors production code-signing
+          # order and validates the framework as a bundle rather than only its binary.
+          codesign --force --sign - \
+            "$embedded/Versions/A/Frameworks/libdiscord_krisp.dylib"
+          codesign --force --sign - "$embedded"
+          codesign --force --sign - "$app"
+          codesign --verify --strict --verbose=2 \
+            "$embedded/Versions/A/Frameworks/libdiscord_krisp.dylib"
+          codesign --verify --strict --verbose=2 "$embedded"
+          codesign --verify --strict --verbose=2 "$app"
+
+      - name: Assert architecture and bundle-local runtime path
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/framework-fixture/build/fixture.app"
+          file "$app/Contents/MacOS/fixture" | tee "$RUNNER_TEMP/fixture-file.txt"
+          grep -F "${{ matrix.arch }}" "$RUNNER_TEMP/fixture-file.txt"
+          otool -l "$app/Contents/MacOS/fixture" | grep -A2 LC_RPATH | \
+            grep -F '@executable_path/../Frameworks'

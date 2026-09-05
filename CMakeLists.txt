@@ -71,6 +71,12 @@ set(
     "Discord Social SDK runtime shared library (for Windows: discord_partner_sdk.dll)"
 )
 set(
+    PULSEFORGE_DISCORD_SDK_FRAMEWORK
+    ""
+    CACHE PATH
+    "macOS Discord Social SDK framework bundle; preferred on Apple when supplied"
+)
+set(
     PULSEFORGE_DISCORD_APPLICATION_ID
     "1544144634832355429"
     CACHE STRING
@@ -545,13 +551,19 @@ if(PULSEFORGE_BUILD_APP)
     # paths. Android consumes discord_partner_sdk.aar through Gradle Prefab and
     # exposes the imported discord_partner_sdk::discord_partner_sdk target.
     set(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE OFF)
+    set(PULSEFORGE_DISCORD_SOCIAL_SDK_FRAMEWORK_ACTIVE OFF)
     set(_pulseforge_discord_include "${PULSEFORGE_DISCORD_SDK_INCLUDE_DIR}")
     set(_pulseforge_discord_library "${PULSEFORGE_DISCORD_SDK_LIBRARY}")
     set(_pulseforge_discord_runtime "${PULSEFORGE_DISCORD_SDK_RUNTIME_LIBRARY}")
-    if(NOT ANDROID AND EXISTS "${PULSEFORGE_DISCORD_SDK_ROOT}/include/discordpp.h")
-        if(NOT _pulseforge_discord_include)
+    set(_pulseforge_discord_framework "${PULSEFORGE_DISCORD_SDK_FRAMEWORK}")
+
+    if(NOT ANDROID)
+        if(NOT _pulseforge_discord_include
+            AND EXISTS "${PULSEFORGE_DISCORD_SDK_ROOT}/include/discordpp.h"
+            AND EXISTS "${PULSEFORGE_DISCORD_SDK_ROOT}/include/cdiscord.h")
             set(_pulseforge_discord_include "${PULSEFORGE_DISCORD_SDK_ROOT}/include")
         endif()
+
         if(WIN32)
             if(NOT _pulseforge_discord_library)
                 set(_pulseforge_discord_library "${PULSEFORGE_DISCORD_SDK_ROOT}/lib/release/discord_partner_sdk.lib")
@@ -560,11 +572,37 @@ if(PULSEFORGE_BUILD_APP)
                 set(_pulseforge_discord_runtime "${PULSEFORGE_DISCORD_SDK_ROOT}/bin/release/discord_partner_sdk.dll")
             endif()
         elseif(APPLE)
-            if(NOT _pulseforge_discord_library)
-                set(_pulseforge_discord_library "${PULSEFORGE_DISCORD_SDK_ROOT}/lib/release/libdiscord_partner_sdk.dylib")
+            set(_pulseforge_discord_default_framework
+                "${PULSEFORGE_DISCORD_SDK_ROOT}/lib/release/discord_partner_sdk.framework"
+            )
+            # Explicit PULSEFORGE_DISCORD_SDK_LIBRARY is an intentional
+            # compatibility override. Otherwise prefer Discord's Social SDK
+            # 1.10 framework distribution when the complete bundle is present.
+            if(NOT _pulseforge_discord_framework
+                AND NOT PULSEFORGE_DISCORD_SDK_LIBRARY
+                AND IS_DIRECTORY "${_pulseforge_discord_default_framework}"
+                AND EXISTS "${_pulseforge_discord_default_framework}/Versions/A/discord_partner_sdk"
+                AND EXISTS "${_pulseforge_discord_default_framework}/Versions/A/Headers/discordpp.h"
+                AND EXISTS "${_pulseforge_discord_default_framework}/Versions/A/Headers/cdiscord.h")
+                set(_pulseforge_discord_framework
+                    "${_pulseforge_discord_default_framework}"
+                )
             endif()
-            if(NOT _pulseforge_discord_runtime)
-                set(_pulseforge_discord_runtime "${PULSEFORGE_DISCORD_SDK_ROOT}/lib/release/libdiscord_partner_sdk.dylib")
+            if(_pulseforge_discord_framework
+                AND NOT _pulseforge_discord_include
+                AND EXISTS "${_pulseforge_discord_framework}/Versions/A/Headers/discordpp.h"
+                AND EXISTS "${_pulseforge_discord_framework}/Versions/A/Headers/cdiscord.h")
+                set(_pulseforge_discord_include
+                    "${_pulseforge_discord_framework}/Versions/A/Headers"
+                )
+            endif()
+            if(NOT _pulseforge_discord_framework)
+                if(NOT _pulseforge_discord_library)
+                    set(_pulseforge_discord_library "${PULSEFORGE_DISCORD_SDK_ROOT}/lib/release/libdiscord_partner_sdk.dylib")
+                endif()
+                if(NOT _pulseforge_discord_runtime)
+                    set(_pulseforge_discord_runtime "${PULSEFORGE_DISCORD_SDK_ROOT}/lib/release/libdiscord_partner_sdk.dylib")
+                endif()
             endif()
         else()
             if(NOT _pulseforge_discord_library)
@@ -575,6 +613,7 @@ if(PULSEFORGE_BUILD_APP)
             endif()
         endif()
     endif()
+
     if(PULSEFORGE_ENABLE_DISCORD_SOCIAL_SDK)
         if(ANDROID)
             find_package(discord_partner_sdk CONFIG QUIET)
@@ -594,6 +633,28 @@ if(PULSEFORGE_BUILD_APP)
                     "PULSEFORGE_DISCORD_SDK_AAR in Gradle)"
                 )
             endif()
+        elseif(APPLE
+            AND _pulseforge_discord_include
+            AND _pulseforge_discord_framework
+            AND EXISTS "${_pulseforge_discord_include}/discordpp.h"
+            AND EXISTS "${_pulseforge_discord_include}/cdiscord.h"
+            AND IS_DIRECTORY "${_pulseforge_discord_framework}"
+            AND EXISTS "${_pulseforge_discord_framework}/Versions/A/discord_partner_sdk")
+            target_include_directories(
+                pulseforge_runtime PRIVATE "${_pulseforge_discord_include}"
+            )
+            target_link_libraries(
+                pulseforge_runtime PRIVATE "${_pulseforge_discord_framework}"
+            )
+            target_compile_definitions(
+                pulseforge_runtime PRIVATE PULSEFORGE_HAS_DISCORD_SOCIAL_SDK=1
+            )
+            set(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE ON)
+            set(PULSEFORGE_DISCORD_SOCIAL_SDK_FRAMEWORK_ACTIVE ON)
+            message(STATUS
+                "PulseForge Discord Social SDK: macOS framework enabled "
+                "(${_pulseforge_discord_framework})"
+            )
         elseif(_pulseforge_discord_include
             AND _pulseforge_discord_library
             AND EXISTS "${_pulseforge_discord_include}/discordpp.h"
@@ -609,7 +670,7 @@ if(PULSEFORGE_BUILD_APP)
                 pulseforge_runtime PRIVATE PULSEFORGE_HAS_DISCORD_SOCIAL_SDK=1
             )
             set(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE ON)
-            message(STATUS "PulseForge Discord Social SDK: desktop enabled")
+            message(STATUS "PulseForge Discord Social SDK: desktop shared-library enabled")
         else()
             message(STATUS
                 "PulseForge Discord Social SDK: no-op backend "
@@ -766,9 +827,31 @@ if(PULSEFORGE_BUILD_APP)
         )
     endif()
 
-    # Package the Discord Social SDK runtime beside desktop executables. Android
-    # uses the Prefab/AAR flow and therefore does not use this path.
-    if(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE
+    # Package the Discord Social SDK runtime. Android uses the Prefab/AAR flow.
+    # On macOS Social SDK 1.10, preserve the complete framework bundle because
+    # it includes nested Krisp runtime/model resources required by the SDK.
+    if(PULSEFORGE_DISCORD_SOCIAL_SDK_FRAMEWORK_ACTIVE)
+        add_custom_command(
+            TARGET pulseforge POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_BUNDLE_CONTENT_DIR:pulseforge>/Frameworks"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf
+                "$<TARGET_BUNDLE_CONTENT_DIR:pulseforge>/Frameworks/discord_partner_sdk.framework"
+            COMMAND /usr/bin/ditto
+                "${_pulseforge_discord_framework}"
+                "$<TARGET_BUNDLE_CONTENT_DIR:pulseforge>/Frameworks/discord_partner_sdk.framework"
+            COMMENT "Embedding Discord Social SDK framework in PulseForge.app"
+            VERBATIM
+        )
+        set_property(
+            TARGET pulseforge APPEND PROPERTY
+            BUILD_RPATH "@executable_path/../Frameworks"
+        )
+        set_property(
+            TARGET pulseforge APPEND PROPERTY
+            INSTALL_RPATH "@executable_path/../Frameworks"
+        )
+    elseif(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE
         AND NOT ANDROID
         AND _pulseforge_discord_runtime
         AND EXISTS "${_pulseforge_discord_runtime}")
@@ -797,6 +880,8 @@ if(PULSEFORGE_BUILD_APP)
                 set_property(TARGET pulseforge_cli APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
             endif()
         elseif(APPLE)
+            # Standalone dylib compatibility path. Social SDK 1.10 production
+            # packaging should use the framework path above.
             set_property(TARGET pulseforge APPEND PROPERTY BUILD_RPATH "@loader_path")
             set_property(TARGET pulseforge APPEND PROPERTY INSTALL_RPATH "@loader_path")
             if(TARGET pulseforge_cli)
@@ -806,10 +891,10 @@ if(PULSEFORGE_BUILD_APP)
         endif()
     elseif(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE AND NOT ANDROID)
         message(FATAL_ERROR
-            "Discord Social SDK is linked, but its runtime shared library is missing. "
+            "Discord Social SDK is linked, but its runtime dependency is missing. "
             "A linked PulseForge build would fail in the operating-system loader before "
-            "the fail-open Discord backend can run. Supply "
-            "PULSEFORGE_DISCORD_SDK_RUNTIME_LIBRARY or install the complete SDK archive."
+            "the fail-open Discord backend can run. Supply PULSEFORGE_DISCORD_SDK_RUNTIME_LIBRARY "
+            "or, on macOS Social SDK 1.10+, the complete discord_partner_sdk.framework bundle."
         )
     endif()
 
@@ -1479,7 +1564,12 @@ if(PULSEFORGE_BUILD_APP)
     if(TARGET pulseforge_cli)
         install(TARGETS pulseforge_cli RUNTIME DESTINATION bin)
     endif()
-    if(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE
+    if(PULSEFORGE_DISCORD_SOCIAL_SDK_FRAMEWORK_ACTIVE)
+        # The framework is embedded by the pulseforge POST_BUILD rule above.
+        # install(TARGETS pulseforge BUNDLE ...) installs that complete app
+        # bundle, including framework symlinks and nested Krisp resources.
+        # Installing the source framework again would duplicate symlinks.
+    elseif(PULSEFORGE_DISCORD_SOCIAL_SDK_ACTIVE
         AND NOT ANDROID
         AND _pulseforge_discord_runtime
         AND EXISTS "${_pulseforge_discord_runtime}")
