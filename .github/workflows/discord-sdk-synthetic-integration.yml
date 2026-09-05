@@ -70,7 +70,7 @@ jobs:
             -DPULSEFORGE_DISCORD_APPLICATION_ID=1 \
             -DPULSEFORGE_BUILD_TESTS=ON \
             2>&1 | tee linux-discord-configure.log
-          grep -F 'PulseForge Discord Social SDK: desktop shared-library enabled' \
+          grep -F 'PulseForge Discord Social SDK: desktop enabled' \
             linux-discord-configure.log
           cmake --build --preset linux-release \
             --target pulseforge pulseforge_discord_presence_tests \
@@ -159,7 +159,20 @@ jobs:
           if ($null -eq $exe) { throw 'pulseforge-cli.exe not found' }
           $packagedDll = Join-Path $exe.DirectoryName 'discord_partner_sdk.dll'
           if (-not (Test-Path $packagedDll)) { throw 'Discord fixture DLL was not packaged beside pulseforge-cli.exe' }
-          dumpbin /DEPENDENTS $exe.FullName | Tee-Object -FilePath windows-discord-dependents.txt
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw 'vswhere.exe not found' }
+          $vsPath = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vsPath) { throw 'Visual Studio C++ installation not found' }
+          $dumpbin = Get-ChildItem (Join-Path $vsPath 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe') |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($null -eq $dumpbin) { throw 'dumpbin.exe not found' }
+          & $dumpbin.FullName /DEPENDENTS $exe.FullName |
+            Tee-Object -FilePath windows-discord-dependents.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Select-String -Path windows-discord-dependents.txt -SimpleMatch 'discord_partner_sdk.dll'
           $env:PATH = (Join-Path $sdk 'bin/release') + ';' + $env:PATH
           ctest --test-dir out/build/msvc -C Release `
@@ -289,18 +302,21 @@ jobs:
           set -euo pipefail
           set -o pipefail
           aar="$RUNNER_TEMP/discord_partner_sdk-fixture.aar"
+          android_build_root="$RUNNER_TEMP/pulseforge-android-build"
           chmod +x platform/android/gradlew
           cd platform/android
-          ./gradlew --no-daemon --stacktrace assembleRelease \
+          ./gradlew --no-daemon --stacktrace \
+            -PPULSEFORGE_ANDROID_BUILD_ROOT="$android_build_root" \
             -PPULSEFORGE_DISCORD_SDK_AAR="$aar" \
-            -PPULSEFORGE_DISCORD_APPLICATION_ID=1 \
+            -PdiscordApplicationId=1 \
+            assembleRelease \
             2>&1 | tee "$GITHUB_WORKSPACE/android-discord-sdk-build.log"
 
       - name: Verify Android APK native dependency, Prefab activation and Java surface
         shell: bash
         run: |
           set -euo pipefail
-          apk="$(find platform/android/app/build -type f -name '*release*.apk' | head -n1)"
+          apk="$(find "$RUNNER_TEMP/pulseforge-android-build/gradle" -type f -name '*release*.apk' | head -n1)"
           if [[ -z "$apk" ]]; then
             echo 'Release APK not found.' >&2
             exit 1
