@@ -190,19 +190,17 @@ jobs:
           test -f "$installed/Contents/Frameworks/discord_partner_sdk.framework/Versions/A/Resources/Krisp/model.kef"
           "$installed/Contents/MacOS/fixture"
 
-          # Sign nested code inside-out. `codesign --deep --sign` is intentionally
-          # avoided because it can misclassify synthetic versioned frameworks;
-          # production signing likewise signs nested code before the containing app.
+          # Sign nested code inside-out: nested Krisp dylib, then the containing
+          # framework bundle, then the app. This mirrors production code-signing
+          # order and validates the framework as a bundle rather than only its binary.
           embedded="$app/Contents/Frameworks/discord_partner_sdk.framework"
           codesign --force --sign - \
             "$embedded/Versions/A/Frameworks/libdiscord_krisp.dylib"
-          codesign --force --sign - \
-            "$embedded/Versions/A/discord_partner_sdk"
+          codesign --force --sign - "$embedded"
           codesign --force --sign - "$app"
           codesign --verify --strict --verbose=2 \
             "$embedded/Versions/A/Frameworks/libdiscord_krisp.dylib"
-          codesign --verify --strict --verbose=2 \
-            "$embedded/Versions/A/discord_partner_sdk"
+          codesign --verify --strict --verbose=2 "$embedded"
           codesign --verify --strict --verbose=2 "$app"
 
       - name: Assert architecture and bundle-local runtime path
