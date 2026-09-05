@@ -21,7 +21,7 @@ jobs:
           ref: release/v1.0.0-final
           fetch-depth: 1
 
-      - name: Apply final fidelity patch
+      - name: Apply and stage final fidelity patch
         shell: bash
         run: |
           set -euo pipefail
@@ -31,6 +31,13 @@ jobs:
           grep -F 'quartIn' src/app/application.cpp
           grep -F 'quintOut' src/app/application.cpp
           grep -F 'third-party mod payloads are not automatically redistributed' docs/MOD_CORPUS_1.0.0.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/application.cpp CHANGELOG.md \
+            docs/RELEASE_NOTES_1.0.0.md docs/MOD_CORPUS_1.0.0.md mods/README.md
+          git diff --cached --quiet && { echo 'No source changes produced.' >&2; exit 1; }
+          git commit -m 'fix(compat): preserve Psych easing fidelity in 1.0.0'
+          echo "VALIDATED_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Install Linux build dependencies
         shell: bash
@@ -49,6 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$VALIDATED_COMMIT"
           cmake --preset linux-release \
             -DPULSEFORGE_BUILD_TESTS=ON \
             -DPULSEFORGE_BUILD_AUTOCHART=OFF \
@@ -56,15 +64,11 @@ jobs:
           cmake --build --preset linux-release --target \
             pulseforge pulseforge_lua_tests --parallel 2
           ./out/build/linux-release/pulseforge_lua_tests
+          test "$(git rev-parse HEAD)" = "$VALIDATED_COMMIT"
 
-      - name: Commit validated final changes
+      - name: Push tested commit
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/app/application.cpp CHANGELOG.md \
-            docs/RELEASE_NOTES_1.0.0.md docs/MOD_CORPUS_1.0.0.md mods/README.md
-          git diff --cached --quiet && { echo 'No source changes produced.' >&2; exit 1; }
-          git commit -m 'fix(compat): preserve Psych easing fidelity in 1.0.0'
+          test "$(git rev-parse HEAD)" = "$VALIDATED_COMMIT"
           git push origin HEAD:release/v1.0.0-final
