@@ -122,24 +122,14 @@ jobs:
               raise SystemExit(f"Expected one old skip helper, found {text.count(old_helper)}")
           text = text.replace(old_helper, new_helper, 1)
 
-          decoded_anchor = '''    while (true) {
-              SDL_Event event;
-          '''
-          decoded_replacement = '''    SkipInputState skip_input;
-              while (true) {
-              SDL_Event event;
-          '''
+          decoded_anchor = "    while (true) {\n        SDL_Event event;"
+          decoded_replacement = "    SkipInputState skip_input;\n    while (true) {\n        SDL_Event event;"
           if text.count(decoded_anchor) != 1:
               raise SystemExit(f"Expected one decoded-loop anchor, found {text.count(decoded_anchor)}")
           text = text.replace(decoded_anchor, decoded_replacement, 1)
 
-          fallback_anchor = '''    const auto begin = SDL_GetTicksNS();
-              while (SDL_GetTicksNS() - begin < duration_ns) {
-          '''
-          fallback_replacement = '''    const auto begin = SDL_GetTicksNS();
-              SkipInputState skip_input;
-              while (SDL_GetTicksNS() - begin < duration_ns) {
-          '''
+          fallback_anchor = "    const auto begin = SDL_GetTicksNS();\n    while (SDL_GetTicksNS() - begin < duration_ns) {"
+          fallback_replacement = "    const auto begin = SDL_GetTicksNS();\n    SkipInputState skip_input;\n    while (SDL_GetTicksNS() - begin < duration_ns) {"
           if text.count(fallback_anchor) != 1:
               raise SystemExit(f"Expected one fallback-loop anchor, found {text.count(fallback_anchor)}")
           text = text.replace(fallback_anchor, fallback_replacement, 1)
@@ -158,7 +148,7 @@ jobs:
 
           verified = path.read_text(encoding="utf-8")
           checks = {
-              'SDL_EVENT_FINGER_UP\n': 1,
+              'case SDL_EVENT_FINGER_UP:': 1,
               'skip_input.consume(event)': 2,
               'SkipInputState skip_input;': 2,
               'SDL_EVENT_FINGER_CANCELED': 1,
