@@ -250,3 +250,117 @@ jobs:
             ${{ runner.temp }}/${{ steps.package.outputs.package }}.badging.txt
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    name: Publish verified v1.0.0
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - windows-x64
+      - linux-x86_64
+      - macos
+      - android-arm64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Download this run's platform artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/release-assets"
+
+      - name: Verify package checksums and exact public asset set
+        id: assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/release-assets"
+          while IFS= read -r checksum; do
+            (cd "$(dirname "$checksum")" && sha256sum -c "$(basename "$checksum")")
+          done < <(find "$root" -type f -name '*.SHA256SUMS.txt' -print | sort)
+
+          expected="$RUNNER_TEMP/expected-assets.txt"
+          actual="$RUNNER_TEMP/actual-assets.txt"
+          cat > "$expected" <<'EOF'
+          PulseForge-v1.0.0-Android-arm64-test-signed.SHA256SUMS.txt
+          PulseForge-v1.0.0-Android-arm64-test-signed.apk
+          PulseForge-v1.0.0-Linux-x86_64.SHA256SUMS.txt
+          PulseForge-v1.0.0-Linux-x86_64.tar.gz
+          PulseForge-v1.0.0-Windows-x86_64.SHA256SUMS.txt
+          PulseForge-v1.0.0-Windows-x86_64.zip
+          PulseForge-v1.0.0-macOS-arm64.SHA256SUMS.txt
+          PulseForge-v1.0.0-macOS-arm64.tar.gz
+          PulseForge-v1.0.0-macOS-x86_64.SHA256SUMS.txt
+          PulseForge-v1.0.0-macOS-x86_64.tar.gz
+          EOF
+          find "$root" -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' -o -name '*.SHA256SUMS.txt' \) \
+            -printf '%f\n' | sort > "$actual"
+          diff -u "$expected" "$actual"
+
+          mapfile -t assets < <(find "$root" -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' -o -name '*.SHA256SUMS.txt' \) -print | sort)
+          test "${#assets[@]}" -eq 10
+          printf '%s\n' "${assets[@]}" > "$RUNNER_TEMP/public-assets.paths"
+
+      - name: Create draft, upload, verify, then publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${PULSEFORGE_VERSION}"
+          repo="$GITHUB_REPOSITORY"
+
+          existing="$({ gh api "repos/$repo/releases" --paginate --jq ".[] | select(.tag_name == \"$tag\") | [.id, .draft, .html_url] | @tsv"; } 2>/dev/null | head -n1 || true)"
+          if [[ -n "$existing" ]]; then
+            IFS=$'\t' read -r existing_id existing_draft existing_url <<< "$existing"
+            if [[ "$existing_draft" == "false" ]]; then
+              echo "Release $tag is already public: $existing_url"
+              exit 0
+            fi
+            echo "Removing stale draft release $existing_id before recreation."
+            gh api --method DELETE "repos/$repo/releases/$existing_id"
+          fi
+
+          release_url="$(gh release create "$tag" \
+            --repo "$repo" \
+            --target "$GITHUB_SHA" \
+            --title "PulseForge ${PULSEFORGE_VERSION}" \
+            --notes-file docs/RELEASE_NOTES_1.0.0.md \
+            --draft)"
+          echo "Draft: $release_url"
+
+          mapfile -t assets < "$RUNNER_TEMP/public-assets.paths"
+          gh release upload "$tag" --repo "$repo" "${assets[@]}"
+
+          release_id="$(gh api "repos/$repo/releases" --paginate --jq ".[] | select(.tag_name == \"$tag\") | .id" | head -n1)"
+          test -n "$release_id"
+          test "$(gh api "repos/$repo/releases/$release_id" --jq '.draft')" = "true"
+          test "$(gh api "repos/$repo/releases/$release_id/assets" --jq 'length')" -eq 10
+
+          expected="$RUNNER_TEMP/expected-assets.txt"
+          actual="$RUNNER_TEMP/release-asset-names.txt"
+          gh api "repos/$repo/releases/$release_id/assets" --paginate --jq '.[].name' | sort > "$actual"
+          diff -u "$expected" "$actual"
+
+          target="$(gh api "repos/$repo/releases/$release_id" --jq '.target_commitish')"
+          test "$target" = "$GITHUB_SHA"
+
+          gh api --method PATCH "repos/$repo/releases/$release_id" \
+            -F draft=false -F prerelease=false -f make_latest=true >/dev/null
+
+          test "$(gh api "repos/$repo/releases/$release_id" --jq '.draft')" = "false"
+          test "$(gh api "repos/$repo/releases/$release_id" --jq '.prerelease')" = "false"
+          tag_sha="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')"
+          test "$tag_sha" = "$GITHUB_SHA"
+          echo "Published $tag at exact source $GITHUB_SHA with 10 verified public assets."
