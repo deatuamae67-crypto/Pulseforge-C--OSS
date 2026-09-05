@@ -78,13 +78,19 @@ if [[ -n "$android_aar" ]]; then
   cp -f -- "$android_aar" "$destination/android/discord_partner_sdk.aar"
 fi
 
+mac_framework="$(find "$destination" -type d -name 'discord_partner_sdk.framework' -print -quit 2>/dev/null || true)"
+
 echo
 echo "Discord Social SDK installed: $destination"
 echo "  Windows import library: $([[ -f "$destination/lib/release/discord_partner_sdk.lib" ]] && echo yes || echo no)"
 echo "  Windows runtime DLL:   $([[ -f "$destination/bin/release/discord_partner_sdk.dll" ]] && echo yes || echo no)"
 echo "  Linux shared library:  $([[ -f "$destination/lib/release/libdiscord_partner_sdk.so" ]] && echo yes || echo no)"
-echo "  macOS dylib:            $([[ -f "$destination/lib/release/libdiscord_partner_sdk.dylib" ]] && echo yes || echo no)"
+echo "  macOS 1.10+ framework: $([[ -n "$mac_framework" ]] && echo yes || echo no)"
+echo "  macOS legacy dylib:    $([[ -f "$destination/lib/release/libdiscord_partner_sdk.dylib" ]] && echo yes || echo no)"
 echo "  Android AAR:            $([[ -f "$destination/android/discord_partner_sdk.aar" ]] && echo yes || echo no)"
+if [[ -n "$mac_framework" ]]; then
+  echo "  macOS framework path:   ${mac_framework#"$destination"/}"
+fi
 echo
 if command -v sha256sum >/dev/null; then
   find "$destination" -type f \( -name 'discordpp.h' -o -name 'cdiscord.h' -o -name 'discord_partner_sdk.*' -o -name 'libdiscord_partner_sdk.*' \) -print0 \
