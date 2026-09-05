@@ -24,35 +24,36 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
 
           path = Path("src/app/application.cpp")
           text = path.read_text(encoding="utf-8")
 
           replacements = [
-              ("mobile_touch_controls()", "detail::mobile_touch_controls()", 6),
-              ("MobileTouchControlOptions{", "detail::MobileTouchControlOptions{", 1),
-              ("MobileTouchContext::", "detail::MobileTouchContext::", 5),
-              ("chart_ == nullptr", "!chart_.has_value()", 1),
+              (r"(?<![A-Za-z0-9_:])mobile_touch_controls\(\)", "detail::mobile_touch_controls()", 6),
+              (r"(?<![A-Za-z0-9_:])MobileTouchContext::", "detail::MobileTouchContext::", 6),
+              (r"chart_\s*==\s*nullptr", "!chart_.has_value()", 1),
           ]
 
-          for old, new, expected in replacements:
-              found = text.count(old)
-              if found != expected:
+          for pattern, replacement, expected in replacements:
+              text, count = re.subn(pattern, replacement, text)
+              if count != expected:
                   raise SystemExit(
-                      f"Refusing patch: expected {expected} occurrences of {old!r}, found {found}"
+                      f"Refusing patch: expected {expected} matches for {pattern!r}, found {count}"
                   )
-              text = text.replace(old, new)
 
           path.write_text(text, encoding="utf-8", newline="\n")
 
           verified = path.read_text(encoding="utf-8")
-          for old, new, expected in replacements:
-              if old in verified:
-                  raise SystemExit(f"Old token still present after patch: {old!r}")
-              if verified.count(new) != expected:
+          for pattern, replacement, expected in replacements:
+              remaining = len(re.findall(pattern, verified))
+              if remaining != 0:
                   raise SystemExit(
-                      f"Verification failed: expected {expected} occurrences of {new!r}, "
-                      f"found {verified.count(new)}"
+                      f"Verification failed: {remaining} unqualified matches remain for {pattern!r}"
+                  )
+              if verified.count(replacement) < expected:
+                  raise SystemExit(
+                      f"Verification failed: replacement {replacement!r} occurs fewer than {expected} times"
                   )
 
       - name: Show and constrain diff
