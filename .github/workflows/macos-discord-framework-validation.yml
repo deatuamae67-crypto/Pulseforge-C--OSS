@@ -128,9 +128,10 @@ jobs:
             BUILD_RPATH "@executable_path/../Frameworks")
           set_property(TARGET fixture APPEND PROPERTY
             INSTALL_RPATH "@executable_path/../Frameworks")
+          # install(TARGETS ... BUNDLE) installs the complete built app bundle,
+          # including the already embedded framework and its symlinks. A second
+          # install(DIRECTORY framework ...) would duplicate those symlinks.
           install(TARGETS fixture BUNDLE DESTINATION .)
-          install(DIRECTORY "${DISCORD_FRAMEWORK}"
-            DESTINATION "$<TARGET_BUNDLE_DIR_NAME:fixture>/Contents/Frameworks")
           EOF
 
           cmake -S "$fixture" -B "$fixture/build" -G Ninja \
