@@ -1,0 +1,86 @@
+name: Validate final Overkill compatibility once
+
+on:
+  push:
+    branches:
+      - release/v1.0.0-final
+    paths:
+      - '.github/workflows/_overkill-final-compat-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: release/v1.0.0-final
+          fetch-depth: 1
+
+      - name: Apply final compatibility patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_overkill_final_compat.py
+          git diff --check
+          grep -R --line-number --fixed-strings 'PULSEFORGE_1_0_0_SAFE_LITERAL_STRING_FIND_V1' src
+          grep -R --line-number --fixed-strings 'PULSEFORGE_1_0_0_RESTRICTED_CALL_METHOD_V1' src
+          grep -R --line-number --fixed-strings 'setLuaSpriteScrollFactor' src tests
+          grep -R --line-number --fixed-strings 'mustHitSection' src tests
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
+
+      - name: Configure app and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset linux-release \
+            -DPULSEFORGE_BUILD_TESTS=ON \
+            -DPULSEFORGE_BUILD_AUTOCHART=OFF \
+            -DPULSEFORGE_ENABLE_LUA=ON
+
+      - name: Compile runtime and Lua regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build --preset linux-release --target \
+            pulseforge pulseforge_lua_tests --parallel 2
+
+      - name: Run sanitized Overkill regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./out/build/linux-release/pulseforge_lua_tests
+
+      - name: Commit validated compatibility changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            src/script/lua_runtime.cpp \
+            src/app/application.cpp \
+            src/app/runtime_scene.hpp \
+            src/app/runtime_scene.cpp \
+            tests/lua_test.cpp \
+            CHANGELOG.md \
+            docs/RELEASE_NOTES_1.0.0.md
+          git diff --cached --quiet && { echo 'No source changes produced.' >&2; exit 1; }
+          git commit -m 'fix(lua): complete Overkill Timeless compatibility'
+          git push origin HEAD:release/v1.0.0-final
