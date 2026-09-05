@@ -7,6 +7,7 @@
 #include "psych_text_layout.hpp"
 #include "runtime_post_effects.hpp"
 #include "runtime_scene.hpp"
+#include "mobile_touch_controls.hpp"
 #include "sdl_input_actions.hpp"
 
 #include "pulseforge/audio_controls.hpp"
@@ -1504,7 +1505,7 @@ private:
         while (!complete.load(std::memory_order_acquire)) {
             discord_presence_.pump();
             SDL_Event event;
-            while (SDL_PollEvent(&event)) {
+            while (detail::poll_mobile_event(&event)) {
                 if (event.type == SDL_EVENT_QUIT
                     || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED
                     || (event.type == SDL_EVENT_KEY_DOWN
@@ -1630,7 +1631,7 @@ private:
                 {64, 225, 235, 255}
             );
         }
-        SDL_RenderPresent(renderer_);
+        detail::present_with_mobile_touch(renderer_);
     }
 
     [[nodiscard]] std::size_t bound_lane_count() const {
@@ -1734,7 +1735,7 @@ private:
             "ENTER / SPACE / GAMEPAD A STARTS    ESC RETURNS TO MENU"
         );
         SDL_SetRenderScale(renderer_, scale_x, scale_y);
-        SDL_RenderPresent(renderer_);
+        detail::present_with_mobile_touch(renderer_);
     }
 
     [[nodiscard]] bool wait_for_ready_screen() {
@@ -1742,7 +1743,7 @@ private:
         while (true) {
             discord_presence_.pump();
             SDL_Event event;
-            while (SDL_PollEvent(&event)) {
+            while (detail::poll_mobile_event(&event)) {
                 if (event.type == SDL_EVENT_QUIT
                     || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
                     return false;
@@ -1802,7 +1803,7 @@ private:
         while (waiting) {
             discord_presence_.pump();
             SDL_Event event;
-            while (SDL_PollEvent(&event)) {
+            while (detail::poll_mobile_event(&event)) {
                 const bool acknowledged = event.type == SDL_EVENT_QUIT
                     || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED
                     || (event.type == SDL_EVENT_KEY_DOWN
@@ -1830,7 +1831,7 @@ private:
             return false;
         }
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (detail::poll_mobile_event(&event)) {
             if (event.type == SDL_EVENT_QUIT
                 || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED
                 || (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat
@@ -2932,6 +2933,20 @@ private:
             SDL_LOGICAL_PRESENTATION_LETTERBOX
         );
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        detail::mobile_touch_controls().configure(
+            window_,
+            renderer_,
+            options_.settings.touch,
+            options_.settings.controls
+        );
+        // Ready/error acknowledgement screens are menu-like. The first live
+        // gameplay frame switches this to lane controls using chart_->key_count.
+        detail::mobile_touch_controls().set_context(
+            options_.offline_render.enabled
+                ? detail::MobileTouchContext::disabled
+                : detail::MobileTouchContext::menu,
+            chart_->key_count
+        );
         const bool vsync_configured = SDL_SetRenderVSync(
             renderer_,
             options_.settings.visual.vsync
@@ -3230,8 +3245,15 @@ if (const auto selected_skin = resolve_note_skin_selection(
         owned_platform_.owns_sdl = sdl_initialized_;
         if (return_platform_ != nullptr && platform_return_safe_
             && owned_platform_.complete()) {
+            // Same SDL renderer is about to return to MenuSession. Preserve the
+            // global router/event watch but release all gameplay lanes and put
+            // it in menu mode until the launcher refreshes its settings.
+            detail::mobile_touch_controls().set_context(detail::MobileTouchContext::menu);
             *return_platform_ = std::move(owned_platform_);
         } else {
+            // No owner will adopt this SDL stack; detach the event watch before
+            // renderer/window destruction and SDL_Quit.
+            detail::mobile_touch_controls().shutdown();
             owned_platform_.reset();
         }
         renderer_ = nullptr;
@@ -3241,6 +3263,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
     }
 
     void frame(const double elapsed_seconds, const std::uint64_t frame_start_ns) {
+        sync_mobile_touch_context();
         gameplay_begin_frame();
 #if defined(PULSEFORGE_HAS_LUA)
         script_state_.clear_transient_output();
@@ -3248,6 +3271,9 @@ if (const auto selected_skin = resolve_note_skin_selection(
 #endif
         double song_time = audio_.compensated_position_ms();
         process_events(frame_start_ns, song_time);
+        // A pause/result transition can be caused by the events just consumed.
+        // Switch overlays before this frame is rendered, not one frame later.
+        sync_mobile_touch_context();
         advance_random_pause_music();
         if (physical_resync_pending_) {
             physical_resync_pending_ = false;
@@ -3325,12 +3351,25 @@ if (const auto selected_skin = resolve_note_skin_selection(
         }
     }
 
+    void sync_mobile_touch_context() noexcept {
+        if (!chart_.has_value() || options_.offline_render.enabled) {
+            detail::mobile_touch_controls().set_context(detail::MobileTouchContext::disabled);
+            return;
+        }
+        detail::mobile_touch_controls().set_context(
+            (paused_ || result_shown_)
+                ? detail::MobileTouchContext::menu
+                : detail::MobileTouchContext::gameplay,
+            chart_->key_count
+        );
+    }
+
     void process_events(
         const std::uint64_t frame_start_ns,
         const double current_song_ms
     ) {
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (detail::poll_mobile_event(&event)) {
             switch (event.type) {
             case SDL_EVENT_QUIT:
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -3657,6 +3696,30 @@ if (const auto selected_skin = resolve_note_skin_selection(
         const double current_song_ms
     ) {
         if (pressed && key.repeat) {
+            return;
+        }
+        if (const auto touch_lane = detail::mobile_touch_lane_from_event(key);
+            touch_lane.has_value()) {
+#if defined(PULSEFORGE_HAS_LUA)
+            if (script_countdown_blocked_) {
+                return;
+            }
+#endif
+            if (options_.replay_path.has_value() || paused_ || result_shown_
+                || *touch_lane >= chart_->key_count) {
+                return;
+            }
+            const double event_time = timestamp_to_song_time(
+                key.timestamp,
+                now_ns,
+                current_song_ms,
+                audio_.playback_rate()
+            );
+            last_input_age_ms_ = current_song_ms - event_time;
+            runtime_performance_.record_input_age_ms(
+                std::max(last_input_age_ms_, 0.0)
+            );
+            apply_lane_input(*touch_lane, pressed, event_time);
             return;
         }
 #if defined(PULSEFORGE_HAS_LUA)
@@ -5740,12 +5803,12 @@ if (const auto selected_skin = resolve_note_skin_selection(
         }
         if (diagnostics_) {
             const auto present_started_ns = SDL_GetTicksNS();
-            SDL_RenderPresent(renderer_);
+            detail::present_with_mobile_touch(renderer_);
             note_profile_present_.sample(
                 SDL_GetTicksNS() - present_started_ns
             );
         } else {
-            SDL_RenderPresent(renderer_);
+            detail::present_with_mobile_touch(renderer_);
         }
     }
 

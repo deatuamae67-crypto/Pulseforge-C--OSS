@@ -222,6 +222,24 @@ int main() {
         );
         require_no_routed_event("focus cancellation leaves no stuck event");
 
+        // Live settings/binding reconfiguration releases held virtual input
+        // using the old map before installing the new one. This prevents a
+        // settings edit or launcher/gameplay handoff from leaving a stuck lane.
+        current_phase = "live reconfiguration";
+        inject_touch(finger_event(SDL_EVENT_FINGER_DOWN, window_id, 45U, lane_x(5U)));
+        require_lane_key(routed_event(), true, 5U);
+        auto reconfigured = settings;
+        reconfigured.opacity = 0.70F;
+        router.configure(
+            window,
+            renderer,
+            reconfigured,
+            pulseforge::default_input_bindings()
+        );
+        require_lane_key(routed_event(), false, 5U);
+        require_no_routed_event("reconfiguration leaves no stuck lane");
+        router.set_context(pulseforge::detail::MobileTouchContext::gameplay, 18U);
+
         current_phase = "desktop pass-through";
         router.shutdown();
         force_touch(false);

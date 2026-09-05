@@ -1,4 +1,5 @@
 #include "editor_ui.hpp"
+#include "mobile_touch_controls.hpp"
 
 #include "pulseforge/ascii_number.hpp"
 #include "pulseforge/audio_transport.hpp"
@@ -26,6 +27,12 @@
 #include <vector>
 
 namespace pulseforge {
+
+using detail::MobileTouchContext;
+using detail::poll_mobile_event;
+using detail::present_with_mobile_touch;
+using detail::ScopedMobileTouchContext;
+
 namespace {
 
 constexpr float canvas_width = 1'280.0F;
@@ -2069,6 +2076,8 @@ EditorUiOutcome run_chart_editor_ui(
         return outcome;
     }
 
+    ScopedMobileTouchContext touch_context{MobileTouchContext::editor};
+
     EditorSessionGuard guard(window, renderer, "PulseForge // Chart Editor");
     auto note_index = build_note_index(editor);
     auto event_index = build_event_index(editor);
@@ -2663,7 +2672,7 @@ EditorUiOutcome run_chart_editor_ui(
         }
 
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (poll_mobile_event(&event)) {
             static_cast<void>(SDL_ConvertEventToRenderCoordinates(renderer, &event));
             if (editor_audio != nullptr
                 && event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
@@ -3225,7 +3234,7 @@ EditorUiOutcome run_chart_editor_ui(
         );
         inline_editor.draw(renderer, ticks);
         option_picker.draw(renderer, ticks);
-        static_cast<void>(SDL_RenderPresent(renderer));
+        static_cast<void>(present_with_mobile_touch(renderer));
         SDL_Delay(1U);
     }
 
@@ -3367,6 +3376,8 @@ EditorUiOutcome run_character_editor_ui(
         outcome.message = "Character Editor requires an existing SDL context";
         return outcome;
     }
+
+    ScopedMobileTouchContext touch_context{MobileTouchContext::editor};
 
     EditorSessionGuard guard(window, renderer, "PulseForge // Character Editor");
     InlineTextEditor inline_editor;
@@ -3666,7 +3677,7 @@ EditorUiOutcome run_character_editor_ui(
 
     while (running) {
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (poll_mobile_event(&event)) {
             static_cast<void>(SDL_ConvertEventToRenderCoordinates(renderer, &event));
             if (event.type == SDL_EVENT_QUIT
                 || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -3977,7 +3988,7 @@ EditorUiOutcome run_character_editor_ui(
             145U
         );
         inline_editor.draw(renderer, ticks);
-        static_cast<void>(SDL_RenderPresent(renderer));
+        static_cast<void>(present_with_mobile_touch(renderer));
         SDL_Delay(1U);
     }
 
@@ -3998,6 +4009,8 @@ EditorUiOutcome run_week_editor_ui(
         outcome.message = "Week Editor requires an existing SDL context";
         return outcome;
     }
+
+    ScopedMobileTouchContext touch_context{MobileTouchContext::editor};
 
     EditorSessionGuard guard(window, renderer, "PulseForge // Week Editor");
     InlineTextEditor inline_editor;
@@ -4175,7 +4188,7 @@ EditorUiOutcome run_week_editor_ui(
 
     while (running) {
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (poll_mobile_event(&event)) {
             static_cast<void>(SDL_ConvertEventToRenderCoordinates(renderer, &event));
             if (event.type == SDL_EVENT_QUIT
                 || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -4557,7 +4570,7 @@ EditorUiOutcome run_week_editor_ui(
             145U
         );
         inline_editor.draw(renderer, ticks);
-        static_cast<void>(SDL_RenderPresent(renderer));
+        static_cast<void>(present_with_mobile_touch(renderer));
         SDL_Delay(1U);
     }
 

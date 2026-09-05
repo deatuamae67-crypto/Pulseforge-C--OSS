@@ -124,12 +124,86 @@ void draw_text(
     static_cast<void>(SDL_SetRenderScale(renderer, old_x, old_y));
 }
 
-[[nodiscard]] bool is_skip_event(const SDL_Event& event) noexcept {
-    return event.type == SDL_EVENT_KEY_DOWN
-        && (event.key.scancode == SDL_SCANCODE_RETURN
-            || event.key.scancode == SDL_SCANCODE_KP_ENTER
-            || event.key.scancode == SDL_SCANCODE_SPACE);
-}
+class SkipInputState {
+public:
+    [[nodiscard]] bool consume(const SDL_Event& event) noexcept {
+        if (event.type == SDL_EVENT_KEY_DOWN
+            && (event.key.scancode == SDL_SCANCODE_RETURN
+                || event.key.scancode == SDL_SCANCODE_KP_ENTER
+                || event.key.scancode == SDL_SCANCODE_SPACE)) {
+            return true;
+        }
+
+        switch (event.type) {
+        case SDL_EVENT_FINGER_DOWN:
+            if (!touch_active_) {
+                touch_active_ = true;
+                touch_id_ = event.tfinger.touchID;
+                finger_id_ = event.tfinger.fingerID;
+                start_x_ = event.tfinger.x;
+                start_y_ = event.tfinger.y;
+                touch_moved_ = false;
+            }
+            return false;
+        case SDL_EVENT_FINGER_MOTION:
+            if (matches_touch(event)) {
+                update_travel(event.tfinger.x, event.tfinger.y);
+            }
+            return false;
+        case SDL_EVENT_FINGER_UP:
+            if (!matches_touch(event)) {
+                return false;
+            }
+            update_travel(event.tfinger.x, event.tfinger.y);
+            {
+                const bool should_skip = !touch_moved_;
+                reset_touch();
+                return should_skip;
+            }
+        case SDL_EVENT_FINGER_CANCELED:
+            if (matches_touch(event)) {
+                reset_touch();
+            }
+            return false;
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            reset_touch();
+            return false;
+        default:
+            return false;
+        }
+    }
+
+private:
+    static constexpr float maximum_tap_travel = 0.05F;
+
+    [[nodiscard]] bool matches_touch(const SDL_Event& event) const noexcept {
+        return touch_active_
+            && event.tfinger.touchID == touch_id_
+            && event.tfinger.fingerID == finger_id_;
+    }
+
+    void update_travel(const float x, const float y) noexcept {
+        const float dx = x - start_x_;
+        const float dy = y - start_y_;
+        touch_moved_ = touch_moved_
+            || dx * dx + dy * dy
+                > maximum_tap_travel * maximum_tap_travel;
+    }
+
+    void reset_touch() noexcept {
+        touch_active_ = false;
+        touch_moved_ = false;
+        touch_id_ = {};
+        finger_id_ = {};
+    }
+
+    bool touch_active_{};
+    bool touch_moved_{};
+    SDL_TouchID touch_id_{};
+    SDL_FingerID finger_id_{};
+    float start_x_{};
+    float start_y_{};
+};
 
 [[nodiscard]] std::optional<std::vector<stbi_uc>> read_bounded_binary(
     const std::filesystem::path& path,
@@ -346,6 +420,7 @@ void draw_text(
         destination.x = (logical_width - destination.w) * 0.5F;
         destination.y = 0.0F;
     }
+    SkipInputState skip_input;
     while (true) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -357,7 +432,7 @@ void draw_text(
                     audio_diagnostic,
                 };
             }
-            if (is_skip_event(event)) {
+            if (skip_input.consume(event)) {
                 audio.stop();
                 return {StartupIntroStatus::skipped, audio_diagnostic};
             }
@@ -412,7 +487,7 @@ void draw_text(
                 renderer,
                 486.0F,
                 650.0F,
-                "PRESS ENTER OR SPACE TO SKIP",
+                "TAP OR PRESS ENTER OR SPACE TO SKIP",
                 {90U, 224U, 232U, 255U},
                 1.2F
             );
@@ -427,6 +502,7 @@ void draw_text(
 ) {
     constexpr std::uint64_t duration_ns = 2'400'000'000ULL;
     const auto begin = SDL_GetTicksNS();
+    SkipInputState skip_input;
     while (SDL_GetTicksNS() - begin < duration_ns) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -434,7 +510,7 @@ void draw_text(
                 || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
                 return StartupIntroStatus::quit_requested;
             }
-            if (is_skip_event(event)) {
+            if (skip_input.consume(event)) {
                 return StartupIntroStatus::skipped;
             }
         }
@@ -481,7 +557,7 @@ void draw_text(
             renderer,
             472.0F,
             532.0F,
-            "PRESS ENTER OR SPACE TO SKIP",
+            "TAP OR PRESS ENTER OR SPACE TO SKIP",
             {92U, 224U, 232U, 255U},
             1.25F
         );
@@ -684,7 +760,7 @@ private:
         renderer,
         486.0F,
         650.0F,
-        "PRESS ENTER OR SPACE TO SKIP",
+        "TAP OR PRESS ENTER OR SPACE TO SKIP",
         {90U, 224U, 232U, 255U},
         1.2F
     );
@@ -737,6 +813,7 @@ private:
     auto status = StartupIntroStatus::played;
     bool native_failed = false;
     bool timed_out = false;
+    SkipInputState skip_input;
     while (!callback->done()) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -745,7 +822,7 @@ private:
                 status = StartupIntroStatus::quit_requested;
                 break;
             }
-            if (is_skip_event(event)) {
+            if (skip_input.consume(event)) {
                 status = StartupIntroStatus::skipped;
                 break;
             }

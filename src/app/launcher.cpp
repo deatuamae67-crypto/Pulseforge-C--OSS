@@ -6,6 +6,7 @@
 #include "media_routes.hpp"
 #include "ps2_theme.hpp"
 #include "menu_layout.hpp"
+#include "mobile_touch_controls.hpp"
 #include "sdl_input_actions.hpp"
 #include "sniff_bridge.hpp"
 
@@ -109,6 +110,7 @@ public:
         }
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
         apply_visual_settings(settings.visual);
+        refresh_touch_controls();
         const auto seed = static_cast<std::uint64_t>(
             std::chrono::steady_clock::now().time_since_epoch().count()
         );
@@ -121,6 +123,12 @@ public:
     ~MenuSession() {
         discord_presence_.clear();
         music_.shutdown();
+        // A released platform belongs to gameplay and must keep the process-wide
+        // touch router alive. If this MenuSession still owns SDL, detach the
+        // event watch before destroying the renderer/window or calling SDL_Quit.
+        if (renderer_ != nullptr || window_ != nullptr || initialized_) {
+            mobile_touch_controls().shutdown();
+        }
         if (renderer_ != nullptr) {
             SDL_DestroyRenderer(renderer_);
         }
@@ -191,6 +199,7 @@ public:
         if (settings_ != nullptr) {
             apply_visual_settings(settings_->visual);
         }
+        refresh_touch_controls();
         SDL_ShowWindow(window_);
         SDL_RaiseWindow(window_);
         publish_presence(RuntimeActivityKind::launcher, "In the main menu");
@@ -374,6 +383,19 @@ public:
 
     [[nodiscard]] std::shared_ptr<DiscordPresenceSession> discord_session() const noexcept {
         return discord_presence_.session();
+    }
+
+    void refresh_touch_controls() noexcept {
+        if (settings_ == nullptr || window_ == nullptr || renderer_ == nullptr) {
+            return;
+        }
+        mobile_touch_controls().configure(
+            window_,
+            renderer_,
+            settings_->touch,
+            settings_->controls
+        );
+        mobile_touch_controls().set_context(MobileTouchContext::menu);
     }
 
     void apply_visual_settings(const VisualSettings& settings) const {
@@ -1499,7 +1521,7 @@ void draw_menu_surface_backdrop(
     while (true) {
         menu.pump_presence();
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (poll_mobile_event(&event)) {
             SDL_ConvertEventToRenderCoordinates(menu.renderer(), &event);
             if (event.type == SDL_EVENT_QUIT
                 || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -1561,7 +1583,7 @@ void draw_menu_surface_backdrop(
             {246.0F, 410.0F, 788.0F * progress, 8.0F},
             palette.accent
         );
-        SDL_RenderPresent(menu.renderer());
+        present_with_mobile_touch(menu.renderer());
         SDL_Delay(1);
     }
 }
@@ -1609,7 +1631,7 @@ void show_loading_screen(
             index == active ? palette.accent : palette.header
         );
     }
-    SDL_RenderPresent(renderer);
+    present_with_mobile_touch(renderer);
 }
 
 [[nodiscard]] std::optional<std::size_t> browse_choices(
@@ -1634,7 +1656,7 @@ void show_loading_screen(
     while (running) {
         menu.update_music();
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (poll_mobile_event(&event)) {
             SDL_ConvertEventToRenderCoordinates(renderer, &event);
             if (event.type == SDL_EVENT_QUIT
                 || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -1801,7 +1823,7 @@ void show_loading_screen(
             );
             y += 40.0F;
         }
-        SDL_RenderPresent(renderer);
+        present_with_mobile_touch(renderer);
         SDL_Delay(1);
     }
 
@@ -1871,7 +1893,7 @@ template <std::size_t Size>
     while (running) {
         menu.update_music();
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (poll_mobile_event(&event)) {
             SDL_ConvertEventToRenderCoordinates(renderer, &event);
             if (event.type == SDL_EVENT_QUIT
                 || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -2080,7 +2102,7 @@ template <std::size_t Size>
                 {153, 233, 178, 255}
             );
         }
-        SDL_RenderPresent(renderer);
+        present_with_mobile_touch(renderer);
         SDL_Delay(1);
     }
 
@@ -2445,7 +2467,7 @@ void SDLCALL file_dialog_callback(
     while (!state.complete.load(std::memory_order_acquire)) {
         menu.update_music();
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (poll_mobile_event(&event)) {
             // Native dialogs own cancellation while open. Keeping this state
             // alive until the callback prevents a use-after-free on platforms
             // that invoke the callback from another thread.
@@ -2476,7 +2498,7 @@ void SDLCALL file_dialog_callback(
             {218, 214, 236, 255},
             1.35F
         );
-        SDL_RenderPresent(menu.renderer());
+        present_with_mobile_touch(menu.renderer());
         SDL_Delay(8);
     }
     const std::scoped_lock lock(state.mutex);
@@ -2799,7 +2821,7 @@ struct FlpInstallResult {
             menu.update_music();
             bool keep_running = !menu.close_requested();
             SDL_Event event;
-            while (SDL_PollEvent(&event)) {
+            while (poll_mobile_event(&event)) {
                 if (event.type == SDL_EVENT_QUIT
                     || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
                     menu.request_close();
@@ -2831,7 +2853,7 @@ struct FlpInstallResult {
                 {218, 214, 236, 255},
                 1.35F
             );
-            SDL_RenderPresent(menu.renderer());
+            present_with_mobile_touch(menu.renderer());
             return keep_running;
         }
     );
@@ -3287,7 +3309,7 @@ void draw_autochart_progress(
         1.0F,
         105U
     );
-    SDL_RenderPresent(renderer);
+    present_with_mobile_touch(renderer);
 }
 
 [[nodiscard]] AutoChartResult run_autochart_generation_screen(
@@ -3331,7 +3353,7 @@ void draw_autochart_progress(
     while (!shared.done.load(std::memory_order_acquire)) {
         menu.pump_presence();
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (poll_mobile_event(&event)) {
             SDL_ConvertEventToRenderCoordinates(menu.renderer(), &event);
             if (event.type == SDL_EVENT_QUIT
                 || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -5046,7 +5068,7 @@ void show_credits(
     while (running) {
         menu.update_music();
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
+        while (poll_mobile_event(&event)) {
             SDL_ConvertEventToRenderCoordinates(menu.renderer(), &event);
             if (event.type == SDL_EVENT_QUIT
                 || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -5198,7 +5220,7 @@ void show_credits(
             palette.muted,
             0.9F
         );
-        SDL_RenderPresent(menu.renderer());
+        present_with_mobile_touch(menu.renderer());
         SDL_Delay(1);
     }
 }
@@ -5390,6 +5412,100 @@ void show_discord_options(MenuSession& menu, AppLaunchOptions& options) {
     }
 }
 
+void show_touch_options(MenuSession& menu, AppLaunchOptions& options) {
+    std::size_t selected_row = 0U;
+    while (true) {
+        auto& touch = options.settings.touch;
+        const auto percent = [](const float value) {
+            return std::to_string(static_cast<int>(std::lround(
+                std::clamp(value, 0.0F, 1.0F) * 100.0F
+            ))) + "%";
+        };
+        const std::vector<std::string> choices{
+            "Gameplay touch lanes: " + on_off(touch.gameplay_enabled),
+            "Show touch labels: " + on_off(touch.show_labels),
+            "Editor direct touch: " + on_off(touch.editor_direct_touch),
+            "Overlay opacity: " + percent(touch.opacity),
+            "Control scale: " + std::to_string(touch.scale).substr(0, 4) + "x",
+            "Touch sensitivity: " + std::to_string(touch.sensitivity).substr(0, 4) + "x",
+            "Boundary deadzone: " + percent(touch.deadzone),
+            "Gameplay screen coverage: " + percent(touch.gameplay_coverage),
+            "Horizontal offset: " + std::to_string(touch.horizontal_offset).substr(0, 5),
+            "Vertical offset: " + std::to_string(touch.vertical_offset).substr(0, 5),
+            "Reset mobile controls to defaults",
+            "Back",
+        };
+        const auto selected = browse_choices(
+            menu,
+            "ANDROID / TOUCH CONTROLS",
+            choices,
+            "Changes apply immediately; gameplay supports 1K-18K multitouch",
+            selected_row
+        );
+        if (!selected.has_value() || *selected == choices.size() - 1U) {
+            return;
+        }
+        selected_row = *selected;
+        switch (*selected) {
+        case 0U: touch.gameplay_enabled = !touch.gameplay_enabled; break;
+        case 1U: touch.show_labels = !touch.show_labels; break;
+        case 2U: touch.editor_direct_touch = !touch.editor_direct_touch; break;
+        case 3U: {
+            constexpr std::array values{0.20F, 0.32F, 0.42F, 0.55F, 0.70F, 0.85F, 1.0F};
+            const auto current = std::ranges::find(values, touch.opacity);
+            touch.opacity = current == values.end() || current + 1 == values.end()
+                ? values.front() : *(current + 1);
+            break;
+        }
+        case 4U: {
+            constexpr std::array values{0.75F, 0.90F, 1.0F, 1.15F, 1.30F, 1.50F};
+            const auto current = std::ranges::find(values, touch.scale);
+            touch.scale = current == values.end() || current + 1 == values.end()
+                ? values.front() : *(current + 1);
+            break;
+        }
+        case 5U: {
+            constexpr std::array values{0.75F, 1.0F, 1.25F, 1.50F, 2.0F};
+            const auto current = std::ranges::find(values, touch.sensitivity);
+            touch.sensitivity = current == values.end() || current + 1 == values.end()
+                ? values.front() : *(current + 1);
+            break;
+        }
+        case 6U: {
+            constexpr std::array values{0.0F, 0.01F, 0.02F, 0.04F, 0.07F, 0.10F};
+            const auto current = std::ranges::find(values, touch.deadzone);
+            touch.deadzone = current == values.end() || current + 1 == values.end()
+                ? values.front() : *(current + 1);
+            break;
+        }
+        case 7U: {
+            constexpr std::array values{0.50F, 0.65F, 0.80F, 0.90F, 1.0F};
+            const auto current = std::ranges::find(values, touch.gameplay_coverage);
+            touch.gameplay_coverage = current == values.end() || current + 1 == values.end()
+                ? values.front() : *(current + 1);
+            break;
+        }
+        case 8U: {
+            constexpr std::array values{-0.15F, -0.075F, 0.0F, 0.075F, 0.15F};
+            const auto current = std::ranges::find(values, touch.horizontal_offset);
+            touch.horizontal_offset = current == values.end() || current + 1 == values.end()
+                ? values.front() : *(current + 1);
+            break;
+        }
+        case 9U: {
+            constexpr std::array values{-0.15F, -0.075F, 0.0F, 0.075F, 0.15F};
+            const auto current = std::ranges::find(values, touch.vertical_offset);
+            touch.vertical_offset = current == values.end() || current + 1 == values.end()
+                ? values.front() : *(current + 1);
+            break;
+        }
+        case 10U: touch = TouchSettings{}; break;
+        default: return;
+        }
+        menu.refresh_touch_controls();
+    }
+}
+
 void show_options(MenuSession& menu, AppLaunchOptions& options) {
     std::size_t selected_row = 0U;
     while (true) {
@@ -5499,6 +5615,7 @@ void show_options(MenuSession& menu, AppLaunchOptions& options) {
                 + std::string(visualizer_image_label),
             "Note skin: " + note_skin_label,
             "Discord Rich Presence...",
+            "Android / Touch controls...",
             "Controls...",
             "Back",
         };
@@ -5929,6 +6046,9 @@ void show_options(MenuSession& menu, AppLaunchOptions& options) {
             show_discord_options(menu, options);
             break;
         case 36:
+            show_touch_options(menu, options);
+            break;
+        case 37:
             show_controls_editor(
                 menu.window(),
                 menu.renderer(),
@@ -5939,6 +6059,8 @@ void show_options(MenuSession& menu, AppLaunchOptions& options) {
         default: return;
         }
         menu.apply_visual_settings(options.settings.visual);
+        // Rebuild the virtual-key map after Controls or touch settings change.
+        menu.refresh_touch_controls();
         if (menu_music_changed) {
             menu.reconfigure_music();
         } else {

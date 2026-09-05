@@ -1208,6 +1208,24 @@ if(PULSEFORGE_BUILD_TESTS)
         )
 
         add_executable(
+            pulseforge_mobile_touch_controls_tests
+            tests/mobile_touch_controls_test.cpp
+        )
+        target_include_directories(
+            pulseforge_mobile_touch_controls_tests
+            PRIVATE src/app
+        )
+        target_link_libraries(
+            pulseforge_mobile_touch_controls_tests
+            PRIVATE pulseforge_runtime SDL3::SDL3
+        )
+        pulseforge_set_warnings(pulseforge_mobile_touch_controls_tests)
+        add_test(
+            NAME pulseforge.mobile_touch_controls
+            COMMAND pulseforge_mobile_touch_controls_tests
+        )
+
+        add_executable(
             pulseforge_editor_ui_tests
             tests/editor_ui_test.cpp
         )
