@@ -12,7 +12,20 @@ The project-local SDK directory remains ignored by Git:
 third_party/discord_social_sdk/
 ```
 
-Developers can stage an authorized SDK archive with:
+Before staging a private SDK archive, audit it in place with the standard-library-only inspector:
+
+```bash
+python3 scripts/inspect-discord-social-sdk.py \
+  --sdk /path/to/DiscordSocialSdk-1.10.19337.zip \
+  --expect-version 1.10.19337 \
+  --require all \
+  --deep \
+  --hash
+```
+
+The auditor reads ZIP/TAR archives or extracted directories without copying SDK contents into the repository. It reports the detected version, headers, platform inputs, PE/ELF/Mach-O architectures, Android Prefab/ABI metadata and SHA-256 values for matched SDK artifacts. Omit `--require all` when auditing a platform-specific download; use repeated `--require windows`, `--require linux`, `--require macos` or `--require android` gates instead.
+
+Developers can then stage an authorized SDK archive with:
 
 ```powershell
 .\scripts\setup-discord-social-sdk.ps1 -SdkPath C:\Downloads\discord_social_sdk.zip
@@ -32,10 +45,10 @@ PulseForge release packages therefore treat the runtime as a required integrated
 
 - Windows: `discord_partner_sdk.dll` beside `pulseforge.exe` and `pulseforge-cli.exe`.
 - Linux: `libdiscord_partner_sdk.so` beside the executable, with an `$ORIGIN` runtime search path.
-- macOS: Discord Social SDK 1.10 packages the runtime as `discord_partner_sdk.framework`, but framework-based PulseForge linking/embedding is **not currently build-ready**. Until issue #42 is completed against an authorized framework package, only the older `libdiscord_partner_sdk.dylib` layout is a validated PulseForge compatibility path on macOS.
+- macOS: Discord's 1.10 release line officially distributes the SDK as `discord_partner_sdk.framework`. The inspected 1.10.19337 package also contains a universal `libdiscord_partner_sdk.dylib` (`x86_64 + arm64`), and the current PulseForge CMake path can use that dylib for private compatibility/build smoke tests. **Do not treat that compatibility path as the canonical 1.10 production package.** Production macOS 1.10 packaging follows the framework distribution and is tracked in issue #42.
 - Android: `discord_partner_sdk.aar` is consumed through Gradle/Prefab and its native runtime is packaged into the APK.
 
-Once #42 is completed, a Social SDK 1.10 macOS package must embed `discord_partner_sdk.framework` inside `PulseForge.app/Contents/Frameworks`, resolve it through a bundle-local `@rpath`, and validate the final signed bundle. Do not label a current framework-only macOS build as Discord-enabled before that validation exists.
+For the macOS 1.10 production path, preserve the complete `discord_partner_sdk.framework` bundle inside `pulseforge.app/Contents/Frameworks` and resolve it through `@rpath`. Copying only the framework executable is invalid: the inspected 1.10.19337 framework bundles `Frameworks/libdiscord_krisp.dylib` plus Krisp model resources under `Resources/Krisp`, and Discord's 1.10 release notes explicitly identify framework packaging as the new macOS signing/notarization path with Krisp bundled inside.
 
 A Discord-enabled release must never be published if the corresponding runtime dependency is missing.
 

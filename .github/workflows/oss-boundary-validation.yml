@@ -130,6 +130,12 @@ jobs:
           print('All remote GitHub Actions and docker action images use immutable references.')
           PY
 
+      - name: Validate Discord private-SDK auditor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/inspect_discord_social_sdk_test.py
+
       - name: Reject non-redistributable or private build inputs
         shell: bash
         run: |
