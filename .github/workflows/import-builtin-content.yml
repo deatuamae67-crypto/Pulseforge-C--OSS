@@ -1,6 +1,12 @@
 name: PulseForge import built-in content
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/import-builtin-content.yml'
+      - 'docs/COMPLETE_CONTENT_1.0.0.json'
+      - 'docs/complete/mods/*.json'
   push:
     branches: [main]
     paths:
@@ -8,7 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CONTENT_BRANCH: 'complete/embedded-builtin-content'
@@ -51,10 +57,18 @@ jobs:
           print('matrix='+json.dumps({'include':items}, separators=(',',':')))
           PY
 
+      - name: Confirm PR mode is validation-only
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: echo 'Import matrix validated; content writes are disabled for pull_request events.'
+
   import-one:
+    if: github.event_name != 'pull_request'
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    permissions:
+      contents: write
     strategy:
       fail-fast: true
       max-parallel: 1
@@ -215,6 +229,7 @@ jobs:
           git push origin "HEAD:$CONTENT_BRANCH"
 
   verify-branch:
+    if: github.event_name != 'pull_request'
     needs: import-one
     runs-on: ubuntu-24.04
     steps:
