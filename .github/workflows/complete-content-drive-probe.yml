@@ -13,20 +13,20 @@ permissions:
 jobs:
   probe-shared-content:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install gdown
+      - name: Install unbounded Drive downloader
         shell: bash
-        run: python -m pip install --disable-pip-version-check 'gdown>=5.2,<6'
+        run: python -m pip install --disable-pip-version-check 'gdown==6.0.0'
 
       - name: Download shared mods manifest
         shell: bash
         run: |
           set -euo pipefail
-          gdown --id '1NDOUVSl9fjdyyKRa-bL30TxJ514O3Lao' -O "$RUNNER_TEMP/modsList.txt"
+          gdown '1NDOUVSl9fjdyyKRa-bL30TxJ514O3Lao' -O "$RUNNER_TEMP/modsList.txt"
           test "$(stat -c '%s' "$RUNNER_TEMP/modsList.txt")" -eq 839
           grep -qx 'drive-library-2026-04-30|1' "$RUNNER_TEMP/modsList.txt"
 
@@ -35,16 +35,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/probe-mod"
-          gdown --folder --remaining-ok 'https://drive.google.com/drive/folders/1ELZMQUVXuAe-V43QeUheKgPY5CxAPPrW' -O "$RUNNER_TEMP/probe-mod"
+          gdown --folder 'https://drive.google.com/drive/folders/1ELZMQUVXuAe-V43QeUheKgPY5CxAPPrW' -O "$RUNNER_TEMP/probe-mod"
           files="$(find "$RUNNER_TEMP/probe-mod" -type f | wc -l | tr -d ' ')"
           bytes="$(find "$RUNNER_TEMP/probe-mod" -type f -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
-          test "$files" -ge 1
-          test "$bytes" -ge 1000000
-          printf 'Downloaded %s files / %s bytes from shared complete-content folder.\n' "$files" "$bytes"
+          test "$files" -eq 41
+          test "$bytes" -eq 3492318
 
-      - name: Probe menu music access
+      - name: Download all shared menu music
         shell: bash
         run: |
           set -euo pipefail
-          gdown --id '1C8IqgLMzWjuFz23kPjVsLwnq6CWU33IV' -O "$RUNNER_TEMP/menu-probe.mp3"
-          test "$(stat -c '%s' "$RUNNER_TEMP/menu-probe.mp3")" -eq 2553543
+          mkdir -p "$RUNNER_TEMP/menu"
+          gdown --folder 'https://drive.google.com/drive/folders/1LZxmV2e_94mDj8qx8b2mBL8cg-f-mVp_' -O "$RUNNER_TEMP/menu"
+          files="$(find "$RUNNER_TEMP/menu" -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')"
+          bytes="$(find "$RUNNER_TEMP/menu" -maxdepth 1 -type f -iname '*.mp3' -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
+          test "$files" -eq 10
+          test "$bytes" -eq 46117355
