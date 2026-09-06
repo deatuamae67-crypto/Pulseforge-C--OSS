@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-batata-static",
+  "slug": "drive-batata-static",
+  "drive_id": "1NgkaKdmunL9J81RnS1nE5HHUngDs63iV",
+  "min_files": 17,
+  "min_bytes": 1703938152,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
