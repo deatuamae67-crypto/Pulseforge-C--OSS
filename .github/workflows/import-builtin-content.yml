@@ -121,6 +121,28 @@ jobs:
         run: |
           set -euo pipefail
 
+          # A successful content unit is already validated, committed and pushed
+          # to the accumulated branch. Re-runs must not spend Drive quota on it.
+          if [[ "$ITEM_KIND" == 'menu' ]]; then
+            target='assets/menu'
+          elif [[ "$ITEM_KIND" == 'modslist' ]]; then
+            target='mods/modsList.txt'
+          else
+            descriptor="docs/complete/mods/$ITEM_SLUG.json"
+            test -f "$descriptor"
+            name="$(jq -r '.name' "$descriptor")"
+            [[ "$name" != '.autochart-staging' ]]
+            [[ "$name" != */* ]]
+            target="mods/$name"
+          fi
+          printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
+
+          expected_commit="complete(content): embed $ITEM_SLUG"
+          if [[ -e "$target" ]] && git log --format='%s' --fixed-strings --grep="$expected_commit" -n 1 | grep -Fxq "$expected_commit"; then
+            echo "$ITEM_SLUG already committed on $CONTENT_BRANCH; skipping Google Drive download."
+            exit 0
+          fi
+
           download_folder_with_retry() {
             local folder_id="$1"
             local output="$2"
@@ -161,7 +183,6 @@ jobs:
 
           if [[ "$ITEM_KIND" == 'menu' ]]; then
             folder_id="$(jq -r '.source.menu_music_staging_folder_id' "$CONTENT_SPEC")"
-            target='assets/menu'
             staging="$RUNNER_TEMP/menu-music"
             download_folder_with_retry "$folder_id" "$staging" 'menu music'
             expected_count="$(jq -r '.menu_music.expected_tracks' "$CONTENT_SPEC")"
@@ -174,7 +195,6 @@ jobs:
             find "$target" -maxdepth 1 -type f \( -iname '*.mp3' -o -iname '*.ogg' -o -iname '*.wav' -o -iname '*.flac' \) -delete
             find "$staging" -maxdepth 1 -type f -exec cp -f '{}' "$target/" \;
           elif [[ "$ITEM_KIND" == 'modslist' ]]; then
-            target='mods/modsList.txt'
             staging="$RUNNER_TEMP/modsList.txt"
             download_file_with_retry "$MODSLIST_FILE_ID" "$staging" 'modsList.txt'
             test "$(stat -c '%s' "$staging")" -eq 839
@@ -189,7 +209,6 @@ jobs:
             min_bytes="$(jq -r '.min_bytes' "$descriptor")"
             [[ "$name" != '.autochart-staging' ]]
             [[ "$name" != */* ]]
-            target="mods/$name"
             staging="$RUNNER_TEMP/mod-$ITEM_SLUG"
             download_folder_with_retry "$drive_id" "$staging" "$name"
             files="$(find "$staging" -type f | wc -l | tr -d ' ')"
@@ -200,8 +219,6 @@ jobs:
             mkdir -p "$(dirname "$target")"
             mv "$staging" "$target"
           fi
-
-          printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
 
       - name: Reject private/non-redistributable engine inputs
         shell: bash
