@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-2026-08-22-evil-unfairness",
+  "slug": "drive-2026-08-22-evil-unfairness",
+  "drive_id": "1tOD7BIA6jbeeFC1zKcDJQh4YTiC_QNzw",
+  "min_files": 405,
+  "min_bytes": 144705828,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
