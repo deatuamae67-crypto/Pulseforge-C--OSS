@@ -34,10 +34,11 @@ under [`docs/`](docs/) and on the [GitHub Releases](https://github.com/deatuamae
 - **Cross-platform** — Windows, Linux, macOS and Android are first-class build
   targets, with Android touch controls included in the public source.
 - **Optional integrations** — Discord Social SDK support is fail-open and kept
-  separate from the redistributable OSS tree when proprietary SDK inputs are
+  separate from the redistributable source tree when proprietary SDK inputs are
   unavailable.
-- **Redistributable demo content** — the repository includes the original CC0
-  `Neon Circuit` procedural demo and PulseForge-authored shader presets.
+- **Content-rich Complete distributions** — approved menu music and the full
+  versioned mod library can be published as verified Release content without
+  bloating the Git history.
 
 ## Platforms
 
@@ -60,18 +61,20 @@ distinct from production notarization.
 PulseForge keeps imported content separate from engine source. The compatibility
 layer covers chart parsing, tempo/event timelines, note ownership and lanes,
 Lua callbacks, supported Psych-style helpers, media routing and gameplay
-startup behavior without requiring third-party mods to be committed to this
-repository.
+startup behavior without requiring multi-gigabyte content libraries to be
+committed as ordinary Git blobs.
 
 Historical compatibility corpora are tracked through deterministic manifests
-and regression fixtures rather than mirroring third-party payloads. Current and
-past compatibility records are kept in [`docs/`](docs/); the public/private
-boundary is defined in [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md).
+and regression fixtures. Approved content-rich distributions are published as
+versioned Release assets with checksums and per-pack manifests. See
+[`docs/COMPLETE_EDITION.md`](docs/COMPLETE_EDITION.md) for the Complete
+distribution model and [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md) for the source
+publication boundary.
 
 Menu/pause music, startup intros, credit portraits and visualizer media remain
-supported as local extension points. Commercial music, videos, proprietary SDK
-files and third-party mod assets keep their own licenses and are not silently
-relicensed by PulseForge.
+supported as extension points. Content included in a Complete release keeps its
+own applicable provenance and terms; inclusion does not silently relicense it
+under the PulseForge source license.
 
 ## Build from source
 
@@ -116,14 +119,15 @@ The repository maintains separate CI gates for:
 
 - cross-platform application builds;
 - deterministic core tests;
-- the public/private OSS boundary;
+- the public/private source boundary;
 - release integrity;
+- Complete-content manifests and packaging;
 - synthetic Discord SDK integration and platform packaging paths where
   applicable.
 
 Release publication is fail-closed: platform artifacts are built from the
-selected `main` commit, checksums and the expected public asset set are verified,
-and only then is the GitHub Release published.
+selected `main` commit, checksums and the expected asset set are verified, and
+only then is the GitHub Release published.
 
 ## Project structure
 
@@ -142,15 +146,17 @@ third_party/          Redistributable dependency integration metadata
 PulseForge-authored source is distributed under the Apache License 2.0 as
 described by [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). The procedural demo is
 CC0-1.0. Optional or externally supplied SDKs, FFmpeg executables, music,
-videos, mods and imported game assets retain their own terms.
+videos, mods and imported game assets retain their own applicable terms.
 
-The public repository intentionally excludes secrets, signing identities,
-proprietary Discord SDK packages, commercial media, private mod collections,
-build caches and historical backup payloads.
+The Git source tree intentionally excludes secrets, signing identities,
+proprietary Discord SDK packages, generated release packages, build caches and
+historical backup payloads. Approved large media/mod collections may instead be
+distributed as separately verified GitHub Release assets by a Complete release.
 
-See [`THIRD_PARTY.md`](THIRD_PARTY.md), [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md)
-and [`docs/RELEASE_REQUIREMENTS.md`](docs/RELEASE_REQUIREMENTS.md) for the
-detailed redistribution and release boundary.
+See [`THIRD_PARTY.md`](THIRD_PARTY.md), [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md),
+[`docs/COMPLETE_EDITION.md`](docs/COMPLETE_EDITION.md) and
+[`docs/RELEASE_REQUIREMENTS.md`](docs/RELEASE_REQUIREMENTS.md) for the detailed
+redistribution and release boundary.
 
 ## Releases and development
 

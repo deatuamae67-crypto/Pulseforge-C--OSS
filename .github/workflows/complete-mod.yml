@@ -1,0 +1,195 @@
+name: PulseForge Complete single-mod integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/complete/mods/*.json'
+      - '.github/workflows/complete-mod.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/complete/mods/*.json'
+
+permissions:
+  contents: read
+
+env:
+  COMPLETE_TAG: 'v1.0.0-complete'
+  CONTENT_SPEC: 'docs/COMPLETE_CONTENT_1.0.0.json'
+  GDOWN_VERSION: '6.0.0'
+
+jobs:
+  validate-and-package-one-mod:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: ${{ github.event_name == 'push' && 'write' || 'read' }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout source with comparison history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Require exactly one newly introduced mod descriptor
+        id: descriptor
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == 'pull_request' ]]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            head='${{ github.event.pull_request.head.sha }}'
+          else
+            base='${{ github.event.before }}'
+            head="$GITHUB_SHA"
+          fi
+          mapfile -t changed < <(git diff --name-only "$base" "$head" -- 'docs/complete/mods/*.json')
+          mapfile -t added < <(git diff --name-only --diff-filter=A "$base" "$head" -- 'docs/complete/mods/*.json')
+          if (( ${#changed[@]} != 1 || ${#added[@]} != 1 )) || [[ "${changed[0]}" != "${added[0]}" ]]; then
+            printf 'Each Complete mod PR/merge must introduce exactly one new docs/complete/mods/*.json file. Changed: %s; added: %s\n' "${#changed[@]}" "${#added[@]}" >&2
+            printf 'Changed files:\n%s\n' "${changed[*]:-<none>}" >&2
+            exit 1
+          fi
+          spec="${added[0]}"
+          jq -e '
+            .schema_version == 1
+            and .edition == "1.0.0-complete"
+            and (.name | type == "string" and length > 0)
+            and (.slug | type == "string" and test("^[a-z0-9][a-z0-9-]*$"))
+            and (.drive_id | type == "string" and length > 10)
+            and (.min_files | type == "number" and . >= 1)
+            and (.min_bytes | type == "number" and . >= 1)
+            and (.enabled_by_default | type == "boolean")
+          ' "$spec" >/dev/null
+          expected="docs/complete/mods/$(jq -r '.slug' "$spec").json"
+          [[ "$spec" == "$expected" ]] || { echo "Descriptor path must be $expected" >&2; exit 1; }
+          [[ "$(jq -r '.name' "$spec")" != '.autochart-staging' ]] || { echo '.autochart-staging is transient and cannot be a Complete mod' >&2; exit 1; }
+          echo "spec=$spec" >> "$GITHUB_OUTPUT"
+          echo "name=$(jq -r '.name' "$spec")" >> "$GITHUB_OUTPUT"
+          echo "slug=$(jq -r '.slug' "$spec")" >> "$GITHUB_OUTPUT"
+          echo "drive_id=$(jq -r '.drive_id' "$spec")" >> "$GITHUB_OUTPUT"
+          echo "min_files=$(jq -r '.min_files' "$spec")" >> "$GITHUB_OUTPUT"
+          echo "min_bytes=$(jq -r '.min_bytes' "$spec")" >> "$GITHUB_OUTPUT"
+
+      - name: Install Drive downloader
+        shell: bash
+        run: python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+
+      - name: Download only this mod
+        shell: bash
+        env:
+          MOD_NAME: ${{ steps.descriptor.outputs.name }}
+          MOD_DRIVE_ID: ${{ steps.descriptor.outputs.drive_id }}
+          MIN_FILES: ${{ steps.descriptor.outputs.min_files }}
+          MIN_BYTES: ${{ steps.descriptor.outputs.min_bytes }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/stage/mods/$MOD_NAME"
+          for attempt in 1 2 3; do
+            rm -rf "$root"
+            mkdir -p "$root"
+            if gdown --folder "https://drive.google.com/drive/folders/$MOD_DRIVE_ID" -O "$root"; then
+              break
+            fi
+            [[ "$attempt" != 3 ]] || exit 1
+            sleep $((attempt * 15))
+          done
+          files="$(find "$root" -type f | wc -l | tr -d ' ')"
+          bytes="$(find "$root" -type f -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
+          (( files >= MIN_FILES )) || { echo "$MOD_NAME: $files files < minimum $MIN_FILES" >&2; exit 1; }
+          (( bytes >= MIN_BYTES )) || { echo "$MOD_NAME: $bytes bytes < minimum $MIN_BYTES" >&2; exit 1; }
+          echo "$MOD_NAME: validated $files files / $bytes bytes."
+
+      - name: Hash and package this mod
+        shell: bash
+        env:
+          MOD_NAME: ${{ steps.descriptor.outputs.name }}
+          MOD_SLUG: ${{ steps.descriptor.outputs.slug }}
+          MOD_DRIVE_ID: ${{ steps.descriptor.outputs.drive_id }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/stage/mods/$MOD_NAME"
+          base="PulseForge-v1.0.0-complete-mod-$MOD_SLUG"
+          manifest="$RUNNER_TEMP/$base.manifest.json"
+          python3 - "$root" "$manifest" "$MOD_NAME" "$MOD_SLUG" "$MOD_DRIVE_ID" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]); files=[]; total=0
+          for p in sorted((x for x in root.rglob('*') if x.is_file()),key=lambda p:p.as_posix().casefold()):
+            h=hashlib.sha256()
+            with p.open('rb') as f:
+              for chunk in iter(lambda:f.read(4*1024*1024),b''): h.update(chunk)
+            size=p.stat().st_size; total+=size
+            files.append({'path':p.relative_to(root).as_posix(),'size_bytes':size,'sha256':h.hexdigest()})
+          json.dump({'schema_version':1,'edition':'1.0.0-complete','kind':'mod','name':sys.argv[3],'slug':sys.argv[4],'source_drive_id':sys.argv[5],'file_count':len(files),'total_bytes':total,'files':files},open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent=2)
+          PY
+          archive="$RUNNER_TEMP/$base.zip"
+          (cd "$RUNNER_TEMP/stage" && zip -q -r -0 "$archive" "mods/$MOD_NAME")
+          (cd "$RUNNER_TEMP" && sha256sum "$base.zip" > "$base.zip.SHA256SUMS.txt")
+          unzip -tq "$archive"
+
+      - name: Upload this mod into the Complete draft after merge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          MOD_SLUG: ${{ steps.descriptor.outputs.slug }}
+        run: |
+          set -euo pipefail
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$COMPLETE_TAG\") | [.id,.draft] | @tsv" | head -n1 || true)"
+          [[ -n "$release" ]] || { echo 'Complete draft does not exist yet; merge the Complete framework PR first.' >&2; exit 1; }
+          IFS=$'\t' read -r release_id draft <<<"$release"
+          [[ "$draft" == 'true' ]] || { echo "$COMPLETE_TAG is already published; refusing to alter it" >&2; exit 1; }
+          base="PulseForge-v1.0.0-complete-mod-$MOD_SLUG"
+          archive="$RUNNER_TEMP/$base.zip"
+          checksum="$RUNNER_TEMP/$base.zip.SHA256SUMS.txt"
+          manifest="$RUNNER_TEMP/$base.manifest.json"
+          max_bytes=$((1900 * 1024 * 1024))
+          upload=("$manifest" "$checksum")
+          if (( $(stat -c '%s' "$archive") < max_bytes )); then
+            upload+=("$archive")
+          else
+            split -b 1900M -d -a 2 "$archive" "$archive.part"
+            parts_checksum="$RUNNER_TEMP/$base.zip.parts.SHA256SUMS.txt"
+            (cd "$RUNNER_TEMP" && sha256sum "$base.zip.part"* > "$(basename "$parts_checksum")")
+            upload+=("$parts_checksum")
+            while IFS= read -r part; do upload+=("$part"); done < <(find "$RUNNER_TEMP" -maxdepth 1 -type f -name "$base.zip.part*" -print | sort)
+          fi
+          gh release upload "$COMPLETE_TAG" "${upload[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Publish Complete automatically when the last mod finishes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$(jq -r '.target_mod_count' "$CONTENT_SPEC")"
+          shopt -s nullglob
+          specs=(docs/complete/mods/*.json)
+          if (( ${#specs[@]} != target )); then
+            echo "Complete draft progress: ${#specs[@]}/$target mod PRs merged."
+            exit 0
+          fi
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$COMPLETE_TAG\" and .draft == true) | .id" | head -n1)"
+          [[ -n "$release_id" ]] || exit 0
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" | jq 'add' > "$RUNNER_TEMP/assets.json"
+          base_assets=(
+            'PulseForge-v1.0.0-complete-Windows-x86_64.zip'
+            'PulseForge-v1.0.0-complete-Linux-x86_64.tar.gz'
+            'PulseForge-v1.0.0-complete-macOS-arm64.tar.gz'
+            'PulseForge-v1.0.0-complete-macOS-x86_64.tar.gz'
+            'PulseForge-v1.0.0-complete-Android-arm64-test-signed.apk'
+            'PulseForge-v1.0.0-complete-menu-music.zip'
+          )
+          for n in "${base_assets[@]}"; do
+            jq -e --arg n "$n" 'any(.[];.name==$n and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Waiting for base asset: $n"; exit 0; }
+          done
+          for spec in "${specs[@]}"; do
+            slug="$(jq -r '.slug' "$spec")"; base="PulseForge-v1.0.0-complete-mod-$slug"
+            jq -e --arg n "$base.manifest.json" 'any(.[];.name==$n and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Waiting for $base manifest"; exit 0; }
+            jq -e --arg n "$base.zip.SHA256SUMS.txt" 'any(.[];.name==$n and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Waiting for $base checksum"; exit 0; }
+            jq -e --arg z "$base.zip" --arg p "$base.zip.part00" 'any(.[];(.name==$z or .name==$p) and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Waiting for $base archive"; exit 0; }
+          done
+          head_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$COMPLETE_TAG" -f sha="$head_sha" -F force=true >/dev/null
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false -F prerelease=false -f make_latest=true >/dev/null
+          echo "Published $COMPLETE_TAG at $head_sha: all $target independently merged mod packs are present."

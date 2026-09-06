@@ -1,0 +1,358 @@
+name: PulseForge 1.0.0 Complete base release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/complete-release.yml'
+      - '.github/workflows/complete-mod.yml'
+      - 'docs/COMPLETE_CONTENT_1.0.0.json'
+      - 'docs/COMPLETE_EDITION.md'
+      - 'docs/RELEASE_NOTES_1.0.0_COMPLETE.md'
+      - 'scripts/install-complete-content.sh'
+      - 'scripts/install-complete-content.ps1'
+      - 'README.md'
+      - 'docs/OSS_SCOPE.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/complete-release.yml'
+      - '.github/workflows/complete-mod.yml'
+      - 'docs/COMPLETE_CONTENT_1.0.0.json'
+      - 'docs/COMPLETE_EDITION.md'
+      - 'docs/RELEASE_NOTES_1.0.0_COMPLETE.md'
+      - 'scripts/install-complete-content.sh'
+      - 'scripts/install-complete-content.ps1'
+      - 'README.md'
+      - 'docs/OSS_SCOPE.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pulseforge-v1.0.0-complete-base-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  COMPLETE_TAG: 'v1.0.0-complete'
+  CONTENT_SPEC: 'docs/COMPLETE_CONTENT_1.0.0.json'
+  GDOWN_VERSION: '6.0.0'
+
+jobs:
+  validate-framework:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate Complete framework
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .schema_version == 2
+            and .edition == "1.0.0-complete"
+            and .target_mod_count == 30
+            and .mods_directory == "docs/complete/mods"
+            and .source.mods_folder_id == "1pAnpn__0pfFe1pMtS-XyenPP5peqIU46"
+            and .source.menu_music_staging_folder_id == "1LZxmV2e_94mDj8qx8b2mBL8cg-f-mVp_"
+            and .source.excluded_transient_folders == [".autochart-staging"]
+            and .menu_music.expected_tracks == 10
+            and .menu_music.expected_total_bytes == 46117355
+            and (.menu_music.tracks | length) == 10
+            and ([.menu_music.tracks[].name] | unique | length) == 10
+            and ([.menu_music.tracks[].drive_id] | unique | length) == 10
+            and ([.menu_music.tracks[].size_bytes] | add) == 46117355
+          ' "$CONTENT_SPEC" >/dev/null
+          bash -n scripts/install-complete-content.sh
+          test -s scripts/install-complete-content.ps1
+      - name: Verify shared Complete content access
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+          gdown "$(jq -r '.source.mods_list_file_id' "$CONTENT_SPEC")" -O "$RUNNER_TEMP/modsList.txt"
+          test "$(stat -c '%s' "$RUNNER_TEMP/modsList.txt")" -eq 839
+          menu="$RUNNER_TEMP/menu"
+          mkdir -p "$menu"
+          gdown --folder "https://drive.google.com/drive/folders/$(jq -r '.source.menu_music_staging_folder_id' "$CONTENT_SPEC")" -O "$menu"
+          test "$(find "$menu" -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')" -eq 10
+          test "$(find "$menu" -maxdepth 1 -type f -iname '*.mp3' -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')" -eq 46117355
+
+  prepare-draft:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate-framework
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Create or reuse Complete draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$COMPLETE_TAG\") | [.id,.draft] | @tsv" | head -n1 || true)"
+          if [[ -n "$existing" ]]; then
+            IFS=$'\t' read -r release_id draft <<<"$existing"
+            [[ "$draft" == 'true' ]] || { echo "$COMPLETE_TAG is already public; refusing to mutate it" >&2; exit 1; }
+          else
+            gh release create "$COMPLETE_TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title 'PulseForge 1.0.0 Complete' --notes-file docs/RELEASE_NOTES_1.0.0_COMPLETE.md --draft
+          fi
+          gh release upload "$COMPLETE_TAG" "$CONTENT_SPEC" scripts/install-complete-content.sh scripts/install-complete-content.ps1 --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Upload current modsList
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+          out="$RUNNER_TEMP/PulseForge-v1.0.0-complete-modsList.txt"
+          gdown "$(jq -r '.source.mods_list_file_id' "$CONTENT_SPEC")" -O "$out"
+          test "$(stat -c '%s' "$out")" -eq 839
+          gh release upload "$COMPLETE_TAG" "$out" --repo "$GITHUB_REPOSITORY" --clobber
+
+  menu-content:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: prepare-draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Package Complete menu music
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+          stage="$RUNNER_TEMP/stage"
+          mkdir -p "$stage/assets/menu"
+          gdown --folder "https://drive.google.com/drive/folders/$(jq -r '.source.menu_music_staging_folder_id' "$CONTENT_SPEC")" -O "$stage/assets/menu"
+          python3 - "$CONTENT_SPEC" "$stage/assets/menu" "$RUNNER_TEMP/PulseForge-v1.0.0-complete-menu-music.manifest.json" <<'PY'
+          import hashlib,json,pathlib,sys
+          spec=json.load(open(sys.argv[1],encoding='utf-8')); root=pathlib.Path(sys.argv[2])
+          expected={x['name']:x['size_bytes'] for x in spec['menu_music']['tracks']}
+          actual={p.name:p.stat().st_size for p in root.iterdir() if p.is_file()}
+          if actual != expected: raise SystemExit(f'menu mismatch: {actual!r}')
+          files=[]
+          for p in sorted(root.iterdir(),key=lambda x:x.name.casefold()):
+            h=hashlib.sha256()
+            with p.open('rb') as f:
+              for c in iter(lambda:f.read(1024*1024),b''): h.update(c)
+            files.append({'path':f'assets/menu/{p.name}','size_bytes':p.stat().st_size,'sha256':h.hexdigest()})
+          json.dump({'schema_version':1,'edition':'1.0.0-complete','kind':'menu_music','files':files},open(sys.argv[3],'w',encoding='utf-8'),ensure_ascii=False,indent=2)
+          PY
+          archive="$RUNNER_TEMP/PulseForge-v1.0.0-complete-menu-music.zip"
+          (cd "$stage" && zip -q -r -0 "$archive" assets/menu)
+          (cd "$RUNNER_TEMP" && sha256sum "$(basename "$archive")" > "$(basename "$archive").SHA256SUMS.txt")
+          gh release upload "$COMPLETE_TAG" "$archive" "$archive.SHA256SUMS.txt" "$RUNNER_TEMP/PulseForge-v1.0.0-complete-menu-music.manifest.json" --repo "$GITHUB_REPOSITORY" --clobber
+
+  linux-complete:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: prepare-draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install dependencies and menu music
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config file libasound2-dev libpulse-dev libudev-dev libdbus-1-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev libegl1-mesa-dev libgl1-mesa-dev
+          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+          mkdir -p assets/menu
+          gdown --folder 'https://drive.google.com/drive/folders/1LZxmV2e_94mDj8qx8b2mBL8cg-f-mVp_' -O assets/menu
+          test "$(find assets/menu -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')" -eq 10
+      - name: Build and upload Linux Complete package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset linux-release
+          cmake --build --preset linux-release --parallel 2
+          package='PulseForge-v1.0.0-complete-Linux-x86_64'; stage="$RUNNER_TEMP/$package"
+          cmake --install out/build/linux-release --prefix "$stage"
+          test -x "$stage/bin/pulseforge"
+          test "$(find "$stage/bin/assets/menu" -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')" -eq 10
+          cp scripts/install-complete-content.sh scripts/install-complete-content.ps1 docs/COMPLETE_EDITION.md "$stage/"
+          chmod +x "$stage/install-complete-content.sh"
+          archive="$RUNNER_TEMP/$package.tar.gz"
+          tar -C "$RUNNER_TEMP" -czf "$archive" "$package"
+          (cd "$RUNNER_TEMP" && sha256sum "$package.tar.gz" > "$package.tar.gz.SHA256SUMS.txt")
+          gh release upload "$COMPLETE_TAG" "$archive" "$archive.SHA256SUMS.txt" --repo "$GITHUB_REPOSITORY" --clobber
+
+  windows-complete:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: prepare-draft
+    runs-on: windows-2022
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Download menu music
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --disable-pip-version-check "gdown==$env:GDOWN_VERSION"
+          New-Item -ItemType Directory -Path assets/menu -Force | Out-Null
+          python -m gdown --folder 'https://drive.google.com/drive/folders/1LZxmV2e_94mDj8qx8b2mBL8cg-f-mVp_' -O assets/menu
+          if (@(Get-ChildItem assets/menu -File -Filter '*.mp3').Count -ne 10) { throw 'Menu music incomplete' }
+      - name: Build and upload Windows Complete package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          cmake --preset windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build --preset windows-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $package='PulseForge-v1.0.0-complete-Windows-x86_64'; $stage=Join-Path $env:RUNNER_TEMP $package
+          cmake --install out/build/msvc --config Release --prefix $stage
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (@(Get-ChildItem (Join-Path $stage 'bin/assets/menu') -File -Filter '*.mp3').Count -ne 10) { throw 'Complete menu music missing' }
+          Copy-Item scripts/install-complete-content.ps1,scripts/install-complete-content.sh,docs/COMPLETE_EDITION.md -Destination $stage -Force
+          $archive="$stage.zip"; Compress-Archive -Path $stage -DestinationPath $archive -CompressionLevel Optimal
+          $hash=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant(); $checksum="$archive.SHA256SUMS.txt"
+          "$hash  $package.zip" | Set-Content $checksum -Encoding ascii
+          gh release upload $env:COMPLETE_TAG $archive $checksum --repo $env:GITHUB_REPOSITORY --clobber
+
+  macos-complete:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: prepare-draft
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: arm64, runner: macos-15}
+          - {arch: x86_64, runner: macos-26-intel}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Prepare menu music
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v cmake >/dev/null || brew install cmake
+          command -v ninja >/dev/null || brew install ninja
+          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+          mkdir -p assets/menu
+          python3 -m gdown --folder 'https://drive.google.com/drive/folders/1LZxmV2e_94mDj8qx8b2mBL8cg-f-mVp_' -O assets/menu
+          test "$(find assets/menu -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')" -eq 10
+      - name: Build and upload macOS Complete package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}'
+          cmake --build --preset macos-release --parallel 2
+          package="PulseForge-v1.0.0-complete-macOS-${{ matrix.arch }}"; stage="$RUNNER_TEMP/$package"
+          cmake --install out/build/macos-release --prefix "$stage"
+          app="$stage/PulseForge.app"; binary="$app/Contents/MacOS/pulseforge"
+          test -x "$binary"; codesign --deep --force --sign - "$app"; codesign --verify --deep --strict "$app"
+          test "$(find "$stage" -path '*/assets/menu/*.mp3' -type f | wc -l | tr -d ' ')" -eq 10
+          cp scripts/install-complete-content.sh scripts/install-complete-content.ps1 docs/COMPLETE_EDITION.md "$stage/"
+          chmod +x "$stage/install-complete-content.sh"
+          archive="$RUNNER_TEMP/$package.tar.gz"; tar -C "$RUNNER_TEMP" -czf "$archive" "$package"
+          (cd "$RUNNER_TEMP" && shasum -a 256 "$package.tar.gz" > "$package.tar.gz.SHA256SUMS.txt")
+          gh release upload "$COMPLETE_TAG" "$archive" "$archive.SHA256SUMS.txt" --repo "$GITHUB_REPOSITORY" --clobber
+
+  android-complete:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: prepare-draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up JDK 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        with: {distribution: temurin, java-version: '17'}
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Build Complete APK with menu music
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager 'platforms;android-35' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.31.6'
+          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+          mkdir -p assets/menu
+          gdown --folder 'https://drive.google.com/drive/folders/1LZxmV2e_94mDj8qx8b2mBL8cg-f-mVp_' -O assets/menu
+          test "$(find assets/menu -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')" -eq 10
+          sed -i "s/versionCode = 100000/versionCode = 100001/" platform/android/app/build.gradle
+          sed -i "s/versionName = '1.0.0'/versionName = '1.0.0-complete'/" platform/android/app/build.gradle
+          chmod +x platform/android/gradlew
+          (cd platform/android && ./gradlew --no-daemon --stacktrace -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android" :app:assembleRelease)
+      - name: Sign and upload Complete APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          package='PulseForge-v1.0.0-complete-Android-arm64-test-signed'
+          unsigned="$RUNNER_TEMP/pulseforge-android/gradle/outputs/apk/release/app-release-unsigned.apk"; aligned="$RUNNER_TEMP/$package-aligned.apk"; signed="$RUNNER_TEMP/$package.apk"; keystore="$RUNNER_TEMP/test.jks"
+          keytool -genkeypair -noprompt -keystore "$keystore" -storepass android -keypass android -alias pulseforge-ci -keyalg RSA -keysize 4096 -validity 10000 -dname 'CN=PulseForge CI Test Build,OU=CI,O=PulseForge,C=PT'
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/zipalign" -P 16 -f 4 "$unsigned" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign --ks "$keystore" --ks-key-alias pulseforge-ci --ks-pass pass:android --key-pass pass:android --out "$signed" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose "$signed"
+          unzip -l "$signed" > "$RUNNER_TEMP/apk.txt"
+          test "$(grep -c 'pulseforge/assets/menu/.*\.mp3' "$RUNNER_TEMP/apk.txt")" -eq 10
+          (cd "$RUNNER_TEMP" && sha256sum "$package.apk" > "$package.apk.SHA256SUMS.txt")
+          gh release upload "$COMPLETE_TAG" "$signed" "$RUNNER_TEMP/$package.apk.SHA256SUMS.txt" --repo "$GITHUB_REPOSITORY" --clobber
+
+  maybe-publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [menu-content, linux-complete, windows-complete, macos-complete, android-complete]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Publish only if all per-mod PRs have landed and uploaded
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$(jq -r '.target_mod_count' "$CONTENT_SPEC")"
+          shopt -s nullglob
+          specs=(docs/complete/mods/*.json)
+          if (( ${#specs[@]} != target )); then
+            echo "Complete draft stays open: ${#specs[@]}/$target mod PRs merged."
+            exit 0
+          fi
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$COMPLETE_TAG\" and .draft == true) | .id" | head -n1)"
+          [[ -n "$release_id" ]] || { echo 'Complete draft not found' >&2; exit 1; }
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" | jq 'add' > "$RUNNER_TEMP/assets.json"
+          for spec in "${specs[@]}"; do
+            slug="$(jq -r '.slug' "$spec")"; base="PulseForge-v1.0.0-complete-mod-$slug"
+            jq -e --arg n "$base.manifest.json" 'any(.[];.name==$n and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || exit 0
+            jq -e --arg n "$base.zip.SHA256SUMS.txt" 'any(.[];.name==$n and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || exit 0
+            jq -e --arg z "$base.zip" --arg p "$base.zip.part00" 'any(.[];(.name==$z or .name==$p) and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || exit 0
+          done
+          head_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$COMPLETE_TAG" -f sha="$head_sha" -F force=true >/dev/null
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false -F prerelease=false -f make_latest=true >/dev/null
+          echo "Published $COMPLETE_TAG at $head_sha after all $target mod PRs were integrated."

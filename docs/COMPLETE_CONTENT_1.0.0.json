@@ -1,0 +1,31 @@
+{
+  "schema_version": 2,
+  "edition": "1.0.0-complete",
+  "target_mod_count": 30,
+  "source": {
+    "historical_project_folder_id": "19Qrolt9FP9f4iV0F7GK3pmVFJM_3FyiU",
+    "mods_folder_id": "1pAnpn__0pfFe1pMtS-XyenPP5peqIU46",
+    "mods_list_file_id": "1NDOUVSl9fjdyyKRa-bL30TxJ514O3Lao",
+    "menu_music_staging_folder_id": "1LZxmV2e_94mDj8qx8b2mBL8cg-f-mVp_",
+    "excluded_transient_folders": [
+      ".autochart-staging"
+    ]
+  },
+  "menu_music": {
+    "expected_tracks": 10,
+    "expected_total_bytes": 46117355,
+    "tracks": [
+      {"name":"roy-orbison-i-drove-all-night-video.mp3","size_bytes":9093197,"drive_id":"1-ZOywUfiGaq-MJ6NG2QUNV-53AZm1fGs"},
+      {"name":"Sending All My Love To You.mp3","size_bytes":5735373,"drive_id":"1_KObwYYO5nl6lC2IEPljGabb-ltR0Flb"},
+      {"name":"Life Letters.mp3","size_bytes":3554879,"drive_id":"1KtS3cJZl9VhxVY0UsmT1OaasWLW4qoab"},
+      {"name":"watch-dogs-chicago-chase.mp3","size_bytes":3654404,"drive_id":"1gq-oR72Z5GxYxJ4R8llkeizpvg2JVxDF"},
+      {"name":"watch-dogs-bad-blood-ghosts-fixer-escape.mp3","size_bytes":3737828,"drive_id":"1FwBFIG9idNCi5fe_D8ykaGqnn5CWA_xL"},
+      {"name":"acceptable-in-the-80s-instrumental-low-quality.mp3","size_bytes":5209128,"drive_id":"1vpEhlWJEEjSXUtpI6JymO5RVQ1NMQ_1d"},
+      {"name":"overlook-bombby-dj-javi26.mp3","size_bytes":3135457,"drive_id":"1762Y_jY7bejI4S7QZOX6odADm-AfDyMa"},
+      {"name":"grants-opus.mp3","size_bytes":3675252,"drive_id":"1VgMyCQRyp_BsOkW0qpeu4j_3cJYEKLPZ"},
+      {"name":"rustie-attak-feat-danny-brown.mp3","size_bytes":2553543,"drive_id":"1_cAPDT1djMyQNcJhuaOmH8oppVJuaVUu"},
+      {"name":"watch-dogs-fixer-ambush-jury-rigged.mp3","size_bytes":5768294,"drive_id":"1NWuBl4FBMmT-uzZL-Nwico5eTHyMAU7r"}
+    ]
+  },
+  "mods_directory": "docs/complete/mods"
+}
