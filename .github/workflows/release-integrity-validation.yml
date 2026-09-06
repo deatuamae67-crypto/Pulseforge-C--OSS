@@ -6,15 +6,15 @@ on:
       - main
     paths:
       - '.github/workflows/release-integrity-validation.yml'
-      - 'docs/RELEASE_0.9.7_ASSET_MANIFEST.json'
-      - 'docs/RELEASE_0.9.7_PROVENANCE.md'
+      - 'docs/RELEASE_1.0.0_ASSET_MANIFEST.json'
+      - 'docs/RELEASE_1.0.0_PROVENANCE.md'
   push:
     branches:
       - main
     paths:
       - '.github/workflows/release-integrity-validation.yml'
-      - 'docs/RELEASE_0.9.7_ASSET_MANIFEST.json'
-      - 'docs/RELEASE_0.9.7_PROVENANCE.md'
+      - 'docs/RELEASE_1.0.0_ASSET_MANIFEST.json'
+      - 'docs/RELEASE_1.0.0_PROVENANCE.md'
   release:
     types:
       - published
@@ -32,11 +32,11 @@ concurrency:
 
 env:
   GH_TOKEN: ${{ github.token }}
-  MANIFEST: docs/RELEASE_0.9.7_ASSET_MANIFEST.json
-  FINAL_SOURCE_SHA: 8e603b240c8c11945da70b03a42e93b7babf763f
-  FINAL_RUN_ID: '33989617582'
-  RELEASE_ID: '382859979'
-  RELEASE_TAG: v0.9.7
+  MANIFEST: docs/RELEASE_1.0.0_ASSET_MANIFEST.json
+  FINAL_SOURCE_SHA: c0ccce44f2ef31819294f127d0b41095d6042d86
+  FINAL_RUN_ID: '33999373364'
+  RELEASE_ID: '383408852'
+  RELEASE_TAG: v1.0.0
 
 jobs:
   validate-release-integrity:
@@ -56,7 +56,7 @@ jobs:
 
           jq -e --arg source "$FINAL_SOURCE_SHA" --argjson run "$FINAL_RUN_ID" --argjson release "$RELEASE_ID" --arg tag "$RELEASE_TAG" '
             .schema_version == 1
-            and .pulseforge_version == "0.9.7"
+            and .pulseforge_version == "1.0.0"
             and .tag == $tag
             and .release_id == $release
             and .release_target_sha == $source
@@ -127,15 +127,15 @@ jobs:
             exit 1
           }
           [[ "$(jq -r '.draft' <<<"$release_json")" == 'false' ]] || {
-            echo 'v0.9.7 unexpectedly returned to draft state.' >&2
+            echo "$RELEASE_TAG unexpectedly returned to draft state." >&2
             exit 1
           }
           [[ "$(jq -r '.prerelease' <<<"$release_json")" == 'false' ]] || {
-            echo 'v0.9.7 unexpectedly became a prerelease.' >&2
+            echo "$RELEASE_TAG unexpectedly became a prerelease." >&2
             exit 1
           }
           [[ -n "$(jq -r '.published_at // empty' <<<"$release_json")" ]] || {
-            echo 'v0.9.7 has no publication timestamp.' >&2
+            echo "$RELEASE_TAG has no publication timestamp." >&2
             exit 1
           }
 
