@@ -61,3 +61,13 @@ mods/**/*.flp filter=lfs diff=lfs merge=lfs -text
 mods/**/*.sf2 filter=lfs diff=lfs merge=lfs -text
 mods/**/*.mid filter=lfs diff=lfs merge=lfs -text
 mods/**/*.midi filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/unknown-black-hole/unknown-black-hole-uncompressed.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/unknown-black-hole/unknown-black-hole.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/eye-of-god/eye-of-god.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/eons/eons-easy.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/flocci/flocci-hard.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/quietus/quietus.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/end-of-the-world/end-of-the-world.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/end-of-the-world/end-of-the-world-compressed.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/end-of-the-world/end-of-the-world-unfinished.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/songs/end-of-the-world/end-of-the-world.json filter=lfs diff=lfs merge=lfs -text
