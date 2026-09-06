@@ -1,58 +1,54 @@
 # PulseForge Complete edition
 
-The Complete edition is the content-rich distribution of PulseForge. It keeps the public source tree lean while publishing the project-approved menu music and mod library as versioned GitHub Release assets.
+The Complete edition is the canonical content-rich PulseForge distribution. Its approved mods and menu music are **part of the engine itself**: they are versioned in the repository and installed with the normal engine tree rather than published as optional per-mod content packs.
 
-## Distribution model
+## Built-in engine layout
 
-A Complete release contains:
+The source and installed runtime use the existing PulseForge layout:
 
-- the normal Windows, Linux, macOS arm64, macOS x86_64 and Android arm64 engine packages;
-- all ten approved menu-music tracks inside every Complete platform build;
-- the current approved `mods/` collections as common content packs, so the same multi-gigabyte mod library is not duplicated inside every platform archive;
-- `modsList.txt`, per-pack file manifests and SHA-256 checksum files;
-- installer scripts that reconstruct split packs when necessary and install the content into the engine's `mods/` and `assets/menu/` roots.
+- `mods/<mod-name>/...` — the complete approved mod library;
+- `mods/modsList.txt` — the engine's historical/default mod enablement list;
+- `assets/menu/*.mp3` — the ten approved menu/background tracks;
+- normal engine source, assets and platform support alongside those directories.
 
-The Complete content is deliberately distributed through GitHub Releases instead of being committed as ordinary Git blobs. This avoids bloating repository history and keeps generated release payloads outside source control.
+`CMakeLists.txt` already installs `assets/` to `bin/assets` and, when present, `mods/` to `bin/mods`. Complete platform builds therefore consume the same built-in directories instead of reconstructing them from separate downloads.
 
-## One mod per pull request
+## Repository storage
 
-The Complete mod library is integrated incrementally. Each mod has one descriptor under `docs/complete/mods/<slug>.json`, and each pull request is required to introduce exactly one new descriptor.
+Large and binary built-in assets are stored with Git LFS. Textual chart/script/configuration files remain ordinary Git files where practical so that they stay reviewable and diffable. Files that exceed the ordinary Git blob safety threshold are automatically routed through LFS during the controlled import.
 
-The single-mod CI path downloads only that mod, validates its minimum historical file/byte counts, hashes every file and proves that the ZIP can be reconstructed. A green PR can therefore be merged independently while other mod PRs continue validating in parallel.
+Git LFS is storage for files that are still versioned as part of this repository; it is not a runtime content-pack system. A normal LFS-enabled checkout of the Complete source contains the real files in `mods/` and `assets/menu/`.
 
-After such a PR is merged into `main`, the same workflow downloads and packages only that mod and uploads its manifest, checksum and ZIP (or split ZIP parts) into the existing `v1.0.0-complete` draft Release. No previously integrated mod is rebuilt or re-uploaded.
+## Provenance descriptors
 
-The Complete Release remains a draft while this fan-out proceeds. Publication is attempted after every successful mod integration and succeeds only when all 30 expected descriptor files have landed and all 30 corresponding Release packs plus the platform/menu assets are present. The tag is then moved to the final `main` commit containing the complete registry before the Release becomes public.
+`docs/complete/mods/*.json` remain as provenance and regression metadata only. They record the approved source folder, expected historical minimum file/byte counts, slug and default-enabled state used to audit the import.
 
-## Authoritative content source
+They are **not** substitutes for the mod directories and are not used by the runtime to fetch content. The import pipeline materializes the corresponding Drive content into the repository tree and validates it before merge.
 
-`docs/COMPLETE_CONTENT_1.0.0.json` records the shared Complete source, the ten menu tracks with their expected byte sizes and the target number of independently integrated mods. Each mod's exact Drive folder, default-enabled state and historical regression minima are stored in its own descriptor under `docs/complete/mods/`.
+`docs/COMPLETE_CONTENT_1.0.0.json` likewise remains an audit specification for the Complete content set and the ten menu tracks. The Google Drive folders are import/source-of-truth inputs, not a runtime dependency.
 
-The release workflows download the current contents of those approved folders. `.autochart-staging` is excluded because it is a transient AutoChart work directory rather than a distributable mod.
+`.autochart-staging` is intentionally excluded because it is a transient AutoChart work directory rather than engine content.
 
-The historical inventory predates three later content folders, so the workflow does not assume the old inventory is the complete current tree. It enumerates and hashes the live approved folders at packaging time while retaining the historical totals as minimum regression thresholds where available.
+## Integration and integrity
 
-## Integrity
+The built-in content import is fail-closed:
 
-Every mod pack receives a JSON manifest containing each file path, byte size and SHA-256 digest. Every archive receives a SHA-256 checksum. If a ZIP would exceed the per-asset upload ceiling, the workflow splits the ZIP into ordered parts below that ceiling and publishes checksums for both the reconstructed ZIP and each part.
+1. exactly 30 approved mod descriptors must be present;
+2. every mod folder is downloaded into `mods/<name>` and checked against its historical minimum file/byte count;
+3. `mods/modsList.txt` is imported and size-checked;
+4. all ten menu tracks are imported into `assets/menu` and checked against the recorded aggregate size;
+5. private/non-redistributable engine inputs such as Discord Social SDK binaries and signing containers are rejected;
+6. binary/large files are committed through Git LFS and ordinary Git blobs are kept below the repository safety threshold;
+7. the accumulated content branch is verified to contain every expected mod directory, the mod list and all ten menu tracks before it can be merged.
 
-The final publication gate verifies that every configured mod has a manifest, checksum and archive (or split archive), that all five platform packages and the menu-music pack exist, and that the assets are fully uploaded before changing the draft into a public release.
+## Release model
 
-## Installation
+A Complete release is built from the repository state that already contains the built-in content. The release process must not publish separate per-mod ZIPs or require an installer to reconstruct the engine after download.
 
-Complete platform packages already contain the ten background/menu tracks. To install all mods, run the supplied installer from the extracted engine directory:
-
-```text
-PowerShell:  .\install-complete-content.ps1
-Linux/macOS: ./install-complete-content.sh
-```
-
-The installers download the public `v1.0.0-complete` content assets, verify checksums, reconstruct split packs if needed and extract them into the engine content root.
+Platform packaging must include the repository's `mods/` and `assets/menu/` trees together with the executable/runtime files. Release publication remains fail-closed until those embedded trees are present and validated.
 
 ## Licensing and provenance boundary
 
-The project owner has explicitly approved the Complete content set for distribution with PulseForge. This approval is specific to the selected Complete content set and does not change the license of independently authored components embedded inside a mod.
+The project owner has explicitly designated the selected Complete content set as part of PulseForge. The Apache-2.0 license covers PulseForge-authored source as described by `LICENSE` and `NOTICE`; independently authored components or assets retain their own notices and terms where applicable.
 
-The Apache-2.0 license continues to cover PulseForge-authored source as described by `LICENSE` and `NOTICE`. Third-party components retain their own notices and terms where applicable.
-
-The Complete release still excludes private signing material, secrets, build caches and the proprietary Discord Social SDK binaries. Discord remains an optional external integration.
+The Complete tree continues to exclude private signing material, secrets, build caches and proprietary Discord Social SDK binaries. Discord remains an optional external integration.
