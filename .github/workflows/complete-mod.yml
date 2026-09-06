@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - 'docs/complete/mods/*.json'
-      - '.github/workflows/complete-mod.yml'
   push:
     branches: [main]
     paths:
@@ -16,7 +15,6 @@ permissions:
 
 env:
   COMPLETE_TAG: 'v1.0.0-complete'
-  CONTENT_SPEC: 'docs/COMPLETE_CONTENT_1.0.0.json'
   GDOWN_VERSION: '6.0.0'
 
 jobs:
@@ -24,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
-      contents: ${{ github.event_name == 'push' && 'write' || 'read' }}
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -49,7 +47,6 @@ jobs:
           mapfile -t added < <(git diff --name-only --diff-filter=A "$base" "$head" -- 'docs/complete/mods/*.json')
           if (( ${#changed[@]} != 1 || ${#added[@]} != 1 )) || [[ "${changed[0]}" != "${added[0]}" ]]; then
             printf 'Each Complete mod PR/merge must introduce exactly one new docs/complete/mods/*.json file. Changed: %s; added: %s\n' "${#changed[@]}" "${#added[@]}" >&2
-            printf 'Changed files:\n%s\n' "${changed[*]:-<none>}" >&2
             exit 1
           fi
           spec="${added[0]}"
@@ -90,9 +87,7 @@ jobs:
           for attempt in 1 2 3; do
             rm -rf "$root"
             mkdir -p "$root"
-            if gdown --folder "https://drive.google.com/drive/folders/$MOD_DRIVE_ID" -O "$root"; then
-              break
-            fi
+            if gdown --folder "https://drive.google.com/drive/folders/$MOD_DRIVE_ID" -O "$root"; then break; fi
             [[ "$attempt" != 3 ]] || exit 1
             sleep $((attempt * 15))
           done
@@ -137,7 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           release="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$COMPLETE_TAG\") | [.id,.draft] | @tsv" | head -n1 || true)"
-          [[ -n "$release" ]] || { echo 'Complete draft does not exist yet; merge the Complete framework PR first.' >&2; exit 1; }
+          [[ -n "$release" ]] || { echo 'Complete draft does not exist.' >&2; exit 1; }
           IFS=$'\t' read -r release_id draft <<<"$release"
           [[ "$draft" == 'true' ]] || { echo "$COMPLETE_TAG is already published; refusing to alter it" >&2; exit 1; }
           base="PulseForge-v1.0.0-complete-mod-$MOD_SLUG"
@@ -156,40 +151,3 @@ jobs:
             while IFS= read -r part; do upload+=("$part"); done < <(find "$RUNNER_TEMP" -maxdepth 1 -type f -name "$base.zip.part*" -print | sort)
           fi
           gh release upload "$COMPLETE_TAG" "${upload[@]}" --repo "$GITHUB_REPOSITORY" --clobber
-
-      - name: Publish Complete automatically when the last mod finishes
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          set -euo pipefail
-          target="$(jq -r '.target_mod_count' "$CONTENT_SPEC")"
-          shopt -s nullglob
-          specs=(docs/complete/mods/*.json)
-          if (( ${#specs[@]} != target )); then
-            echo "Complete draft progress: ${#specs[@]}/$target mod PRs merged."
-            exit 0
-          fi
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$COMPLETE_TAG\" and .draft == true) | .id" | head -n1)"
-          [[ -n "$release_id" ]] || exit 0
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" | jq 'add' > "$RUNNER_TEMP/assets.json"
-          base_assets=(
-            'PulseForge-v1.0.0-complete-Windows-x86_64.zip'
-            'PulseForge-v1.0.0-complete-Linux-x86_64.tar.gz'
-            'PulseForge-v1.0.0-complete-macOS-arm64.tar.gz'
-            'PulseForge-v1.0.0-complete-macOS-x86_64.tar.gz'
-            'PulseForge-v1.0.0-complete-Android-arm64-test-signed.apk'
-            'PulseForge-v1.0.0-complete-menu-music.zip'
-          )
-          for n in "${base_assets[@]}"; do
-            jq -e --arg n "$n" 'any(.[];.name==$n and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Waiting for base asset: $n"; exit 0; }
-          done
-          for spec in "${specs[@]}"; do
-            slug="$(jq -r '.slug' "$spec")"; base="PulseForge-v1.0.0-complete-mod-$slug"
-            jq -e --arg n "$base.manifest.json" 'any(.[];.name==$n and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Waiting for $base manifest"; exit 0; }
-            jq -e --arg n "$base.zip.SHA256SUMS.txt" 'any(.[];.name==$n and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Waiting for $base checksum"; exit 0; }
-            jq -e --arg z "$base.zip" --arg p "$base.zip.part00" 'any(.[];(.name==$z or .name==$p) and .state=="uploaded" and .size>0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Waiting for $base archive"; exit 0; }
-          done
-          head_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$COMPLETE_TAG" -f sha="$head_sha" -F force=true >/dev/null
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false -F prerelease=false -f make_latest=true >/dev/null
-          echo "Published $COMPLETE_TAG at $head_sha: all $target independently merged mod packs are present."
