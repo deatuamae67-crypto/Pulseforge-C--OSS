@@ -72,7 +72,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          git fetch origin "$BASE_REF" --depth=1
+          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
           python3 - <<'PY'
           import json,os,pathlib,subprocess,sys
           base=subprocess.check_output(['git','merge-base','HEAD',f'origin/{os.environ["BASE_REF"]}'],text=True).strip()
