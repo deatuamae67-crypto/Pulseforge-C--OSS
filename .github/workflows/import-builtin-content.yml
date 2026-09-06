@@ -1,0 +1,253 @@
+name: PulseForge import built-in content
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/import-builtin-content.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CONTENT_BRANCH: 'complete/embedded-builtin-content'
+  CONTENT_SPEC: 'docs/COMPLETE_CONTENT_1.0.0.json'
+  GDOWN_VERSION: '6.0.0'
+  MODSLIST_FILE_ID: '1NDOUVSl9fjdyyKRa-bL30TxJ514O3Lao'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Build deterministic content matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import glob, json
+
+          specs=[]
+          for path in sorted(glob.glob('docs/complete/mods/*.json')):
+              with open(path, encoding='utf-8') as f:
+                  spec=json.load(f)
+              if spec.get('name') == '.autochart-staging':
+                  raise SystemExit('.autochart-staging must never be embedded')
+              specs.append({'kind':'mod','slug':spec['slug']})
+
+          if len(specs) != 30:
+              raise SystemExit(f'expected 30 built-in mod descriptors, found {len(specs)}')
+
+          items=[{'kind':'menu','slug':'menu-music'}, {'kind':'modslist','slug':'mods-list'}, *specs]
+          print('matrix='+json.dumps({'include':items}, separators=(',',':')))
+          PY
+
+  import-one:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    env:
+      ITEM_KIND: ${{ matrix.kind }}
+      ITEM_SLUG: ${{ matrix.slug }}
+    steps:
+      - name: Checkout source without downloading existing LFS payloads
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: true
+
+      - name: Install content import tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v git-lfs >/dev/null 2>&1 || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends git-lfs
+          }
+          git lfs install --local
+          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+
+      - name: Continue the single accumulated content branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin "$CONTENT_BRANCH" || true
+          if git show-ref --verify --quiet "refs/remotes/origin/$CONTENT_BRANCH"; then
+            git checkout -B "$CONTENT_BRANCH" "origin/$CONTENT_BRANCH"
+          else
+            git checkout -b "$CONTENT_BRANCH"
+          fi
+          git status --short
+
+      - name: Download the real built-in engine content
+        id: content
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$ITEM_KIND" == 'menu' ]]; then
+            folder_id="$(jq -r '.source.menu_music_staging_folder_id' "$CONTENT_SPEC")"
+            target='assets/menu'
+            rm -rf "$target"
+            mkdir -p "$target"
+            for attempt in 1 2 3; do
+              rm -rf "$target" && mkdir -p "$target"
+              if gdown --folder "https://drive.google.com/drive/folders/$folder_id" -O "$target"; then
+                break
+              fi
+              [[ "$attempt" != 3 ]] || exit 1
+              sleep $((attempt * 15))
+            done
+            expected_count="$(jq -r '.menu_music.expected_tracks' "$CONTENT_SPEC")"
+            expected_bytes="$(jq -r '.menu_music.expected_total_bytes' "$CONTENT_SPEC")"
+            actual_count="$(find "$target" -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')"
+            actual_bytes="$(find "$target" -maxdepth 1 -type f -iname '*.mp3' -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
+            [[ "$actual_count" == "$expected_count" ]] || { echo "menu track count $actual_count != $expected_count" >&2; exit 1; }
+            [[ "$actual_bytes" == "$expected_bytes" ]] || { echo "menu bytes $actual_bytes != $expected_bytes" >&2; exit 1; }
+          elif [[ "$ITEM_KIND" == 'modslist' ]]; then
+            target='mods/modsList.txt'
+            mkdir -p mods
+            gdown "$MODSLIST_FILE_ID" -O "$target"
+            test "$(stat -c '%s' "$target")" -eq 839
+          else
+            descriptor="docs/complete/mods/$ITEM_SLUG.json"
+            test -f "$descriptor"
+            name="$(jq -r '.name' "$descriptor")"
+            drive_id="$(jq -r '.drive_id' "$descriptor")"
+            min_files="$(jq -r '.min_files' "$descriptor")"
+            min_bytes="$(jq -r '.min_bytes' "$descriptor")"
+            [[ "$name" != '.autochart-staging' ]]
+            [[ "$name" != */* ]]
+            target="mods/$name"
+            rm -rf "$target"
+            mkdir -p "$target"
+            for attempt in 1 2 3; do
+              rm -rf "$target" && mkdir -p "$target"
+              if gdown --folder "https://drive.google.com/drive/folders/$drive_id" -O "$target"; then
+                break
+              fi
+              [[ "$attempt" != 3 ]] || exit 1
+              sleep $((attempt * 15))
+            done
+            files="$(find "$target" -type f | wc -l | tr -d ' ')"
+            bytes="$(find "$target" -type f -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
+            (( files >= min_files )) || { echo "$name: $files files < minimum $min_files" >&2; exit 1; }
+            (( bytes >= min_bytes )) || { echo "$name: $bytes bytes < minimum $min_bytes" >&2; exit 1; }
+          fi
+
+          printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
+
+      - name: Reject private/non-redistributable engine inputs
+        shell: bash
+        env:
+          TARGET: ${{ steps.content.outputs.target }}
+        run: |
+          set -euo pipefail
+          violations=()
+          while IFS= read -r -d '' path; do
+            lower="${path,,}"
+            base="${lower##*/}"
+            case "$lower" in
+              *third_party/discord_social_sdk/*|*discord_partner_sdk.framework/*|*discord_partner_sdk.xcframework/*)
+                violations+=("$path")
+                ;;
+            esac
+            case "$base" in
+              discord_partner_sdk.dll|libdiscord_partner_sdk.so|libdiscord_partner_sdk.dylib|discord_partner_sdk.aar|*.jks|*.keystore|*.p12|*.pfx)
+                violations+=("$path")
+                ;;
+            esac
+          done < <(find "$TARGET" -type f -print0)
+          if (( ${#violations[@]} )); then
+            printf 'Refusing private/non-redistributable inputs:\n' >&2
+            printf ' - %s\n' "${violations[@]}" >&2
+            exit 1
+          fi
+
+      - name: Route large files through Git LFS
+        shell: bash
+        env:
+          TARGET: ${{ steps.content.outputs.target }}
+        run: |
+          set -euo pipefail
+          if [[ -f "$TARGET" ]]; then
+            roots=("$TARGET")
+          else
+            roots=("$TARGET")
+          fi
+          while IFS= read -r -d '' file; do
+            size="$(stat -c '%s' "$file")"
+            if (( size >= 25 * 1024 * 1024 )); then
+              attr="$(git check-attr filter -- "$file" | sed 's/^.*: //')"
+              if [[ "$attr" != 'lfs' ]]; then
+                git lfs track "$file"
+              fi
+            fi
+          done < <(find "${roots[@]}" -type f -print0)
+
+          git add -- .gitattributes "$TARGET"
+          if git diff --cached --quiet; then
+            echo "$ITEM_SLUG already present with identical Git content; nothing to commit."
+            exit 0
+          fi
+
+          # Prevent ordinary Git blobs from crossing the GitHub hard limit.
+          while IFS= read -r -d '' file; do
+            size="$(stat -c '%s' "$file")"
+            if (( size >= 95 * 1024 * 1024 )); then
+              attr="$(git check-attr filter -- "$file" | sed 's/^.*: //')"
+              [[ "$attr" == 'lfs' ]] || { echo "$file is $size bytes but is not tracked by LFS" >&2; exit 1; }
+            fi
+          done < <(find "${roots[@]}" -type f -print0)
+
+          git lfs fsck --objects
+          git commit -m "complete(content): embed $ITEM_SLUG"
+          git push origin "HEAD:$CONTENT_BRANCH"
+
+  verify-branch:
+    needs: import-one
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout accumulated content branch without smudging LFS
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: complete/embedded-builtin-content
+          fetch-depth: 0
+          lfs: false
+
+      - name: Verify the engine tree contains the complete built-in content set
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$(jq -r '.target_mod_count' docs/COMPLETE_CONTENT_1.0.0.json)"
+          shopt -s nullglob
+          specs=(docs/complete/mods/*.json)
+          (( ${#specs[@]} == target )) || { echo "descriptor count ${#specs[@]} != $target" >&2; exit 1; }
+          for spec in "${specs[@]}"; do
+            name="$(jq -r '.name' "$spec")"
+            test -d "mods/$name" || { echo "missing built-in mod directory: mods/$name" >&2; exit 1; }
+            test -n "$(find "mods/$name" -type f -print -quit)" || { echo "empty built-in mod directory: mods/$name" >&2; exit 1; }
+          done
+          test -f mods/modsList.txt
+          test "$(stat -c '%s' mods/modsList.txt)" -eq 839
+          test ! -e mods/.autochart-staging
+          test "$(find assets/menu -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')" -eq 10
+
+          oversized="$(git ls-tree -r -l HEAD | awk '$4 ~ /^[0-9]+$/ && $4 >= 99614720 {print $4, $5}')"
+          [[ -z "$oversized" ]] || { printf 'ordinary Git blobs >=95 MiB remain:\n%s\n' "$oversized" >&2; exit 1; }
+
+          echo "Embedded content branch contains all $target mods, modsList.txt and 10 menu tracks."
