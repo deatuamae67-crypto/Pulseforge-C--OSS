@@ -36,9 +36,9 @@ under [`docs/`](docs/) and on the [GitHub Releases](https://github.com/deatuamae
 - **Optional integrations** — Discord Social SDK support is fail-open and kept
   separate from the redistributable source tree when proprietary SDK inputs are
   unavailable.
-- **Content-rich Complete distributions** — approved menu music and the full
-  versioned mod library can be published as verified Release content without
-  bloating the Git history.
+- **Built-in Complete content** — the approved mod library, `modsList.txt` and
+  menu music are versioned as part of the engine tree; large/binary objects use
+  Git LFS instead of being replaced by external per-mod downloads.
 
 ## Platforms
 
@@ -58,25 +58,36 @@ distinct from production notarization.
 
 ## Content and mod support
 
-PulseForge keeps imported content separate from engine source. The compatibility
-layer covers chart parsing, tempo/event timelines, note ownership and lanes,
-Lua callbacks, supported Psych-style helpers, media routing and gameplay
-startup behavior without requiring multi-gigabyte content libraries to be
-committed as ordinary Git blobs.
+The Complete engine source contains its approved content in the same layout the
+runtime consumes:
 
-Historical compatibility corpora are tracked through deterministic manifests
-and regression fixtures. Approved content-rich distributions are published as
-versioned Release assets with checksums and per-pack manifests. See
-[`docs/COMPLETE_EDITION.md`](docs/COMPLETE_EDITION.md) for the Complete
-distribution model and [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md) for the source
-publication boundary.
+```text
+mods/modsList.txt
+mods/<approved collection>/...
+assets/menu/<approved track>.mp3
+```
+
+The compatibility layer covers chart parsing, tempo/event timelines, note
+ownership and lanes, Lua callbacks, supported Psych-style helpers, media
+routing and gameplay startup behavior. Large/binary built-in content is stored
+through Git LFS; textual charts, scripts and configuration remain ordinary Git
+files where practical so they stay reviewable.
+
+Historical/current compatibility metadata is retained through deterministic
+manifests and provenance descriptors. Those records audit the built-in tree;
+they do not replace the actual mod files. See
+[`docs/COMPLETE_EDITION.md`](docs/COMPLETE_EDITION.md) for the Complete model
+and [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md) for the publication boundary.
 
 Menu/pause music, startup intros, credit portraits and visualizer media remain
-supported as extension points. Content included in a Complete release keeps its
-own applicable provenance and terms; inclusion does not silently relicense it
-under the PulseForge source license.
+supported as extension points. Content included in the approved Complete tree
+keeps its own applicable provenance and terms; inclusion does not silently
+relicense it under the PulseForge-authored source license.
 
 ## Build from source
+
+A normal Complete checkout should have Git LFS available so the real built-in
+binary/media objects are materialized before building.
 
 ### Windows
 
@@ -121,23 +132,24 @@ The repository maintains separate CI gates for:
 - deterministic core tests;
 - the public/private source boundary;
 - release integrity;
-- Complete-content manifests and packaging;
+- Complete built-in content/provenance validation;
 - synthetic Discord SDK integration and platform packaging paths where
   applicable.
 
 Release publication is fail-closed: platform artifacts are built from the
-selected `main` commit, checksums and the expected asset set are verified, and
-only then is the GitHub Release published.
+selected source commit, required built-in content and checksums are verified,
+and only then is a GitHub Release published.
 
 ## Project structure
 
 ```text
 include/             Public/native engine headers
 src/                 Engine and application source
-assets/              Redistributable runtime assets and extension contracts
+assets/              Runtime assets, including Complete menu music
+mods/                Built-in Complete mod/content tree and modsList.txt
 platform/android/    Android frontend and Gradle project
-tests/                Deterministic and compatibility regressions
-docs/                 Architecture, release and compatibility documentation
+tests/               Deterministic and compatibility regressions
+docs/                Architecture, release and compatibility documentation
 third_party/          Redistributable dependency integration metadata
 ```
 
@@ -145,13 +157,18 @@ third_party/          Redistributable dependency integration metadata
 
 PulseForge-authored source is distributed under the Apache License 2.0 as
 described by [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). The procedural demo is
-CC0-1.0. Optional or externally supplied SDKs, FFmpeg executables, music,
-videos, mods and imported game assets retain their own applicable terms.
+CC0-1.0. Optional or externally supplied SDKs, FFmpeg executables and other
+third-party components/assets retain their own applicable terms.
 
-The Git source tree intentionally excludes secrets, signing identities,
-proprietary Discord SDK packages, generated release packages, build caches and
-historical backup payloads. Approved large media/mod collections may instead be
-distributed as separately verified GitHub Release assets by a Complete release.
+The selected Complete mod/menu content set has been designated for inclusion
+with PulseForge and is versioned in this repository, with Git LFS used for
+large/binary objects. Independently authored content retains its applicable
+notices/terms; repository inclusion does not silently relicense it as
+Apache-2.0.
+
+The Git source tree still excludes secrets, signing identities, proprietary
+Discord SDK packages, generated release packages, build caches and historical
+backup payloads.
 
 See [`THIRD_PARTY.md`](THIRD_PARTY.md), [`docs/OSS_SCOPE.md`](docs/OSS_SCOPE.md),
 [`docs/COMPLETE_EDITION.md`](docs/COMPLETE_EDITION.md) and
