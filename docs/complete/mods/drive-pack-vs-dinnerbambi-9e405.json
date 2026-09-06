@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-pack-vs-dinnerbambi-9e405",
+  "slug": "drive-pack-vs-dinnerbambi-9e405",
+  "drive_id": "1k5TR9OSyS3m5R2iiJfmvKwraiLjmcLkE",
+  "min_files": 758,
+  "min_bytes": 346161509,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
