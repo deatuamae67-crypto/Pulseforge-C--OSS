@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "source": {
+    "historical_project_folder_id": "19Qrolt9FP9f4iV0F7GK3pmVFJM_3FyiU",
+    "mods_folder_id": "1pAnpn__0pfFe1pMtS-XyenPP5peqIU46",
+    "mods_list_file_id": "1NDOUVSl9fjdyyKRa-bL30TxJ514O3Lao",
+    "menu_music_staging_folder_id": "1LZxmV2e_94mDj8qx8b2mBL8cg-f-mVp_",
+    "excluded_transient_folders": [
+      ".autochart-staging"
+    ]
+  },
+  "menu_music": {
+    "expected_tracks": 10,
+    "expected_total_bytes": 46117355,
+    "tracks": [
+      {"name":"roy-orbison-i-drove-all-night-video.mp3","size_bytes":9093197,"drive_id":"1-ZOywUfiGaq-MJ6NG2QUNV-53AZm1fGs"},
+      {"name":"Sending All My Love To You.mp3","size_bytes":5735373,"drive_id":"1_KObwYYO5nl6lC2IEPljGabb-ltR0Flb"},
+      {"name":"Life Letters.mp3","size_bytes":3554879,"drive_id":"1KtS3cJZl9VhxVY0UsmT1OaasWLW4qoab"},
+      {"name":"watch-dogs-chicago-chase.mp3","size_bytes":3654404,"drive_id":"1gq-oR72Z5GxYxJ4R8llkeizpvg2JVxDF"},
+      {"name":"watch-dogs-bad-blood-ghosts-fixer-escape.mp3","size_bytes":3737828,"drive_id":"1FwBFIG9idNCi5fe_D8ykaGqnn5CWA_xL"},
+      {"name":"acceptable-in-the-80s-instrumental-low-quality.mp3","size_bytes":5209128,"drive_id":"1vpEhlWJEEjSXUtpI6JymO5RVQ1NMQ_1d"},
+      {"name":"overlook-bombby-dj-javi26.mp3","size_bytes":3135457,"drive_id":"1762Y_jY7bejI4S7QZOX6odADm-AfDyMa"},
+      {"name":"grants-opus.mp3","size_bytes":3675252,"drive_id":"1VgMyCQRyp_BsOkW0qpeu4j_3cJYEKLPZ"},
+      {"name":"rustie-attak-feat-danny-brown.mp3","size_bytes":2553543,"drive_id":"1_cAPDT1djMyQNcJhuaOmH8oppVJuaVUu"},
+      {"name":"watch-dogs-fixer-ambush-jury-rigged.mp3","size_bytes":5768294,"drive_id":"1NWuBl4FBMmT-uzZL-Nwico5eTHyMAU7r"}
+    ]
+  },
+  "mods": [
+    {"name":"charts feitos no flp","slug":"charts-feitos-no-flp","drive_id":"1Z-g_itHvEMiPnP7XB4Z9Adhu6G4S-Xnp","min_files":1,"min_bytes":1},
+    {"name":"drive-2026-08-22-dek-v2-dev-unverified","slug":"drive-2026-08-22-dek-v2-dev-unverified","drive_id":"1Yla_a-mYRA5vDBOeS5Me2jTnuHJGvcau","min_files":575,"min_bytes":344260382},
+    {"name":"drive-2026-08-22-evil-tsukareta-b-side","slug":"drive-2026-08-22-evil-tsukareta-b-side","drive_id":"1kun7MefPcpLqDchsm8j0zKWkpRoiTMt-","min_files":393,"min_bytes":134693528},
+    {"name":"drive-2026-08-22-evil-unfairness","slug":"drive-2026-08-22-evil-unfairness","drive_id":"1tOD7BIA6jbeeFC1zKcDJQh4YTiC_QNzw","min_files":405,"min_bytes":144705828},
+    {"name":"drive-2026-08-22-vs-bambi-b-side-9k","slug":"drive-2026-08-22-vs-bambi-b-side-9k","drive_id":"1rAiZ5Ry5ISyJ_dPQqGSsDIzDqQqhdvN9","min_files":396,"min_bytes":137192805},
+    {"name":"drive-2026-08-22-vs-everamii","slug":"drive-2026-08-22-vs-everamii","drive_id":"1Xns4TsZdDCKhClqbGwGU702nk8ciwrjP","min_files":1092,"min_bytes":254502864},
+    {"name":"drive-2026-08-22-vs-yerep-v2","slug":"drive-2026-08-22-vs-yerep-v2","drive_id":"1DgQeakx07MucA13_2juqnuAgqFb8766X","min_files":1379,"min_bytes":504322079},
+    {"name":"Hellbreaker Remake FLP","slug":"hellbreaker-remake-flp","drive_id":"1XqWarJ7TDlLfjJ3Ae6WCCZfR3LJM2SwH","min_files":1,"min_bytes":1},
+    {"name":"m-r-vs-dave-bambi-fantrack-reupload","slug":"m-r-vs-dave-bambi-fantrack-reupload","drive_id":"1WD3k9iuF6QNVUmy4UyJRtsNuJorHqbFL","min_files":7,"min_bytes":3402847},
+    {"name":"taimuresu spam amplified","slug":"taimuresu-spam-amplified","drive_id":"14MFlkrbN6sRJwnqSTwMobRJ5NVoc_VHK","min_files":1,"min_bytes":1},
+    {"name":"drive-2026-08-22-dek-v1","slug":"drive-2026-08-22-dek-v1","drive_id":"1W0eTRv8bJgNke38YA0iJKoZTErkqksGD","min_files":282,"min_bytes":241118272},
+    {"name":"drive-2026-08-22-dek-v2-demo","slug":"drive-2026-08-22-dek-v2-demo","drive_id":"18OLGtIwI20KP0ZRrvtlaD_sFIlfDIq7Z","min_files":538,"min_bytes":337381878},
+    {"name":"drive-2026-08-22-dek-v2-finale","slug":"drive-2026-08-22-dek-v2-finale","drive_id":"1boHh8HtatjRrPYCjn9xMI0QFCbDxoYtA","min_files":951,"min_bytes":1153345941},
+    {"name":"drive-2026-08-22-ez-edition","slug":"drive-2026-08-22-ez-edition","drive_id":"1b7PQfq2p97xSJJEQfloCb2EHr8laBSPX","min_files":329,"min_bytes":279964464},
+    {"name":"drive-pack-christmasred-edition","slug":"drive-pack-christmasred-edition","drive_id":"1_Z0ZzstG7rhDkqOfdQOvaEva96ssAQ3N","min_files":1441,"min_bytes":851092276},
+    {"name":"drive-pack-disable-sustains-legacy","slug":"drive-pack-disable-sustains-legacy","drive_id":"1nmrnSGijljg_u8Se9xZ9V9KItVJ1gMtx","min_files":783,"min_bytes":177125667},
+    {"name":"drive-pack-files","slug":"drive-pack-files","drive_id":"1_ZYbZRVLr2TQpTy-yPnOWsS323PcBASG","min_files":51,"min_bytes":2390312362},
+    {"name":"drive-pack-hortas-edition-v3-16d89","slug":"drive-pack-hortas-edition-v3-16d89","drive_id":"1x0tlkEQM7vbc8XQnNFyUvcaMP0N3c6LX","min_files":1482,"min_bytes":1256632059},
+    {"name":"drive-pack-screboot-demo","slug":"drive-pack-screboot-demo","drive_id":"1s40Q-khRW33tvM9RsEdQ0gOgB6rTONkg","min_files":1848,"min_bytes":592464073},
+    {"name":"drive-pack-vs-dinnerbambi-9e405","slug":"drive-pack-vs-dinnerbambi-9e405","drive_id":"1k5TR9OSyS3m5R2iiJfmvKwraiLjmcLkE","min_files":758,"min_bytes":346161509},
+    {"name":"drive-batata-static","slug":"drive-batata-static","drive_id":"1NgkaKdmunL9J81RnS1nE5HHUngDs63iV","min_files":17,"min_bytes":1703938152},
+    {"name":"drive-library-2026-04-30","slug":"drive-library-2026-04-30","drive_id":"1PTa0ldHNt0reXMOhnz6vTJVt5RkokHu0","min_files":1012,"min_bytes":389579119},
+    {"name":"drive-loose-charts-2026-08-01","slug":"drive-loose-charts-2026-08-01","drive_id":"1sl3Dyd56Co6nuykyXx1Eb3MKGi_-3fZ7","min_files":627,"min_bytes":721246229},
+    {"name":"drive-pack-denpaex","slug":"drive-pack-denpaex","drive_id":"1jfE3oKE_onhN4OAKX7rQPxwtXBSKtRfL","min_files":501,"min_bytes":254631623},
+    {"name":"drive-pack-fnf-js-engine-windows","slug":"drive-pack-fnf-js-engine-windows","drive_id":"1spqt0yKLzmPyHRm5khs-w2lEor_89cQT","min_files":1031,"min_bytes":481992046},
+    {"name":"drive-pack-h-slice-0-2-3-windows","slug":"drive-pack-h-slice-0-2-3-windows","drive_id":"1g0oPwr9ey4vFgjlH701N-fETz5yeD_3c","min_files":1488,"min_bytes":593846242},
+    {"name":"drive-pack-h-slice-js-0-2-4-windows","slug":"drive-pack-h-slice-js-0-2-4-windows","drive_id":"1QOCRFk5iJzmNCudLEX4JRyFUw3nZk_7m","min_files":1488,"min_bytes":593871715},
+    {"name":"js-engine-dorklysonic","slug":"js-engine-dorklysonic","drive_id":"1ELZMQUVXuAe-V43QeUheKgPY5CxAPPrW","min_files":41,"min_bytes":3492318},
+    {"name":"mr-shash-recovered","slug":"mr-shash-recovered","drive_id":"1JXQZUnuOo9klZb9vg9OReaVIn55VGMQL","min_files":516,"min_bytes":149594831},
+    {"name":"pulseforge-created","slug":"pulseforge-created","drive_id":"1d-a6q9C9AkxJUITKtZsk0wlNpqhXDYa-","min_files":1334,"min_bytes":388710226}
+  ]
+}
