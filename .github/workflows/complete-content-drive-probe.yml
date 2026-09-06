@@ -41,3 +41,10 @@ jobs:
           test "$files" -ge 1
           test "$bytes" -ge 1000000
           printf 'Downloaded %s files / %s bytes from shared complete-content folder.\n' "$files" "$bytes"
+
+      - name: Probe menu music access
+        shell: bash
+        run: |
+          set -euo pipefail
+          gdown --id '1C8IqgLMzWjuFz23kPjVsLwnq6CWU33IV' -O "$RUNNER_TEMP/menu-probe.mp3"
+          test "$(stat -c '%s' "$RUNNER_TEMP/menu-probe.mp3")" -eq 2553543
