@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-2026-08-22-dek-v2-dev-unverified",
+  "slug": "drive-2026-08-22-dek-v2-dev-unverified",
+  "drive_id": "1Yla_a-mYRA5vDBOeS5Me2jTnuHJGvcau",
+  "min_files": 575,
+  "min_bytes": 344260382,
+  "enabled_by_default": false,
+  "default_state_basis": "historical modsList=0"
+}
