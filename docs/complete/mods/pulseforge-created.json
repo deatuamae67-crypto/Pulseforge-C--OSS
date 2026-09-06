@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "pulseforge-created",
+  "slug": "pulseforge-created",
+  "drive_id": "1d-a6q9C9AkxJUITKtZsk0wlNpqhXDYa-",
+  "min_files": 1334,
+  "min_bytes": 388710226,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
