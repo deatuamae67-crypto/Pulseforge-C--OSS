@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-2026-08-22-vs-yerep-v2",
+  "slug": "drive-2026-08-22-vs-yerep-v2",
+  "drive_id": "1DgQeakx07MucA13_2juqnuAgqFb8766X",
+  "min_files": 1379,
+  "min_bytes": 504322079,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
