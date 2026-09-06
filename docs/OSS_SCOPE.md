@@ -4,9 +4,7 @@ This document defines the publication boundary for `Pulseforge-C--OSS`.
 
 ## Source of truth
 
-The public repository is derived selectively from the current PulseForge development tree. The development tree remains authoritative while the public mirror is being bootstrapped.
-
-Older cumulative or hotfix archives must not be applied wholesale over a newer development tree. Changes are reconciled selectively against the current source.
+The public repository is derived selectively from the current PulseForge development tree. The current reconciled engine tree is authoritative for public release work; older cumulative or hotfix archives must not be applied wholesale over a newer tree.
 
 ## Included by default
 
@@ -20,24 +18,30 @@ Material authored for the PulseForge core may be published when its provenance a
 - project documentation;
 - project-owned metadata and notices.
 
-Every import should be reviewed in the context of the current tree rather than copied from an obsolete package.
+The approved PulseForge Complete content set is also explicitly included in the engine repository/runtime tree:
+
+- `mods/<collection>/...` for the selected 30 current mod/content collections;
+- `mods/modsList.txt` for historical/default enablement;
+- `assets/menu/*.mp3` for the ten selected menu/background tracks.
+
+Large/binary built-in assets are stored through Git LFS rather than ordinary Git blobs. Git LFS changes the storage mechanism, not the fact that these files are versioned engine content.
 
 ## Excluded from the Git source tree by default
 
-The following are not mirrored as ordinary Git source merely because they exist in the development workspace:
+The following are not mirrored merely because they exist in a development workspace:
 
-- user-provided or private validation corpora;
-- local mods or imported mod libraries without an explicit distribution decision;
-- third-party music, video, artwork, fonts or other media without a clear public redistribution basis;
+- user-provided/private validation corpora that are not part of the approved Complete set;
+- arbitrary local mods or imported libraries without an explicit distribution decision;
+- unrelated third-party music, video, artwork, fonts or media without a public distribution decision;
 - the separately obtained Discord Social SDK and Android AAR;
-- Android signing material;
-- generated executables, libraries, build trees and release archives;
+- Android/macOS/Windows signing material and credentials;
+- generated executables, libraries, build trees and release archives except where an explicitly approved content collection itself legitimately contains runtime/source artifacts;
 - local settings, logs, crash dumps, replays and renders;
 - AutoChart virtual environments, downloaded models and caches;
 - privately hosted dependency archives;
 - binary FFmpeg distributions unless the chosen public package satisfies the applicable redistribution requirements.
 
-Large approved content does not need to become Git history in order to be part of a PulseForge distribution. A separately reviewed Complete edition may publish approved music and mod collections as versioned GitHub Release assets with explicit manifests and checksums while leaving the source repository itself lean.
+`.autochart-staging` is always excluded from Complete content because it is transient AutoChart workspace data.
 
 ## Discord
 
@@ -47,17 +51,17 @@ The engine must remain buildable through the no-op Discord backend when the SDK 
 
 ## Assets and mods
 
-A code license on an upstream engine does not automatically license the music, artwork, characters, fonts, videos or mods bundled with that engine.
+A code license on an upstream engine does not automatically license music, artwork, characters, fonts, videos or mods bundled with that engine. Material used inside a private development workspace is therefore not automatically public.
 
-Material used inside a private development workspace is not automatically treated as public-redistribution material. Assets and mods therefore require a separate provenance and distribution decision before publication.
+For the PulseForge Complete content set recorded in `docs/COMPLETE_CONTENT_1.0.0.json` and `docs/complete/mods/*.json`, the project owner has explicitly designated the selected content for public distribution as part of PulseForge. The real files are integrated into `mods/` and `assets/menu/`; the descriptors remain provenance/regression metadata only.
 
-For the PulseForge Complete content set recorded in `docs/COMPLETE_CONTENT_1.0.0.json`, the project owner has explicitly authorized public distribution with PulseForge. That decision permits the selected content to be shipped as Complete Release assets; it does not silently change the license of independently authored material embedded inside those packs.
+This distribution decision does not silently relicense independently authored material under Apache-2.0. Existing notices, licenses and attribution requirements remain applicable to their respective files/components.
 
-Transient development content such as `.autochart-staging` remains excluded. The Complete workflow must enumerate and hash the approved live content, enforce its recorded regression minima and publish the content separately from the ordinary Git source tree.
+The controlled import must enumerate the approved sources, enforce historical regression minima, reject transient/private engine inputs, route large files through Git LFS and verify the resulting repository tree before merge.
 
 ## Third-party notices
 
-Apache-2.0 applies to the PulseForge-authored core as described by `LICENSE` and `NOTICE`. Third-party components retain their upstream licenses and notice requirements.
+Apache-2.0 applies to the PulseForge-authored core as described by `LICENSE` and `NOTICE`. Third-party components retain their upstream/applicable licenses and notice requirements.
 
 Before a public source or binary release, the third-party inventory and bundled content must be re-audited against the exact files being shipped.
 
@@ -69,4 +73,4 @@ A passing validation result from a private development snapshot is useful histor
 
 Platform status must be reported precisely; do not claim a Windows/MSVC, Android, macOS or live Discord validation unless that exact path was actually run successfully.
 
-Complete releases follow the same fail-closed principle: the GitHub Release remains a draft until the approved content packs, platform packages, manifests and checksums have all been uploaded and verified against the exact release source.
+Complete releases follow the same fail-closed principle: the release source must already contain the approved built-in `mods/` and `assets/menu/` trees, and platform packages must be built from that exact source state. Separate per-mod download packs are not the Complete engine architecture.
