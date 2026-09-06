@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-pack-denpaex",
+  "slug": "drive-pack-denpaex",
+  "drive_id": "1jfE3oKE_onhN4OAKX7rQPxwtXBSKtRfL",
+  "min_files": 501,
+  "min_bytes": 254631623,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
