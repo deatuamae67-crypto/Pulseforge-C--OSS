@@ -108,6 +108,9 @@ jobs:
           else
             git checkout -b "$CONTENT_BRANCH"
           fi
+          # Each matrix job starts from the exact accumulated branch. Discard
+          # checkout/filter noise before introducing the next controlled unit.
+          git reset --hard HEAD
           git status --short
 
       - name: Download the real built-in engine content
@@ -211,7 +214,10 @@ jobs:
             fi
           done < <(find "$TARGET" -type f -print0)
 
-          git add -- .gitattributes "$TARGET"
+          # Built-in mods are authoritative repository content. -f makes the
+          # importer resilient to stale ignore rules on an accumulated branch.
+          git add -- .gitattributes
+          git add -f -- "$TARGET"
           if git diff --cached --quiet; then
             echo "$ITEM_SLUG already present with identical Git content; nothing to commit."
             exit 0
