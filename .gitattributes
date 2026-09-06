@@ -61,3 +61,7 @@ mods/**/*.flp filter=lfs diff=lfs merge=lfs -text
 mods/**/*.sf2 filter=lfs diff=lfs merge=lfs -text
 mods/**/*.mid filter=lfs diff=lfs merge=lfs -text
 mods/**/*.midi filter=lfs diff=lfs merge=lfs -text
+mods/drive-batata-static/assets/data/Nullifier/nullifier-accurate.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-batata-static/assets/data/ingratiating/ingratiating-backup-easy-3.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-batata-static/assets/data/ingratiating/ingratiating-backup-normal-1.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-batata-static/assets/data/ingratiating/ingratiating-backup-easy-2.json filter=lfs diff=lfs merge=lfs -text
