@@ -1,0 +1,247 @@
+name: PulseForge stage isolated Complete mod branches
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/stage-complete-mod-branches.yml'
+      - 'docs/complete/mods/*.json'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/stage-complete-mod-branches.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GDOWN_VERSION: '6.0.0'
+  GIT_LFS_SKIP_SMUDGE: '1'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          lfs: false
+
+      - name: Build isolated mod matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import glob, json
+
+          specs = []
+          for path in sorted(glob.glob('docs/complete/mods/*.json')):
+              with open(path, encoding='utf-8') as f:
+                  spec = json.load(f)
+              if spec.get('name') == '.autochart-staging':
+                  raise SystemExit('.autochart-staging must never be embedded')
+              specs.append({'slug': spec['slug']})
+
+          if len(specs) != 30:
+              raise SystemExit(f'expected 30 built-in mod descriptors, found {len(specs)}')
+
+          # DEK v1 has repeatedly hit transient Drive throttling. Stage every
+          # unrelated mod first so it can never hold up the rest of the rollout.
+          deferred = {'drive-2026-08-22-dek-v1'}
+          specs.sort(key=lambda item: (item['slug'] in deferred, item['slug']))
+          print('matrix=' + json.dumps({'include': specs}, separators=(',', ':')))
+          PY
+
+      - name: Confirm PR mode is validation-only
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: echo 'Isolated Complete mod matrix validated; branch writes are disabled for pull requests.'
+
+  stage-one:
+    if: github.event_name != 'pull_request'
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      # Keep Drive pressure low; isolation means failures still advance to the next mod.
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    env:
+      ITEM_SLUG: ${{ matrix.slug }}
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: true
+
+      - name: Install content import tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v git-lfs >/dev/null 2>&1 || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends git-lfs
+          }
+          git lfs install --local
+          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+
+      - name: Validate descriptor and prepare isolated branch
+        id: mod
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ITEM_SLUG" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "invalid slug: $ITEM_SLUG" >&2; exit 1; }
+
+          descriptor="docs/complete/mods/$ITEM_SLUG.json"
+          test -f "$descriptor" || { echo "unknown Complete mod: $ITEM_SLUG" >&2; exit 1; }
+          [[ "$(jq -r '.slug' "$descriptor")" == "$ITEM_SLUG" ]] || { echo 'descriptor slug mismatch' >&2; exit 1; }
+
+          name="$(jq -r '.name' "$descriptor")"
+          drive_id="$(jq -r '.drive_id' "$descriptor")"
+          min_files="$(jq -r '.min_files' "$descriptor")"
+          min_bytes="$(jq -r '.min_bytes' "$descriptor")"
+          [[ "$name" != '.autochart-staging' ]]
+          [[ -n "$name" && "$name" != 'null' && "$name" != */* && "$name" != *\\* ]]
+          [[ "$drive_id" =~ ^[A-Za-z0-9_-]+$ ]]
+          [[ "$min_files" =~ ^[0-9]+$ && "$min_bytes" =~ ^[0-9]+$ ]]
+
+          target="mods/$name"
+          branch="complete/content-$ITEM_SLUG"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          old=''
+          if git fetch origin "$branch"; then
+            old="$(git rev-parse "refs/remotes/origin/$branch")"
+          fi
+          git checkout -B "$branch" "$GITHUB_SHA"
+          git reset --hard "$GITHUB_SHA"
+
+          printf 'name=%s\n' "$name" >> "$GITHUB_OUTPUT"
+          printf 'drive_id=%s\n' "$drive_id" >> "$GITHUB_OUTPUT"
+          printf 'min_files=%s\n' "$min_files" >> "$GITHUB_OUTPUT"
+          printf 'min_bytes=%s\n' "$min_bytes" >> "$GITHUB_OUTPUT"
+          printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
+          printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
+          printf 'old=%s\n' "$old" >> "$GITHUB_OUTPUT"
+
+      - name: Download and validate this mod only
+        shell: bash
+        env:
+          NAME: ${{ steps.mod.outputs.name }}
+          DRIVE_ID: ${{ steps.mod.outputs.drive_id }}
+          MIN_FILES: ${{ steps.mod.outputs.min_files }}
+          MIN_BYTES: ${{ steps.mod.outputs.min_bytes }}
+          TARGET: ${{ steps.mod.outputs.target }}
+        run: |
+          set -euo pipefail
+          staging="$RUNNER_TEMP/mod-$ITEM_SLUG"
+          rm -rf "$staging"
+          mkdir -p "$staging"
+
+          for attempt in 1 2 3 4 5; do
+            if gdown --continue --folder "https://drive.google.com/drive/folders/$DRIVE_ID" -O "$staging"; then
+              break
+            fi
+            if [[ "$attempt" == 5 ]]; then
+              echo "$NAME: Google Drive download failed after $attempt resumable attempts" >&2
+              exit 1
+            fi
+            echo "$NAME: retrying without discarding completed files (attempt $((attempt + 1))/5)" >&2
+            sleep $((attempt * 30))
+          done
+
+          files="$(find "$staging" -type f | wc -l | tr -d ' ')"
+          bytes="$(find "$staging" -type f -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
+          (( files >= MIN_FILES )) || { echo "$NAME: $files files < minimum $MIN_FILES" >&2; exit 1; }
+          (( bytes >= MIN_BYTES )) || { echo "$NAME: $bytes bytes < minimum $MIN_BYTES" >&2; exit 1; }
+
+          violations=()
+          while IFS= read -r -d '' path; do
+            lower="${path,,}"
+            base="${lower##*/}"
+            case "$lower" in
+              *third_party/discord_social_sdk/*|*discord_partner_sdk.framework/*|*discord_partner_sdk.xcframework/*)
+                violations+=("$path")
+                ;;
+            esac
+            case "$base" in
+              discord_partner_sdk.dll|libdiscord_partner_sdk.so|libdiscord_partner_sdk.dylib|discord_partner_sdk.aar|*.jks|*.keystore|*.p12|*.pfx)
+                violations+=("$path")
+                ;;
+            esac
+          done < <(find "$staging" -type f -print0)
+
+          if (( ${#violations[@]} )); then
+            printf 'Refusing private/non-redistributable inputs:\n' >&2
+            printf ' - %s\n' "${violations[@]}" >&2
+            exit 1
+          fi
+
+          rm -rf "$TARGET"
+          mkdir -p "$(dirname "$TARGET")"
+          mv "$staging" "$TARGET"
+
+      - name: Commit and publish this mod branch
+        shell: bash
+        env:
+          TARGET: ${{ steps.mod.outputs.target }}
+          BRANCH: ${{ steps.mod.outputs.branch }}
+          OLD_SHA: ${{ steps.mod.outputs.old }}
+        run: |
+          set -euo pipefail
+
+          while IFS= read -r -d '' file; do
+            size="$(stat -c '%s' "$file")"
+            if (( size >= 25 * 1024 * 1024 )); then
+              attr="$(git check-attr filter -- "$file" | sed 's/^.*: //')"
+              if [[ "$attr" != 'lfs' ]]; then
+                git lfs track "$file"
+              fi
+            fi
+          done < <(find "$TARGET" -type f -print0)
+
+          git add -- .gitattributes
+          git add -f -- "$TARGET"
+
+          if git diff --cached --quiet; then
+            echo "$ITEM_SLUG is already identical to main; no isolated branch is needed."
+            exit 0
+          fi
+
+          while IFS= read -r path; do
+            [[ "$path" == '.gitattributes' || "$path" == "$TARGET"/* ]] || {
+              echo "unexpected staged path: $path" >&2
+              exit 1
+            }
+          done < <(git diff --cached --name-only)
+
+          while IFS= read -r -d '' file; do
+            size="$(stat -c '%s' "$file")"
+            if (( size >= 95 * 1024 * 1024 )); then
+              attr="$(git check-attr filter -- "$file" | sed 's/^.*: //')"
+              [[ "$attr" == 'lfs' ]] || { echo "$file is $size bytes but is not tracked by LFS" >&2; exit 1; }
+            fi
+          done < <(find "$TARGET" -type f -print0)
+
+          git commit -m "complete(content): embed $ITEM_SLUG"
+          git lfs fsck --pointers HEAD
+
+          if [[ -n "$OLD_SHA" ]]; then
+            git push --force-with-lease="refs/heads/$BRANCH:$OLD_SHA" origin "HEAD:refs/heads/$BRANCH"
+          else
+            git push origin "HEAD:refs/heads/$BRANCH"
+          fi
+
+          echo "Published isolated Complete mod branch: $BRANCH"
