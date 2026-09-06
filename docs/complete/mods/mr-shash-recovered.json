@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "mr-shash-recovered",
+  "slug": "mr-shash-recovered",
+  "drive_id": "1JXQZUnuOo9klZb9vg9OReaVIn55VGMQL",
+  "min_files": 516,
+  "min_bytes": 149594831,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
