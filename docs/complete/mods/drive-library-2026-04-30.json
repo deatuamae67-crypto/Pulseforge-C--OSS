@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-library-2026-04-30",
+  "slug": "drive-library-2026-04-30",
+  "drive_id": "1PTa0ldHNt0reXMOhnz6vTJVt5RkokHu0",
+  "min_files": 1012,
+  "min_bytes": 389579119,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
