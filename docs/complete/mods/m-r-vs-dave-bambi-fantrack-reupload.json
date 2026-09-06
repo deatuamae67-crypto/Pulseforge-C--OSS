@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "m-r-vs-dave-bambi-fantrack-reupload",
+  "slug": "m-r-vs-dave-bambi-fantrack-reupload",
+  "drive_id": "1WD3k9iuF6QNVUmy4UyJRtsNuJorHqbFL",
+  "min_files": 7,
+  "min_bytes": 3402847,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
