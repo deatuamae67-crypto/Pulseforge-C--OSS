@@ -72,3 +72,4 @@ mods/drive-pack-files/data/end-of-the-world/end-of-the-world.json filter=lfs dif
 mods/drive-pack-files/data/end-of-the-world/end-of-the-world-compressed.json filter=lfs diff=lfs merge=lfs -text
 mods/drive-pack-files/data/end-of-the-world/end-of-the-world-unfinished.json filter=lfs diff=lfs merge=lfs -text
 mods/drive-pack-files/songs/end-of-the-world/end-of-the-world.json filter=lfs diff=lfs merge=lfs -text
+mods/taimuresu[[:space:]]spam[[:space:]]amplified/taimuresu/data/Taimuresu_overkill_mode/Taimuresu_overkill_mode.json filter=lfs diff=lfs merge=lfs -text
