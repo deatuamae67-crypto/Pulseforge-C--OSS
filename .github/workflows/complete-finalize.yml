@@ -1,0 +1,99 @@
+name: PulseForge Complete final publication gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/complete/READY'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  COMPLETE_TAG: 'v1.0.0-complete'
+  CONTENT_SPEC: 'docs/COMPLETE_CONTENT_1.0.0.json'
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+      - name: Verify Complete source and every Release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$(jq -r '.target_mod_count' "$CONTENT_SPEC")"
+          [[ "$target" == '30' ]]
+          shopt -s nullglob
+          specs=(docs/complete/mods/*.json)
+          (( ${#specs[@]} == target )) || { echo "Expected $target merged mod descriptors, found ${#specs[@]}" >&2; exit 1; }
+          [[ "$(printf '%s\n' "${specs[@]}" | sort -u | wc -l | tr -d ' ')" == "$target" ]]
+
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$COMPLETE_TAG\") | [.id,.draft,.prerelease] | @tsv" | head -n1 || true)"
+          [[ -n "$release" ]] || { echo 'Complete release draft not found.' >&2; exit 1; }
+          IFS=$'\t' read -r release_id draft prerelease <<<"$release"
+          [[ "$draft" == 'true' && "$prerelease" == 'false' ]] || { echo 'Complete release is not in the expected guarded draft state.' >&2; exit 1; }
+
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" | jq 'add' > "$RUNNER_TEMP/assets.json"
+          jq -e 'length > 0 and all(.[]; .state == "uploaded" and .size > 0 and (.digest | test("^sha256:[0-9a-f]{64}$")))' "$RUNNER_TEMP/assets.json" >/dev/null
+
+          required=(
+            'COMPLETE_CONTENT_1.0.0.json'
+            'install-complete-content.sh'
+            'install-complete-content.ps1'
+            'PulseForge-v1.0.0-complete-modsList.txt'
+            'PulseForge-v1.0.0-complete-menu-music.zip'
+            'PulseForge-v1.0.0-complete-menu-music.zip.SHA256SUMS.txt'
+            'PulseForge-v1.0.0-complete-menu-music.manifest.json'
+            'PulseForge-v1.0.0-complete-Windows-x86_64.zip'
+            'PulseForge-v1.0.0-complete-Windows-x86_64.zip.SHA256SUMS.txt'
+            'PulseForge-v1.0.0-complete-Linux-x86_64.tar.gz'
+            'PulseForge-v1.0.0-complete-Linux-x86_64.tar.gz.SHA256SUMS.txt'
+            'PulseForge-v1.0.0-complete-macOS-arm64.tar.gz'
+            'PulseForge-v1.0.0-complete-macOS-arm64.tar.gz.SHA256SUMS.txt'
+            'PulseForge-v1.0.0-complete-macOS-x86_64.tar.gz'
+            'PulseForge-v1.0.0-complete-macOS-x86_64.tar.gz.SHA256SUMS.txt'
+            'PulseForge-v1.0.0-complete-Android-arm64-test-signed.apk'
+            'PulseForge-v1.0.0-complete-Android-arm64-test-signed.apk.SHA256SUMS.txt'
+          )
+          for n in "${required[@]}"; do
+            jq -e --arg n "$n" 'any(.[]; .name == $n and .state == "uploaded" and .size > 0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Missing required Complete asset: $n" >&2; exit 1; }
+          done
+
+          for spec in "${specs[@]}"; do
+            slug="$(jq -r '.slug' "$spec")"
+            base="PulseForge-v1.0.0-complete-mod-$slug"
+            jq -e --arg n "$base.manifest.json" 'any(.[]; .name == $n and .state == "uploaded" and .size > 0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Missing $base manifest" >&2; exit 1; }
+            jq -e --arg n "$base.zip.SHA256SUMS.txt" 'any(.[]; .name == $n and .state == "uploaded" and .size > 0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Missing $base archive checksum" >&2; exit 1; }
+            jq -e --arg z "$base.zip" --arg p "$base.zip.part00" 'any(.[]; (.name == $z or .name == $p) and .state == "uploaded" and .size > 0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Missing $base archive or first split part" >&2; exit 1; }
+            if jq -e --arg p "$base.zip.part00" 'any(.[]; .name == $p)' "$RUNNER_TEMP/assets.json" >/dev/null; then
+              jq -e --arg n "$base.zip.parts.SHA256SUMS.txt" 'any(.[]; .name == $n and .state == "uploaded" and .size > 0)' "$RUNNER_TEMP/assets.json" >/dev/null || { echo "Missing split-parts checksum for $base" >&2; exit 1; }
+            fi
+          done
+
+          echo "release_id=$release_id" >> "$GITHUB_ENV"
+          echo "All $target Complete mod packs and all base artifacts passed the publication gate."
+
+      - name: Point tag at final main and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          head_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$COMPLETE_TAG" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$COMPLETE_TAG" -f sha="$head_sha" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$COMPLETE_TAG" -f sha="$head_sha" >/dev/null
+          fi
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f target_commitish="$head_sha" -F draft=false -F prerelease=false -f make_latest=true > "$RUNNER_TEMP/published.json"
+          jq -e --arg tag "$COMPLETE_TAG" '.tag_name == $tag and .draft == false and .prerelease == false and .published_at != null' "$RUNNER_TEMP/published.json" >/dev/null
+          ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$COMPLETE_TAG")"
+          [[ "$(jq -r '.object.type' <<<"$ref")" == 'commit' ]]
+          [[ "$(jq -r '.object.sha' <<<"$ref")" == "$head_sha" ]]
+          echo "Published $COMPLETE_TAG at $head_sha."
