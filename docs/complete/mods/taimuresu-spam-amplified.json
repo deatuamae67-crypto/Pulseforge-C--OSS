@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "taimuresu spam amplified",
+  "slug": "taimuresu-spam-amplified",
+  "drive_id": "14MFlkrbN6sRJwnqSTwMobRJ5NVoc_VHK",
+  "min_files": 1,
+  "min_bytes": 1,
+  "enabled_by_default": false,
+  "default_state_basis": "not present in historical modsList; included in Complete but not auto-enabled"
+}
