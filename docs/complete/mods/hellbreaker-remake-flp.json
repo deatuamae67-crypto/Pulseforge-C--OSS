@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "Hellbreaker Remake FLP",
+  "slug": "hellbreaker-remake-flp",
+  "drive_id": "1XqWarJ7TDlLfjJ3Ae6WCCZfR3LJM2SwH",
+  "min_files": 1,
+  "min_bytes": 1,
+  "enabled_by_default": false,
+  "default_state_basis": "not present in historical modsList; included in Complete but not auto-enabled"
+}
