@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "charts feitos no flp",
+  "slug": "charts-feitos-no-flp",
+  "drive_id": "1Z-g_itHvEMiPnP7XB4Z9Adhu6G4S-Xnp",
+  "min_files": 1,
+  "min_bytes": 1,
+  "enabled_by_default": false,
+  "default_state_basis": "not present in historical modsList; included in Complete but not auto-enabled"
+}
