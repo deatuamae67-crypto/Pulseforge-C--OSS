@@ -1,5 +1,4 @@
 * text=auto
-
 *.c text eol=lf
 *.cc text eol=lf
 *.cpp text eol=lf
@@ -15,7 +14,6 @@ CMakeLists.txt text eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.sh text eol=lf
-
 *.jar binary
 *.png binary
 *.jpg binary
@@ -23,7 +21,6 @@ CMakeLists.txt text eol=lf
 *.ogg binary
 *.mp3 binary
 *.mp4 binary
-
 # PulseForge built-in content is part of the engine source tree. Large/binary
 # assets are versioned through Git LFS so `mods/` and `assets/menu/` contain the
 # real engine content without hitting GitHub's ordinary-blob size limits.
@@ -61,3 +58,7 @@ mods/**/*.flp filter=lfs diff=lfs merge=lfs -text
 mods/**/*.sf2 filter=lfs diff=lfs merge=lfs -text
 mods/**/*.mid filter=lfs diff=lfs merge=lfs -text
 mods/**/*.midi filter=lfs diff=lfs merge=lfs -text
+mods/drive-batata-static/assets/data/Nullifier/nullifier-accurate.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-batata-static/assets/data/ingratiating/ingratiating-backup-easy-3.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-batata-static/assets/data/ingratiating/ingratiating-backup-normal-1.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-batata-static/assets/data/ingratiating/ingratiating-backup-easy-2.json filter=lfs diff=lfs merge=lfs -text
