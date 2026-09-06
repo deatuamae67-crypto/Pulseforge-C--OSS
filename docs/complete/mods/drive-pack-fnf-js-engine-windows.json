@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-pack-fnf-js-engine-windows",
+  "slug": "drive-pack-fnf-js-engine-windows",
+  "drive_id": "1spqt0yKLzmPyHRm5khs-w2lEor_89cQT",
+  "min_files": 1031,
+  "min_bytes": 481992046,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
