@@ -1,0 +1,9 @@
+{
+    "archive":  "Files.zip",
+    "sha256":  "0ef2987afe4e11d787aa1e21afa91a789ce13344a30b8407e9d04847776bcd60",
+    "importedFiles":  49,
+    "importedBytes":  2390311627,
+    "skippedNonContentEntries":  0,
+    "preservedDuplicateEntries":  0,
+    "policy":  "Static FNF data only; executables, DLLs and nested binary archives excluded."
+}
