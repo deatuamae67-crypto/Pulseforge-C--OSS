@@ -48,8 +48,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import glob, json
-          specs=[]; names=set(); slugs=set()
+          import glob, json, pathlib, sys
+          descriptors=[]; names=set(); slugs=set()
           for path in sorted(glob.glob('docs/complete/mods/*.json')):
               with open(path,encoding='utf-8') as f: spec=json.load(f)
               name=spec.get('name'); slug=spec.get('slug')
@@ -58,10 +58,12 @@ jobs:
               if not isinstance(slug,str) or not slug: raise SystemExit(f'invalid slug in {path}: {slug!r}')
               if name.casefold() in names: raise SystemExit(f'duplicate Complete mod name: {name}')
               if slug in slugs: raise SystemExit(f'duplicate Complete mod slug: {slug}')
-              names.add(name.casefold()); slugs.add(slug); specs.append({'slug':slug})
-          if len(specs)!=30: raise SystemExit(f'expected 30 built-in mod descriptors, found {len(specs)}')
+              names.add(name.casefold()); slugs.add(slug); descriptors.append({'slug':slug,'name':name})
+          if len(descriptors)!=30: raise SystemExit(f'expected 30 built-in mod descriptors, found {len(descriptors)}')
+          specs=[{'slug':item['slug']} for item in descriptors if not (pathlib.Path('mods')/item['name']).exists()]
           deferred={'drive-2026-08-22-dek-v1','charts-feitos-no-flp'}
           specs.sort(key=lambda item:(item['slug'] in deferred,item['slug']))
+          print(f'Complete mods remaining to stage: {len(specs)}', file=sys.stderr)
           print('matrix='+json.dumps({'include':specs},separators=(',',':')))
           PY
 
@@ -104,7 +106,7 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 6
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     env:
       ITEM_SLUG: ${{ matrix.slug }}
@@ -142,14 +144,15 @@ jobs:
           git checkout -B "$branch" "$GITHUB_SHA"; git reset --hard "$GITHUB_SHA"
           printf 'name=%s\ndrive_id=%s\nmin_files=%s\nmin_bytes=%s\ndescriptor=%s\ntarget=%s\nbranch=%s\nold=%s\n' "$name" "$drive_id" "$min_files" "$min_bytes" "$descriptor" "$target" "$branch" "$old" >> "$GITHUB_OUTPUT"
 
-      # Prefer a payload already committed to the accumulated Git/LFS branch.
-      # It is fully hydrated and re-audited below, so cached content does not
-      # bypass current payload, redistribution-safety or functional checks.
+      # Prefer a payload already committed to the accumulated Git/LFS branch,
+      # but only when it still passes the current functional-dependency audit.
+      # A hydrated but stale/incomplete cache candidate falls back to Drive.
       - name: Reuse already embedded candidate when available
         id: embedded_candidate
         shell: bash
         env:
           TARGET: ${{ steps.mod.outputs.target }}
+          DESCRIPTOR: ${{ steps.mod.outputs.descriptor }}
         run: |
           set -euo pipefail
           echo 'hit=false' >> "$GITHUB_OUTPUT"
@@ -199,13 +202,18 @@ jobs:
             cache_ok=false
           fi
 
+          if [[ "$cache_ok" == true ]] && ! python3 scripts/audit_complete_mod_payload.py . --mod-root "$cache_worktree/$TARGET" --descriptor "$DESCRIPTOR" --output "$RUNNER_TEMP/embedded-cache-audit-$ITEM_SLUG.json"; then
+            cache_ok=false
+            echo "::warning title=Embedded cache audit failed::Cached candidate for $ITEM_SLUG is hydrated but not functionally complete under the current auditor; falling back to Google Drive."
+          fi
+
           if [[ "$cache_ok" == true ]]; then
             mkdir -p "$(dirname "$staging")"
             mv "$cache_worktree/$TARGET" "$staging"
             echo 'hit=true' >> "$GITHUB_OUTPUT"
-            echo "Reused fully hydrated Git/LFS candidate for $ITEM_SLUG."
+            echo "Reused fully hydrated and audited Git/LFS candidate for $ITEM_SLUG."
           else
-            echo "::warning title=Embedded cache hydration failed::Cached candidate for $ITEM_SLUG could not be fully hydrated; falling back to Google Drive."
+            echo "::warning title=Embedded cache rejected::Cached candidate for $ITEM_SLUG could not be safely reused; falling back to Google Drive."
           fi
           git worktree remove --force "$cache_worktree" || true
           git worktree prune || true
