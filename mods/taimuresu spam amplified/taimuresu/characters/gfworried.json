@@ -1,0 +1,20 @@
+{
+  "animations": [
+    {"loop": true, "offsets": [0, 0], "anim": "idle", "fps": 24, "name": "GF Dancing Beat", "indices": []},
+    {"loop": false, "offsets": [0, 0], "anim": "singLEFT", "fps": 24, "name": "GF Left Note", "indices": []},
+    {"loop": false, "offsets": [0, 0], "anim": "singDOWN", "fps": 24, "name": "GF Down Note", "indices": []},
+    {"loop": false, "offsets": [0, 0], "anim": "singUP", "fps": 24, "name": "GF Up Note", "indices": []},
+    {"loop": false, "offsets": [0, 0], "anim": "singRIGHT", "fps": 24, "name": "GF Right Note", "indices": []},
+    {"loop": false, "offsets": [0, 0], "anim": "cheer", "fps": 24, "name": "GF Cheer", "indices": []},
+    {"loop": true, "offsets": [0, 0], "anim": "scared", "fps": 24, "name": "GF FEAR ", "indices": []}
+  ],
+  "no_antialiasing": false,
+  "image": "characters/GF_worried",
+  "position": [0, 0],
+  "healthicon": "gf",
+  "flip_x": false,
+  "healthbar_colors": [165, 0, 77],
+  "camera_position": [0, 0],
+  "sing_duration": 4,
+  "scale": 1.0
+}

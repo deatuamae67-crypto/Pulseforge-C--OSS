@@ -1,0 +1,95 @@
+{
+	"events": [
+		[
+			-9999,
+			[
+				["Change Botplay Text", "Welcome to the hell", ""]
+			]
+		],
+		[
+			15360,
+			[
+				["Change Character", "1", "taimuresu1"]
+			]
+		],
+		[
+			122880,
+			[
+				["Rainbow Eyesore", "9471", "3"]
+			]
+		],
+		[
+			161280,
+			[
+				["Add Camera Zoom", "100", "100"]
+			]
+		],
+		[
+			161280,
+			[
+				["Change Character", "1", "taimuresu2"]
+			]
+		],
+		[
+			161280,
+			[
+				["Change Botplay Text", "Just a break time", ""]
+			]
+		],
+		[
+			247200,
+			[
+				["Change Botplay Text", "Get ready?", ""]
+			]
+		],
+		[
+			253440,
+			[
+				["Add Camera Zoom", "100", "100"]
+			]
+		],
+		[
+			253440,
+			[
+				["Change Character", "1", "taimuresu3"]
+			]
+		],
+		[
+			253440,
+			[
+				["Change Botplay Text", "He's only exerting 3% of his power", ""]
+			]
+		],
+		[
+			284160,
+			[
+				["Rainbow Eyesore", "26368", "2"]
+			]
+		],
+		[
+			414720,
+			[
+				["Add Camera Zoom", "100", "100"]
+			]
+		],
+		[
+			414720,
+			[
+				["Change Character", "1", "taimuresu4"]
+			]
+		],
+		[
+			414720,
+			[
+				["Change Botplay Text", "... Good Luck !", ""]
+			]
+		],
+		[
+			460800,
+			[
+				["Rainbow Eyesore", "32000", "12"]
+			]
+		]
+	],
+	"format": "psych_v1"
+}
