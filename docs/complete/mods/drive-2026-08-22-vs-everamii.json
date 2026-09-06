@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-2026-08-22-vs-everamii",
+  "slug": "drive-2026-08-22-vs-everamii",
+  "drive_id": "1Xns4TsZdDCKhClqbGwGU702nk8ciwrjP",
+  "min_files": 1092,
+  "min_bytes": 254502864,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
