@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-pack-files",
+  "slug": "drive-pack-files",
+  "drive_id": "1_ZYbZRVLr2TQpTy-yPnOWsS323PcBASG",
+  "min_files": 51,
+  "min_bytes": 2390312362,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
