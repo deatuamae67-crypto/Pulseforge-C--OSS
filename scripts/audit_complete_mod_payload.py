@@ -7,7 +7,7 @@ STOCK_SONGS={"tutorial","bopeebo","fresh","dad-battle","spookeez","south","monst
 STOCK_CHARS={"bf","bf-car","bf-christmas","bf-pixel","bf-holding-gf","gf","gf-car","gf-christmas","gf-pixel","gf-speaker","gf-tankmen","dad","mom","mom-car","parents-christmas","spooky","pico","monster","monster-christmas","senpai","senpai-angry","spirit","tankman"}
 STOCK_STAGES={"stage","spooky","philly","limo","mall","mallevil","school","schoolevil","tank","phillystreets","phillyblazin"}
 BUILTIN_NOTES={"","alt animation","gf sing","hey!","hurt note","no animation"}
-BUILTIN_EVENTS={"","add camera zoom","alt idle animation","camera follow pos","change character","change scroll speed","hey!","kill henchmen","play animation","screen shake","set gf speed","set property"}
+BUILTIN_EVENTS={"","add camera zoom","alt idle animation","camera follow pos","change character","change scroll speed","change note multiplier","hey!","kill henchmen","play animation","screen shake","set gf speed","set property"}
 AUDIO=(".ogg",".wav",".mp3",".flac"); IMAGES=(".png",".jpg",".jpeg",".webp"); VIDEOS=(".mp4",".webm",".mkv",".avi",".mov"); ATLASES=(".xml",".txt",".json")
 
 def n(s): return str(s).replace("\\","/").strip().strip("/").lower()
