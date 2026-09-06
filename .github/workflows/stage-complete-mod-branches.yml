@@ -48,8 +48,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import glob, json
-          specs=[]; names=set(); slugs=set()
+          import glob, json, pathlib
+          descriptors=[]; names=set(); slugs=set()
           for path in sorted(glob.glob('docs/complete/mods/*.json')):
               with open(path,encoding='utf-8') as f: spec=json.load(f)
               name=spec.get('name'); slug=spec.get('slug')
@@ -58,10 +58,12 @@ jobs:
               if not isinstance(slug,str) or not slug: raise SystemExit(f'invalid slug in {path}: {slug!r}')
               if name.casefold() in names: raise SystemExit(f'duplicate Complete mod name: {name}')
               if slug in slugs: raise SystemExit(f'duplicate Complete mod slug: {slug}')
-              names.add(name.casefold()); slugs.add(slug); specs.append({'slug':slug})
-          if len(specs)!=30: raise SystemExit(f'expected 30 built-in mod descriptors, found {len(specs)}')
+              names.add(name.casefold()); slugs.add(slug); descriptors.append({'slug':slug,'name':name})
+          if len(descriptors)!=30: raise SystemExit(f'expected 30 built-in mod descriptors, found {len(descriptors)}')
+          specs=[{'slug':item['slug']} for item in descriptors if not (pathlib.Path('mods')/item['name']).exists()]
           deferred={'drive-2026-08-22-dek-v1','charts-feitos-no-flp'}
           specs.sort(key=lambda item:(item['slug'] in deferred,item['slug']))
+          print(f'Complete mods remaining to stage: {len(specs)}')
           print('matrix='+json.dumps({'include':specs},separators=(',',':')))
           PY
 
@@ -104,7 +106,7 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 6
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     env:
       ITEM_SLUG: ${{ matrix.slug }}
