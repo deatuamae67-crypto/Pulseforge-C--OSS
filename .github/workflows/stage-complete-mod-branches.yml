@@ -142,10 +142,79 @@ jobs:
           git checkout -B "$branch" "$GITHUB_SHA"; git reset --hard "$GITHUB_SHA"
           printf 'name=%s\ndrive_id=%s\nmin_files=%s\nmin_bytes=%s\ndescriptor=%s\ntarget=%s\nbranch=%s\nold=%s\n' "$name" "$drive_id" "$min_files" "$min_bytes" "$descriptor" "$target" "$branch" "$old" >> "$GITHUB_OUTPUT"
 
+      # Prefer a payload already committed to the accumulated Git/LFS branch.
+      # It is fully hydrated and re-audited below, so cached content does not
+      # bypass current payload, redistribution-safety or functional checks.
+      - name: Reuse already embedded candidate when available
+        id: embedded_candidate
+        shell: bash
+        env:
+          TARGET: ${{ steps.mod.outputs.target }}
+        run: |
+          set -euo pipefail
+          echo 'hit=false' >> "$GITHUB_OUTPUT"
+          cache_branch='complete/embedded-builtin-content'
+          cache_ref="refs/remotes/origin/$cache_branch"
+          staging="$RUNNER_TEMP/mod-$ITEM_SLUG"
+          cache_worktree="$RUNNER_TEMP/embedded-cache-$ITEM_SLUG"
+
+          if ! git fetch origin "$cache_branch:$cache_ref"; then
+            echo "::warning title=Embedded cache unavailable::Could not fetch $cache_branch; falling back to Google Drive for $ITEM_SLUG."
+            exit 0
+          fi
+          if ! git cat-file -e "$cache_ref:$TARGET" 2>/dev/null; then
+            echo "No embedded Git/LFS candidate for $ITEM_SLUG; using Google Drive."
+            exit 0
+          fi
+
+          rm -rf "$staging" "$cache_worktree"
+          if ! GIT_LFS_SKIP_SMUDGE=1 git worktree add --detach "$cache_worktree" "$cache_ref"; then
+            echo "::warning title=Embedded cache checkout failed::Could not create cache worktree for $ITEM_SLUG; falling back to Google Drive."
+            git worktree prune || true
+            exit 0
+          fi
+
+          cache_ok=true
+          if ! git -C "$cache_worktree" lfs fetch origin "$cache_branch" --include="$TARGET/**" --exclude=''; then
+            cache_ok=false
+          elif ! git -C "$cache_worktree" lfs checkout "$TARGET"; then
+            cache_ok=false
+          elif ! python3 - "$cache_worktree/$TARGET" <<'PY'
+          import pathlib, sys
+          root=pathlib.Path(sys.argv[1])
+          if not root.exists():
+              raise SystemExit(1)
+          for path in root.rglob('*'):
+              if not path.is_file():
+                  continue
+              try:
+                  head=path.read_bytes()[:256]
+              except OSError:
+                  raise SystemExit(1)
+              if head.startswith(b'version https://git-lfs.github.com/spec/v1\n') and b'\noid sha256:' in head:
+                  print(f'unhydrated LFS pointer: {path}', file=sys.stderr)
+                  raise SystemExit(1)
+          PY
+          then
+            cache_ok=false
+          fi
+
+          if [[ "$cache_ok" == true ]]; then
+            mkdir -p "$(dirname "$staging")"
+            mv "$cache_worktree/$TARGET" "$staging"
+            echo 'hit=true' >> "$GITHUB_OUTPUT"
+            echo "Reused fully hydrated Git/LFS candidate for $ITEM_SLUG."
+          else
+            echo "::warning title=Embedded cache hydration failed::Cached candidate for $ITEM_SLUG could not be fully hydrated; falling back to Google Drive."
+          fi
+          git worktree remove --force "$cache_worktree" || true
+          git worktree prune || true
+
       # Only the external Drive transfer is soft-failed. Descriptor, payload,
       # redistribution-safety and functional-audit failures remain hard failures.
       - name: Download the entire source mod recursively
         id: source_download
+        if: steps.embedded_candidate.outputs.hit != 'true'
         continue-on-error: true
         shell: bash
         env:
@@ -161,7 +230,7 @@ jobs:
           done
 
       - name: Report upstream candidate unavailable
-        if: steps.source_download.outcome == 'failure'
+        if: steps.embedded_candidate.outputs.hit != 'true' && steps.source_download.outcome == 'failure'
         shell: bash
         env:
           NAME: ${{ steps.mod.outputs.name }}
@@ -169,8 +238,8 @@ jobs:
         run: |
           echo "::warning title=Authoritative candidate unavailable::$ITEM_SLUG ($NAME) could not be fully downloaded from Drive folder $DRIVE_ID after resumable retries. The source tree remains healthy; this candidate will be retried by a later staging run."
 
-      - name: Validate and materialize downloaded source mod
-        if: steps.source_download.outcome == 'success'
+      - name: Validate and materialize source mod
+        if: steps.embedded_candidate.outputs.hit == 'true' || steps.source_download.outcome == 'success'
         shell: bash
         env:
           NAME: ${{ steps.mod.outputs.name }}
@@ -187,7 +256,7 @@ jobs:
           rm -rf "$TARGET"; mkdir -p "$(dirname "$TARGET")"; mv "$staging" "$TARGET"
 
       - name: Audit functional dependency closure before Git LFS conversion
-        if: success() && steps.source_download.outcome == 'success'
+        if: success() && (steps.embedded_candidate.outputs.hit == 'true' || steps.source_download.outcome == 'success')
         shell: bash
         env:
           TARGET: ${{ steps.mod.outputs.target }}
@@ -206,7 +275,7 @@ jobs:
           retention-days: 7
 
       - name: Commit and publish this mod branch
-        if: success() && steps.source_download.outcome == 'success'
+        if: success() && (steps.embedded_candidate.outputs.hit == 'true' || steps.source_download.outcome == 'success')
         shell: bash
         env:
           TARGET: ${{ steps.mod.outputs.target }}
