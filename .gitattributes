@@ -62,3 +62,13 @@ mods/drive-batata-static/assets/data/Nullifier/nullifier-accurate.json filter=lf
 mods/drive-batata-static/assets/data/ingratiating/ingratiating-backup-easy-3.json filter=lfs diff=lfs merge=lfs -text
 mods/drive-batata-static/assets/data/ingratiating/ingratiating-backup-normal-1.json filter=lfs diff=lfs merge=lfs -text
 mods/drive-batata-static/assets/data/ingratiating/ingratiating-backup-easy-2.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/unknown-black-hole/unknown-black-hole-uncompressed.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/unknown-black-hole/unknown-black-hole.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/eye-of-god/eye-of-god.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/eons/eons-easy.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/flocci/flocci-hard.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/quietus/quietus.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/end-of-the-world/end-of-the-world.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/end-of-the-world/end-of-the-world-compressed.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/data/end-of-the-world/end-of-the-world-unfinished.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-pack-files/songs/end-of-the-world/end-of-the-world.json filter=lfs diff=lfs merge=lfs -text

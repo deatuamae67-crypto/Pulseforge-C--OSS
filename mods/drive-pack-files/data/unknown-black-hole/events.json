@@ -1,0 +1,176 @@
+{
+	"song": {
+		"events": [
+			[
+				566.037735849057,
+				[
+					[
+						"Change Note Multiplier",
+						"21447891",
+						""
+					]
+				]
+			],
+			[
+				1132.07547169811,
+				[
+					[
+						"Change Note Multiplier",
+						"1",
+						""
+					]
+				]
+			],
+			[
+				54339.6226415095,
+				[
+					[
+						"Change Note Multiplier",
+						"2",
+						""
+					]
+				]
+			],
+			[
+				72452.8301886793,
+				[
+					[
+						"Change Note Multiplier",
+						"4",
+						""
+					]
+				]
+			],
+			[
+				90566.0377358489,
+				[
+					[
+						"Change Note Multiplier",
+						"16",
+						""
+					]
+				]
+			],
+			[
+				108679.245283019,
+				[
+					[
+						"Change Note Multiplier",
+						"1",
+						""
+					]
+				]
+			],
+			[
+				126792.452830188,
+				[
+					[
+						"Change Note Multiplier",
+						"32",
+						""
+					]
+				]
+			],
+			[
+				144905.660377358,
+				[
+					[
+						"Change Note Multiplier",
+						"64",
+						""
+					]
+				]
+			],
+			[
+				147169.811320754,
+				[
+					[
+						"Change Note Multiplier",
+						"1",
+						""
+					]
+				]
+			],
+			[
+				149433.962264151,
+				[
+					[
+						"Change Note Multiplier",
+						"64",
+						""
+					]
+				]
+			],
+			[
+				151698.113207547,
+				[
+					[
+						"Change Note Multiplier",
+						"1",
+						""
+					]
+				]
+			],
+			[
+				153962.264150943,
+				[
+					[
+						"Change Note Multiplier",
+						"64",
+						""
+					]
+				]
+			],
+			[
+				156226.41509434,
+				[
+					[
+						"Change Note Multiplier",
+						"1",
+						""
+					]
+				]
+			],
+			[
+				158490.566037736,
+				[
+					[
+						"Change Note Multiplier",
+						"64",
+						""
+					]
+				]
+			],
+			[
+				160754.716981132,
+				[
+					[
+						"Change Note Multiplier",
+						"1",
+						""
+					]
+				]
+			],
+			[
+				163018.867924528,
+				[
+					[
+						"Change Note Multiplier",
+						"128",
+						""
+					]
+				]
+			],
+			[
+				181132.075471698,
+				[
+					[
+						"Change Note Multiplier",
+						"256",
+						""
+					]
+				]
+			]
+		]
+	}
+}
