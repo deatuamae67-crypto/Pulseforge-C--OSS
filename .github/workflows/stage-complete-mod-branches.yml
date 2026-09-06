@@ -1,0 +1,199 @@
+name: PulseForge stage isolated Complete mod branches
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mods/**'
+      - 'docs/complete/mods/*.json'
+      - 'scripts/audit_complete_mod_payload.py'
+      - '.github/workflows/stage-complete-mod-branches.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/complete/mods/*.json'
+      - 'scripts/audit_complete_mod_payload.py'
+      - '.github/workflows/stage-complete-mod-branches.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GDOWN_VERSION: '6.0.0'
+  GIT_LFS_SKIP_SMUDGE: '1'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          lfs: false
+
+      - name: Self-test Complete payload auditor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/audit_complete_mod_payload.py --self-test
+
+      - name: Build isolated mod matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import glob, json
+          specs=[]; names=set(); slugs=set()
+          for path in sorted(glob.glob('docs/complete/mods/*.json')):
+              with open(path,encoding='utf-8') as f: spec=json.load(f)
+              name=spec.get('name'); slug=spec.get('slug')
+              if name=='.autochart-staging': raise SystemExit('.autochart-staging must never be embedded')
+              if not isinstance(name,str) or not name or '/' in name or '\\' in name: raise SystemExit(f'invalid mod name in {path}: {name!r}')
+              if not isinstance(slug,str) or not slug: raise SystemExit(f'invalid slug in {path}: {slug!r}')
+              if name.casefold() in names: raise SystemExit(f'duplicate Complete mod name: {name}')
+              if slug in slugs: raise SystemExit(f'duplicate Complete mod slug: {slug}')
+              names.add(name.casefold()); slugs.add(slug); specs.append({'slug':slug})
+          if len(specs)!=30: raise SystemExit(f'expected 30 built-in mod descriptors, found {len(specs)}')
+          deferred={'drive-2026-08-22-dek-v1','charts-feitos-no-flp'}
+          specs.sort(key=lambda item:(item['slug'] in deferred,item['slug']))
+          print('matrix='+json.dumps({'include':specs},separators=(',',':')))
+          PY
+
+      - name: Audit changed Complete mod payloads in this PR
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch origin "$BASE_REF" --depth=1
+          python3 - <<'PY'
+          import json,os,pathlib,subprocess,sys
+          base=subprocess.check_output(['git','merge-base','HEAD',f'origin/{os.environ["BASE_REF"]}'],text=True).strip()
+          changed=subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
+          mods={p.parts[1] for x in changed if len((p:=pathlib.PurePosixPath(x)).parts)>=2 and p.parts[0]=='mods'}
+          desc={json.loads(p.read_text(encoding='utf-8'))['name']:p for p in pathlib.Path('docs/complete/mods').glob('*.json')}
+          audited=0
+          for name in sorted(mods,key=str.casefold):
+              root=pathlib.Path('mods')/name
+              if not root.exists(): continue
+              spec=desc.get(name)
+              if spec is None: raise SystemExit(f'changed Complete mod has no descriptor: {name}')
+              subprocess.check_call([sys.executable,'scripts/audit_complete_mod_payload.py','.','--mod-root',str(root),'--descriptor',str(spec),'--output',f'/tmp/pulseforge-audit-{spec.stem}.json'])
+              audited+=1
+          print(f'PR Complete payloads audited: {audited}')
+          PY
+
+      - name: Confirm PR mode is validation-only
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: echo 'Complete mod dependency gate passed; staging branch writes are disabled for pull requests.'
+
+  stage-one:
+    if: github.event_name != 'pull_request'
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    env:
+      ITEM_SLUG: ${{ matrix.slug }}
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          lfs: false
+          persist-credentials: true
+
+      - name: Install content import tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v git-lfs >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y --no-install-recommends git-lfs; }
+          git lfs install --local
+          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+
+      - name: Validate descriptor and prepare isolated branch
+        id: mod
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ITEM_SLUG" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "invalid slug: $ITEM_SLUG" >&2; exit 1; }
+          descriptor="docs/complete/mods/$ITEM_SLUG.json"; test -f "$descriptor"
+          [[ "$(jq -r '.slug' "$descriptor")" == "$ITEM_SLUG" ]] || exit 1
+          name="$(jq -r '.name' "$descriptor")"; drive_id="$(jq -r '.drive_id' "$descriptor")"; min_files="$(jq -r '.min_files' "$descriptor")"; min_bytes="$(jq -r '.min_bytes' "$descriptor")"
+          [[ "$name" != '.autochart-staging' && -n "$name" && "$name" != 'null' && "$name" != */* && "$name" != *\\* ]]
+          [[ "$drive_id" =~ ^[A-Za-z0-9_-]+$ && "$min_files" =~ ^[0-9]+$ && "$min_bytes" =~ ^[0-9]+$ ]]
+          target="mods/$name"; branch="complete/content-$ITEM_SLUG"
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          old=''; if git fetch origin "$branch"; then old="$(git rev-parse "refs/remotes/origin/$branch")"; fi
+          git checkout -B "$branch" "$GITHUB_SHA"; git reset --hard "$GITHUB_SHA"
+          printf 'name=%s\ndrive_id=%s\nmin_files=%s\nmin_bytes=%s\ndescriptor=%s\ntarget=%s\nbranch=%s\nold=%s\n' "$name" "$drive_id" "$min_files" "$min_bytes" "$descriptor" "$target" "$branch" "$old" >> "$GITHUB_OUTPUT"
+
+      - name: Download the entire source mod recursively
+        shell: bash
+        env:
+          NAME: ${{ steps.mod.outputs.name }}
+          DRIVE_ID: ${{ steps.mod.outputs.drive_id }}
+          MIN_FILES: ${{ steps.mod.outputs.min_files }}
+          MIN_BYTES: ${{ steps.mod.outputs.min_bytes }}
+          TARGET: ${{ steps.mod.outputs.target }}
+        run: |
+          set -euo pipefail
+          staging="$RUNNER_TEMP/mod-$ITEM_SLUG"; rm -rf "$staging"; mkdir -p "$staging"
+          for attempt in 1 2 3 4 5; do
+            if gdown --continue --folder "https://drive.google.com/drive/folders/$DRIVE_ID" -O "$staging"; then break; fi
+            [[ "$attempt" != 5 ]] || { echo "$NAME: Drive failed after 5 resumable attempts" >&2; exit 1; }
+            sleep $((attempt*30))
+          done
+          files="$(find "$staging" -type f | wc -l | tr -d ' ')"; bytes="$(find "$staging" -type f -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
+          (( files >= MIN_FILES )) || { echo "$NAME: $files files < $MIN_FILES" >&2; exit 1; }; (( bytes >= MIN_BYTES )) || { echo "$NAME: $bytes bytes < $MIN_BYTES" >&2; exit 1; }
+          violations=(); while IFS= read -r -d '' path; do lower="${path,,}"; base="${lower##*/}"; case "$lower" in *third_party/discord_social_sdk/*|*discord_partner_sdk.framework/*|*discord_partner_sdk.xcframework/*) violations+=("$path");; esac; case "$base" in discord_partner_sdk.dll|libdiscord_partner_sdk.so|libdiscord_partner_sdk.dylib|discord_partner_sdk.aar|*.jks|*.keystore|*.p12|*.pfx) violations+=("$path");; esac; done < <(find "$staging" -type f -print0)
+          if (( ${#violations[@]} )); then printf 'Refusing private/non-redistributable inputs:\n' >&2; printf ' - %s\n' "${violations[@]}" >&2; exit 1; fi
+          rm -rf "$TARGET"; mkdir -p "$(dirname "$TARGET")"; mv "$staging" "$TARGET"
+
+      - name: Audit functional dependency closure before Git LFS conversion
+        shell: bash
+        env:
+          TARGET: ${{ steps.mod.outputs.target }}
+          DESCRIPTOR: ${{ steps.mod.outputs.descriptor }}
+        run: |
+          set -euo pipefail
+          python3 scripts/audit_complete_mod_payload.py . --mod-root "$TARGET" --descriptor "$DESCRIPTOR" --output "$RUNNER_TEMP/complete-mod-audit-$ITEM_SLUG.json"
+
+      - name: Upload dependency audit
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: complete-mod-audit-${{ matrix.slug }}
+          path: ${{ runner.temp }}/complete-mod-audit-${{ matrix.slug }}.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Commit and publish this mod branch
+        shell: bash
+        env:
+          TARGET: ${{ steps.mod.outputs.target }}
+          BRANCH: ${{ steps.mod.outputs.branch }}
+          OLD_SHA: ${{ steps.mod.outputs.old }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do size="$(stat -c '%s' "$file")"; if (( size >= 25*1024*1024 )); then attr="$(git check-attr filter -- "$file" | sed 's/^.*: //')"; [[ "$attr" == lfs ]] || git lfs track "$file"; fi; done < <(find "$TARGET" -type f -print0)
+          git add -- .gitattributes; git add -f -- "$TARGET"
+          if git diff --cached --quiet; then echo "$ITEM_SLUG already identical to main"; exit 0; fi
+          while IFS= read -r path; do [[ "$path" == '.gitattributes' || "$path" == "$TARGET"/* ]] || { echo "unexpected staged path: $path" >&2; exit 1; }; done < <(git diff --cached --name-only)
+          while IFS= read -r -d '' file; do size="$(stat -c '%s' "$file")"; if (( size >= 95*1024*1024 )); then [[ "$(git check-attr filter -- "$file" | sed 's/^.*: //')" == lfs ]] || { echo "$file is $size bytes but is not LFS" >&2; exit 1; }; fi; done < <(find "$TARGET" -type f -print0)
+          git commit -m "complete(content): embed $ITEM_SLUG"; git lfs fsck --pointers HEAD
+          if [[ -n "$OLD_SHA" ]]; then git push --force-with-lease="refs/heads/$BRANCH:$OLD_SHA" origin "HEAD:refs/heads/$BRANCH"; else git push origin "HEAD:refs/heads/$BRANCH"; fi
