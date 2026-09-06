@@ -1,7 +1,0 @@
-{
-  "id": "user.sniff.flp-charts",
-  "name": "Charts feitos no FLP",
-  "version": "1",
-  "engine": "psych",
-  "description": "Charts converted locally with the guarded SNIFF-RUSTED bridge."
-}
