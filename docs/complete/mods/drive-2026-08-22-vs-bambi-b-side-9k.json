@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-2026-08-22-vs-bambi-b-side-9k",
+  "slug": "drive-2026-08-22-vs-bambi-b-side-9k",
+  "drive_id": "1rAiZ5Ry5ISyJ_dPQqGSsDIzDqQqhdvN9",
+  "min_files": 396,
+  "min_bytes": 137192805,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
