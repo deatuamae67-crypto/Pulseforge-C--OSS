@@ -119,9 +119,10 @@ jobs:
           if [[ "$ITEM_KIND" == 'menu' ]]; then
             folder_id="$(jq -r '.source.menu_music_staging_folder_id' "$CONTENT_SPEC")"
             target='assets/menu'
+            staging="$RUNNER_TEMP/menu-music"
             for attempt in 1 2 3; do
-              rm -rf "$target" && mkdir -p "$target"
-              if gdown --folder "https://drive.google.com/drive/folders/$folder_id" -O "$target"; then
+              rm -rf "$staging" && mkdir -p "$staging"
+              if gdown --folder "https://drive.google.com/drive/folders/$folder_id" -O "$staging"; then
                 break
               fi
               [[ "$attempt" != 3 ]] || exit 1
@@ -129,10 +130,13 @@ jobs:
             done
             expected_count="$(jq -r '.menu_music.expected_tracks' "$CONTENT_SPEC")"
             expected_bytes="$(jq -r '.menu_music.expected_total_bytes' "$CONTENT_SPEC")"
-            actual_count="$(find "$target" -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')"
-            actual_bytes="$(find "$target" -maxdepth 1 -type f -iname '*.mp3' -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
+            actual_count="$(find "$staging" -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')"
+            actual_bytes="$(find "$staging" -maxdepth 1 -type f -iname '*.mp3' -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
             [[ "$actual_count" == "$expected_count" ]] || { echo "menu track count $actual_count != $expected_count" >&2; exit 1; }
             [[ "$actual_bytes" == "$expected_bytes" ]] || { echo "menu bytes $actual_bytes != $expected_bytes" >&2; exit 1; }
+            mkdir -p "$target"
+            find "$target" -maxdepth 1 -type f \( -iname '*.mp3' -o -iname '*.ogg' -o -iname '*.wav' -o -iname '*.flac' \) -delete
+            find "$staging" -maxdepth 1 -type f -exec cp -f '{}' "$target/" \;
           elif [[ "$ITEM_KIND" == 'modslist' ]]; then
             target='mods/modsList.txt'
             mkdir -p mods
@@ -223,9 +227,6 @@ jobs:
 
           git commit -m "complete(content): embed $ITEM_SLUG"
           git lfs fsck --pointers HEAD
-          # The LFS pre-push hook uploads the newly introduced real objects before
-          # the Git ref moves. Existing objects stay as pointers locally and are
-          # not repeatedly downloaded between matrix jobs.
           git push origin "HEAD:$CONTENT_BRANCH"
 
   verify-branch:
