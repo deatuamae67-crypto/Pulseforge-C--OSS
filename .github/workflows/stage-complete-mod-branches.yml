@@ -142,22 +142,44 @@ jobs:
           git checkout -B "$branch" "$GITHUB_SHA"; git reset --hard "$GITHUB_SHA"
           printf 'name=%s\ndrive_id=%s\nmin_files=%s\nmin_bytes=%s\ndescriptor=%s\ntarget=%s\nbranch=%s\nold=%s\n' "$name" "$drive_id" "$min_files" "$min_bytes" "$descriptor" "$target" "$branch" "$old" >> "$GITHUB_OUTPUT"
 
+      # Only the external Drive transfer is soft-failed. Descriptor, payload,
+      # redistribution-safety and functional-audit failures remain hard failures.
       - name: Download the entire source mod recursively
+        id: source_download
+        continue-on-error: true
         shell: bash
         env:
           NAME: ${{ steps.mod.outputs.name }}
           DRIVE_ID: ${{ steps.mod.outputs.drive_id }}
+        run: |
+          set -euo pipefail
+          staging="$RUNNER_TEMP/mod-$ITEM_SLUG"; rm -rf "$staging"; mkdir -p "$staging"
+          for attempt in 1 2 3 4 5; do
+            if gdown --continue --folder "https://drive.google.com/drive/folders/$DRIVE_ID" -O "$staging"; then exit 0; fi
+            [[ "$attempt" != 5 ]] || { echo "$NAME: Drive failed after 5 resumable attempts" >&2; exit 1; }
+            sleep $((attempt*30))
+          done
+
+      - name: Report upstream candidate unavailable
+        if: steps.source_download.outcome == 'failure'
+        shell: bash
+        env:
+          NAME: ${{ steps.mod.outputs.name }}
+          DRIVE_ID: ${{ steps.mod.outputs.drive_id }}
+        run: |
+          echo "::warning title=Authoritative candidate unavailable::$ITEM_SLUG ($NAME) could not be fully downloaded from Drive folder $DRIVE_ID after resumable retries. The source tree remains healthy; this candidate will be retried by a later staging run."
+
+      - name: Validate and materialize downloaded source mod
+        if: steps.source_download.outcome == 'success'
+        shell: bash
+        env:
+          NAME: ${{ steps.mod.outputs.name }}
           MIN_FILES: ${{ steps.mod.outputs.min_files }}
           MIN_BYTES: ${{ steps.mod.outputs.min_bytes }}
           TARGET: ${{ steps.mod.outputs.target }}
         run: |
           set -euo pipefail
-          staging="$RUNNER_TEMP/mod-$ITEM_SLUG"; rm -rf "$staging"; mkdir -p "$staging"
-          for attempt in 1 2 3 4 5; do
-            if gdown --continue --folder "https://drive.google.com/drive/folders/$DRIVE_ID" -O "$staging"; then break; fi
-            [[ "$attempt" != 5 ]] || { echo "$NAME: Drive failed after 5 resumable attempts" >&2; exit 1; }
-            sleep $((attempt*30))
-          done
+          staging="$RUNNER_TEMP/mod-$ITEM_SLUG"
           files="$(find "$staging" -type f | wc -l | tr -d ' ')"; bytes="$(find "$staging" -type f -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
           (( files >= MIN_FILES )) || { echo "$NAME: $files files < $MIN_FILES" >&2; exit 1; }; (( bytes >= MIN_BYTES )) || { echo "$NAME: $bytes bytes < $MIN_BYTES" >&2; exit 1; }
           violations=(); while IFS= read -r -d '' path; do lower="${path,,}"; base="${lower##*/}"; case "$lower" in *third_party/discord_social_sdk/*|*discord_partner_sdk.framework/*|*discord_partner_sdk.xcframework/*) violations+=("$path");; esac; case "$base" in discord_partner_sdk.dll|libdiscord_partner_sdk.so|libdiscord_partner_sdk.dylib|discord_partner_sdk.aar|*.jks|*.keystore|*.p12|*.pfx) violations+=("$path");; esac; done < <(find "$staging" -type f -print0)
@@ -165,6 +187,7 @@ jobs:
           rm -rf "$TARGET"; mkdir -p "$(dirname "$TARGET")"; mv "$staging" "$TARGET"
 
       - name: Audit functional dependency closure before Git LFS conversion
+        if: success() && steps.source_download.outcome == 'success'
         shell: bash
         env:
           TARGET: ${{ steps.mod.outputs.target }}
@@ -183,6 +206,7 @@ jobs:
           retention-days: 7
 
       - name: Commit and publish this mod branch
+        if: success() && steps.source_download.outcome == 'success'
         shell: bash
         env:
           TARGET: ${{ steps.mod.outputs.target }}
