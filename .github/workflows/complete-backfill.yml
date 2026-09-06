@@ -1,0 +1,135 @@
+name: PulseForge Complete content backfill
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/complete-backfill.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  COMPLETE_TAG: 'v1.0.0-complete'
+  GDOWN_VERSION: '6.0.0'
+
+jobs:
+  enumerate:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.mods.outputs.matrix }}
+      count: ${{ steps.mods.outputs.count }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Enumerate merged Complete descriptors
+        id: mods
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          specs=(docs/complete/mods/*.json)
+          (( ${#specs[@]} > 0 )) || { echo 'No Complete mod descriptors found.' >&2; exit 1; }
+          matrix="$(jq -sc '{include: map({name:.name,slug:.slug,drive_id:.drive_id,min_files:.min_files,min_bytes:.min_bytes})}' "${specs[@]}")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=${#specs[@]}" >> "$GITHUB_OUTPUT"
+          echo "Backfill will process ${#specs[@]} merged mod descriptors."
+
+  backfill:
+    needs: enumerate
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.enumerate.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MOD_NAME: ${{ matrix.name }}
+      MOD_SLUG: ${{ matrix.slug }}
+      MOD_DRIVE_ID: ${{ matrix.drive_id }}
+      MIN_FILES: ${{ matrix.min_files }}
+      MIN_BYTES: ${{ matrix.min_bytes }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install Drive downloader
+        shell: bash
+        run: python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+      - name: Download and validate mod
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/stage/mods/$MOD_NAME"
+          for attempt in 1 2 3; do
+            rm -rf "$root"
+            mkdir -p "$root"
+            if gdown --folder "https://drive.google.com/drive/folders/$MOD_DRIVE_ID" -O "$root"; then break; fi
+            [[ "$attempt" != 3 ]] || exit 1
+            sleep $((attempt * 15))
+          done
+          files="$(find "$root" -type f | wc -l | tr -d ' ')"
+          bytes="$(find "$root" -type f -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
+          (( files >= MIN_FILES )) || { echo "$MOD_NAME: $files files < minimum $MIN_FILES" >&2; exit 1; }
+          (( bytes >= MIN_BYTES )) || { echo "$MOD_NAME: $bytes bytes < minimum $MIN_BYTES" >&2; exit 1; }
+          echo "$MOD_NAME: validated $files files / $bytes bytes."
+      - name: Hash and package mod
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/stage/mods/$MOD_NAME"
+          base="PulseForge-v1.0.0-complete-mod-$MOD_SLUG"
+          manifest="$RUNNER_TEMP/$base.manifest.json"
+          python3 - "$root" "$manifest" "$MOD_NAME" "$MOD_SLUG" "$MOD_DRIVE_ID" <<'PY'
+          import hashlib,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]); files=[]; total=0
+          for p in sorted((x for x in root.rglob('*') if x.is_file()),key=lambda p:p.as_posix().casefold()):
+            h=hashlib.sha256()
+            with p.open('rb') as f:
+              for chunk in iter(lambda:f.read(4*1024*1024),b''): h.update(chunk)
+            size=p.stat().st_size; total+=size
+            files.append({'path':p.relative_to(root).as_posix(),'size_bytes':size,'sha256':h.hexdigest()})
+          json.dump({'schema_version':1,'edition':'1.0.0-complete','kind':'mod','name':sys.argv[3],'slug':sys.argv[4],'source_drive_id':sys.argv[5],'file_count':len(files),'total_bytes':total,'files':files},open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent=2)
+          PY
+          archive="$RUNNER_TEMP/$base.zip"
+          (cd "$RUNNER_TEMP/stage" && zip -q -r -0 "$archive" "mods/$MOD_NAME")
+          (cd "$RUNNER_TEMP" && sha256sum "$base.zip" > "$base.zip.SHA256SUMS.txt")
+          unzip -tq "$archive"
+      - name: Upload verified pack to Complete draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$COMPLETE_TAG\") | [.id,.draft] | @tsv" | head -n1 || true)"
+          [[ -n "$release" ]] || { echo 'Complete draft does not exist.' >&2; exit 1; }
+          IFS=$'\t' read -r release_id draft <<<"$release"
+          [[ "$draft" == 'true' ]] || { echo "$COMPLETE_TAG is already public; refusing to alter it" >&2; exit 1; }
+          base="PulseForge-v1.0.0-complete-mod-$MOD_SLUG"
+          archive="$RUNNER_TEMP/$base.zip"
+          checksum="$RUNNER_TEMP/$base.zip.SHA256SUMS.txt"
+          manifest="$RUNNER_TEMP/$base.manifest.json"
+          max_bytes=$((1900 * 1024 * 1024))
+          upload=("$manifest" "$checksum")
+          if (( $(stat -c '%s' "$archive") < max_bytes )); then
+            upload+=("$archive")
+          else
+            split -b 1900M -d -a 2 "$archive" "$archive.part"
+            parts_checksum="$RUNNER_TEMP/$base.zip.parts.SHA256SUMS.txt"
+            (cd "$RUNNER_TEMP" && sha256sum "$base.zip.part"* > "$(basename "$parts_checksum")")
+            upload+=("$parts_checksum")
+            while IFS= read -r part; do upload+=("$part"); done < <(find "$RUNNER_TEMP" -maxdepth 1 -type f -name "$base.zip.part*" -print | sort)
+          fi
+          gh release upload "$COMPLETE_TAG" "${upload[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+
+  summary:
+    needs: [enumerate, backfill]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require successful backfill
+        shell: bash
+        run: |
+          [[ '${{ needs.backfill.result }}' == 'success' ]] || exit 1
+          echo "Successfully backfilled ${{ needs.enumerate.outputs.count }} independently verified Complete mod packs."
