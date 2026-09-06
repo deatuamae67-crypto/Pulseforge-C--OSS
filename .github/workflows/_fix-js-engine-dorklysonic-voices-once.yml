@@ -1,0 +1,74 @@
+name: Fix js-engine-dorklysonic voices metadata once
+
+on:
+  push:
+    branches:
+      - complete/content-js-engine-dorklysonic
+    paths:
+      - '.github/workflows/_fix-js-engine-dorklysonic-voices-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-audit-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout content branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: complete/content-js-engine-dorklysonic
+          fetch-depth: 1
+          lfs: false
+
+      - name: Correct source-inconsistent voices metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('mods/js-engine-dorklysonic')
+          chart = root / 'data/for-hire/for-hire.json'
+          song_dir = root / 'songs/for-hire'
+          voice_names = {
+              'voices', 'voices-player', 'voices-opponent', 'voices-bf',
+              'voices-dad', 'voices-player1', 'voices-player2'
+          }
+          voice_exts = {'.ogg', '.wav', '.mp3', '.flac'}
+          found = [p for p in song_dir.rglob('*') if p.is_file()
+                   and p.suffix.lower() in voice_exts
+                   and p.stem.lower() in voice_names]
+          if found:
+              raise SystemExit('Refusing metadata correction: vocal stems exist: ' + ', '.join(map(str, found)))
+
+          data = json.loads(chart.read_text(encoding='utf-8'))
+          song = data.get('song', data)
+          if not isinstance(song, dict):
+              raise SystemExit('Chart has no Psych song object')
+          if song.get('needsVoices') is not True:
+              raise SystemExit(f"Expected needsVoices=true, got {song.get('needsVoices')!r}")
+          song['needsVoices'] = False
+          chart.write_text(json.dumps(data, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+          PY
+
+          python3 scripts/audit_complete_mod_payload.py . \
+            --mod-root mods/js-engine-dorklysonic \
+            --descriptor docs/complete/mods/js-engine-dorklysonic.json \
+            --output /tmp/js-engine-dorklysonic-audit.json
+          git diff --check
+
+      - name: Commit only the validated metadata correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/_fix-js-engine-dorklysonic-voices-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add mods/js-engine-dorklysonic/data/for-hire/for-hire.json \
+                  .github/workflows/_fix-js-engine-dorklysonic-voices-once.yml
+          git diff --cached --quiet && { echo 'No correction produced.' >&2; exit 1; }
+          git commit -m 'fix(content): correct for-hire voices metadata'
+          git push origin HEAD:complete/content-js-engine-dorklysonic
