@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-2026-08-22-ez-edition",
+  "slug": "drive-2026-08-22-ez-edition",
+  "drive_id": "1b7PQfq2p97xSJJEQfloCb2EHr8laBSPX",
+  "min_files": 329,
+  "min_bytes": 279964464,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
