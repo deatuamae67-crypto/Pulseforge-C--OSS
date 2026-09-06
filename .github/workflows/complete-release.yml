@@ -50,9 +50,9 @@ jobs:
           specs=(docs/complete/mods/*.json)
           test "${#specs[@]}" -eq 30
 
-          grep -q 'assets/menu/.*filter=lfs' .gitattributes
-          grep -q 'mods/.*filter=lfs' .gitattributes
-          grep -q 'part of the engine' docs/COMPLETE_EDITION.md
+          grep -Fq 'assets/menu/*.mp3 filter=lfs' .gitattributes
+          grep -Fq 'mods/**/*.ogg filter=lfs' .gitattributes
+          grep -Fq 'part of the engine' docs/COMPLETE_EDITION.md
 
           # The old content-pack model must not return.
           ! grep -q 'gh release upload.*complete-mod-' .github/workflows/complete-mod.yml
