@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-pack-screboot-demo",
+  "slug": "drive-pack-screboot-demo",
+  "drive_id": "1s40Q-khRW33tvM9RsEdQ0gOgB6rTONkg",
+  "min_files": 1848,
+  "min_bytes": 592464073,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
