@@ -4,7 +4,7 @@ import argparse,json,os,re,sys,tempfile
 from pathlib import Path
 
 STOCK_SONGS={"tutorial","bopeebo","fresh","dad-battle","spookeez","south","monster","pico","philly-nice","blammed","satin-panties","high","milf","cocoa","eggnog","winter-horrorland","senpai","roses","thorns","ugh","guns","stress","darnell","lit-up","2hot","blazin"}
-STOCK_CHARS={"dad","mom","mom-car","parents-christmas","spooky","pico","monster","monster-christmas","senpai","senpai-angry","spirit","tankman"}
+STOCK_CHARS={"bf","bf-car","bf-christmas","bf-pixel","bf-holding-gf","gf","gf-car","gf-christmas","gf-pixel","gf-speaker","gf-tankmen","dad","mom","mom-car","parents-christmas","spooky","pico","monster","monster-christmas","senpai","senpai-angry","spirit","tankman"}
 STOCK_STAGES={"stage","spooky","philly","limo","mall","mallevil","school","schoolevil","tank","phillystreets","phillyblazin"}
 BUILTIN_NOTES={"","alt animation","gf sing","hey!","hurt note","no animation"}
 BUILTIN_EVENTS={"","add camera zoom","alt idle animation","camera follow pos","change character","change scroll speed","hey!","kill henchmen","play animation","screen shake","set gf speed","set property"}
@@ -83,10 +83,11 @@ def shader(r):
 def childscript(r):
     r=n(r) if n(r).endswith(".lua") else n(r)+".lua"; return [r,f"scripts/{r}",f"assets/scripts/{r}",f"assets/preload/scripts/{r}",f"assets/shared/scripts/{r}"]
 def stock_char(x):
-    x=n(x); return x in STOCK_CHARS or x.startswith("bf") or x.startswith("gf")
+    return n(x) in STOCK_CHARS
 
 LUA=[
-("image",re.compile(r"\bmake(?:Animated)?LuaSprite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]",re.I)),
+("animated_image",re.compile(r"\bmakeAnimatedLuaSprite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]",re.I)),
+("image",re.compile(r"\bmakeLuaSprite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]",re.I)),
 ("image",re.compile(r"\bprecacheImage\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
 ("image",re.compile(r"\bloadGraphic\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]",re.I)),
 ("sound",re.compile(r"\b(?:playSound|precacheSound)\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
@@ -94,7 +95,8 @@ LUA=[
 ("video",re.compile(r"\b(?:startVideo|playVideo)\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
 ("shader",re.compile(r"\binitLuaShader\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
 ("script",re.compile(r"\baddLuaScript\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
-("character",re.compile(r"\b(?:addCharacterToList|precacheCharacter)\s*\(\s*['\"]([^'\"]+)['\"]",re.I))]
+("character",re.compile(r"\b(?:addCharacterToList|precacheCharacter)\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
+("character_event",re.compile(r"\btriggerEvent\s*\(\s*['\"]Change\s+Character['\"]\s*,\s*['\"][^'\"]*['\"]\s*,\s*['\"]([^'\"]+)['\"]",re.I))]
 
 def readj(p):
     try:
@@ -217,7 +219,12 @@ def audit(project,mod,desc):
         for kind,pat in LUA:
             for m in pat.finditer(t):
                 lua_refs+=1; r=m.group(1); src=f"{p.relative_to(project)}:{t.count(chr(10),0,m.start())+1}"
-                if kind=="character":audit_character(r,f"{src} Lua character preload",mod,files,local,stock,err,warn,checked); continue
+                if kind in ("character","character_event"):
+                    audit_character(r,f"{src} Lua {'Change Character' if kind=='character_event' else 'character preload'}",mod,files,local,stock,err,warn,checked); continue
+                if kind=="animated_image":
+                    if not ok(img(r),True):err.append(f"{src}: unresolved animated image '{r}'"+(" (no stock provider)" if not sp else ""))
+                    elif not ok(atlas(r),True):err.append(f"{src}: animated image '{r}' has no XML/TXT/JSON atlas metadata")
+                    continue
                 c={"image":img(r),"sound":gaudio(r,"sounds"),"music":gaudio(r,"music"),"video":video(r),"shader":shader(r),"script":childscript(r)}[kind]; allow=kind!="script"
                 if not ok(c,allow):err.append(f"{src}: unresolved {kind} '{r}'"+(" (no stock provider)" if allow and not sp else ""))
     if charts and len(files)<=2:err.append("chart-bearing payload is metadata/charts only; functional assets are missing")
@@ -227,14 +234,20 @@ def audit(project,mod,desc):
 def selftest():
     with tempfile.TemporaryDirectory() as td:
         r=Path(td); m=r/"mods"/"x"
-        for d in ("data/custom","songs/custom","characters","stages","custom_notetypes","custom_events","images/characters","images/bg","videos","scripts"):(m/d).mkdir(parents=True,exist_ok=True)
-        j={"song":{"song":"custom","needsVoices":True,"player1":"bf","player2":"xchar","gfVersion":"gf","stage":"xstage","notes":[{"sectionNotes":[[0,0,0,"X Note"]]}],"events":[[0,[["X Event","",""]]]]}}
+        for d in ("data/custom","songs/custom","characters","stages","custom_notetypes","custom_events","images/characters","images/bg","images/anim","videos","scripts"):(m/d).mkdir(parents=True,exist_ok=True)
+        j={"song":{"song":"custom","needsVoices":True,"player1":"bf-custom","player2":"xchar","gfVersion":"gf","stage":"xstage","notes":[{"sectionNotes":[[0,0,0,"X Note"]]}],"events":[[0,[["X Event","",""]]]]}}
         (m/"data/custom/custom.json").write_text(json.dumps(j)); (m/"data/custom/events.json").write_text(json.dumps({"song":{"events":[[0,[["Change Character","dad","xchar2"]]]]}})); (m/"songs/custom/Inst.ogg").write_bytes(b"x"); (m/"songs/custom/Voices.ogg").write_bytes(b"x")
-        for c in ("xchar","xchar2"):
+        for c in ("bf-custom","xchar","xchar2","xchar3"):
             (m/f"characters/{c}.json").write_text(json.dumps({"image":f"characters/{c}","animations":[{"anim":"idle","name":"idle"}]})); (m/f"images/characters/{c}.png").write_bytes(b"x"); (m/f"images/characters/{c}.xml").write_text("<TextureAtlas/>")
-        (m/"stages/xstage.lua").write_text("makeLuaSprite('x','bg/foo',0,0)\nstartVideo('intro')"); (m/"images/bg/foo.png").write_bytes(b"x"); (m/"videos/intro.mp4").write_bytes(b"x"); (m/"custom_notetypes/X Note.lua").write_text(""); (m/"custom_events/X Event.lua").write_text(""); (m/"scripts/a.lua").write_text("loadGraphic('x','bg/foo')\naddCharacterToList('xchar2','dad')")
+        (m/"stages/xstage.lua").write_text("makeLuaSprite('x','bg/foo',0,0)\nmakeAnimatedLuaSprite('a','anim/foo',0,0)\nstartVideo('intro')"); (m/"images/bg/foo.png").write_bytes(b"x"); (m/"images/anim/foo.png").write_bytes(b"x"); (m/"images/anim/foo.xml").write_text("<TextureAtlas/>"); (m/"videos/intro.mp4").write_bytes(b"x"); (m/"custom_notetypes/X Note.lua").write_text(""); (m/"custom_events/X Event.lua").write_text(""); (m/"scripts/a.lua").write_text("loadGraphic('x','bg/foo')\naddCharacterToList('xchar2','dad')\ntriggerEvent('Change Character','dad','xchar3')")
         d={"slug":"x","min_files":1,"min_bytes":1}; _,e=audit(r,m,d)
         if e:print(e,file=sys.stderr); return 1
+        (m/"characters/bf-custom.json").unlink(); _,e=audit(r,m,d)
+        if not any("bf-custom" in x and "definition missing" in x for x in e):return 1
+        (m/"characters/bf-custom.json").write_text(json.dumps({"image":"characters/bf-custom","animations":[{"anim":"idle","name":"idle"}]}))
+        (m/"images/anim/foo.xml").unlink(); _,e=audit(r,m,d)
+        if not any("animated image" in x and "atlas metadata" in x for x in e):return 1
+        (m/"images/anim/foo.xml").write_text("<TextureAtlas/>")
         (m/"images/characters/xchar.xml").unlink(); _,e=audit(r,m,d)
         if not any("atlas metadata" in x for x in e):return 1
         (m/"images/characters/xchar.xml").write_text("<TextureAtlas/>"); (m/"songs/custom/Inst.ogg").unlink(); _,e=audit(r,m,d)
