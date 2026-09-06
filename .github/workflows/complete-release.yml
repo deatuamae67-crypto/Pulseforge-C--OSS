@@ -54,9 +54,10 @@ jobs:
           grep -Fq 'mods/**/*.ogg filter=lfs' .gitattributes
           grep -Fq 'part of the engine' docs/COMPLETE_EDITION.md
 
-          # The old content-pack model must not return.
-          ! grep -q 'gh release upload.*complete-mod-' .github/workflows/complete-mod.yml
-          ! grep -q 'gdown' .github/workflows/complete-release.yml
+          # The old content-pack model must not return. Match executable command
+          # lines only so these assertions cannot match their own grep text.
+          ! grep -Eq '^[[:space:]]*gh[[:space:]]+release[[:space:]]+upload.*complete-mod-' .github/workflows/complete-mod.yml
+          ! grep -Eq '^[[:space:]]*(gdown|python3[[:space:]]+-m[[:space:]]+gdown)([[:space:]]|$)' .github/workflows/complete-release.yml
 
       - name: Verify embedded tree when it is present
         shell: bash
