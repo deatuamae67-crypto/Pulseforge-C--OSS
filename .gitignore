@@ -45,8 +45,8 @@ Thumbs.db
 /tools/autochart/cache/
 /tools/autochart/__pycache__/
 
-# Local game content and caches
-/mods/
+# Runtime-generated outputs and caches. The repository-level mods/ tree is
+# intentionally tracked: approved mods are built-in PulseForge engine content.
 /renders/
 /out/
 *.partial.mp4
