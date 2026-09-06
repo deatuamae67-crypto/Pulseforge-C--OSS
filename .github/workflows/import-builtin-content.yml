@@ -119,18 +119,49 @@ jobs:
         run: |
           set -euo pipefail
 
+          download_folder_with_retry() {
+            local folder_id="$1"
+            local output="$2"
+            local label="$3"
+            rm -rf "$output"
+            mkdir -p "$output"
+            for attempt in 1 2 3 4 5; do
+              if gdown --continue --folder "https://drive.google.com/drive/folders/$folder_id" -O "$output"; then
+                return 0
+              fi
+              if [[ "$attempt" == 5 ]]; then
+                echo "$label: Google Drive download failed after $attempt resumable attempts" >&2
+                return 1
+              fi
+              echo "$label: retrying without discarding completed files (attempt $((attempt + 1))/5)" >&2
+              sleep $((attempt * 30))
+            done
+          }
+
+          download_file_with_retry() {
+            local file_id="$1"
+            local output="$2"
+            local label="$3"
+            rm -f "$output" "$output.part"
+            mkdir -p "$(dirname "$output")"
+            for attempt in 1 2 3 4 5; do
+              if gdown --continue "$file_id" -O "$output"; then
+                return 0
+              fi
+              if [[ "$attempt" == 5 ]]; then
+                echo "$label: Google Drive download failed after $attempt resumable attempts" >&2
+                return 1
+              fi
+              echo "$label: retrying partial file (attempt $((attempt + 1))/5)" >&2
+              sleep $((attempt * 30))
+            done
+          }
+
           if [[ "$ITEM_KIND" == 'menu' ]]; then
             folder_id="$(jq -r '.source.menu_music_staging_folder_id' "$CONTENT_SPEC")"
             target='assets/menu'
             staging="$RUNNER_TEMP/menu-music"
-            for attempt in 1 2 3; do
-              rm -rf "$staging" && mkdir -p "$staging"
-              if gdown --folder "https://drive.google.com/drive/folders/$folder_id" -O "$staging"; then
-                break
-              fi
-              [[ "$attempt" != 3 ]] || exit 1
-              sleep $((attempt * 15))
-            done
+            download_folder_with_retry "$folder_id" "$staging" 'menu music'
             expected_count="$(jq -r '.menu_music.expected_tracks' "$CONTENT_SPEC")"
             expected_bytes="$(jq -r '.menu_music.expected_total_bytes' "$CONTENT_SPEC")"
             actual_count="$(find "$staging" -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')"
@@ -142,9 +173,11 @@ jobs:
             find "$staging" -maxdepth 1 -type f -exec cp -f '{}' "$target/" \;
           elif [[ "$ITEM_KIND" == 'modslist' ]]; then
             target='mods/modsList.txt'
+            staging="$RUNNER_TEMP/modsList.txt"
+            download_file_with_retry "$MODSLIST_FILE_ID" "$staging" 'modsList.txt'
+            test "$(stat -c '%s' "$staging")" -eq 839
             mkdir -p mods
-            gdown "$MODSLIST_FILE_ID" -O "$target"
-            test "$(stat -c '%s' "$target")" -eq 839
+            mv -f "$staging" "$target"
           else
             descriptor="docs/complete/mods/$ITEM_SLUG.json"
             test -f "$descriptor"
@@ -155,18 +188,15 @@ jobs:
             [[ "$name" != '.autochart-staging' ]]
             [[ "$name" != */* ]]
             target="mods/$name"
-            for attempt in 1 2 3; do
-              rm -rf "$target" && mkdir -p "$target"
-              if gdown --folder "https://drive.google.com/drive/folders/$drive_id" -O "$target"; then
-                break
-              fi
-              [[ "$attempt" != 3 ]] || exit 1
-              sleep $((attempt * 15))
-            done
-            files="$(find "$target" -type f | wc -l | tr -d ' ')"
-            bytes="$(find "$target" -type f -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
+            staging="$RUNNER_TEMP/mod-$ITEM_SLUG"
+            download_folder_with_retry "$drive_id" "$staging" "$name"
+            files="$(find "$staging" -type f | wc -l | tr -d ' ')"
+            bytes="$(find "$staging" -type f -printf '%s\n' | awk '{s+=$1} END{printf "%.0f",s}')"
             (( files >= min_files )) || { echo "$name: $files files < minimum $min_files" >&2; exit 1; }
             (( bytes >= min_bytes )) || { echo "$name: $bytes bytes < minimum $min_bytes" >&2; exit 1; }
+            rm -rf "$target"
+            mkdir -p "$(dirname "$target")"
+            mv "$staging" "$target"
           fi
 
           printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
