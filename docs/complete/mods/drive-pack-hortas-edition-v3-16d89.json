@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-pack-hortas-edition-v3-16d89",
+  "slug": "drive-pack-hortas-edition-v3-16d89",
+  "drive_id": "1x0tlkEQM7vbc8XQnNFyUvcaMP0N3c6LX",
+  "min_files": 1482,
+  "min_bytes": 1256632059,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
