@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-loose-charts-2026-08-01",
+  "slug": "drive-loose-charts-2026-08-01",
+  "drive_id": "1sl3Dyd56Co6nuykyXx1Eb3MKGi_-3fZ7",
+  "min_files": 627,
+  "min_bytes": 721246229,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
