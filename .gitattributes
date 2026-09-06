@@ -23,3 +23,41 @@ CMakeLists.txt text eol=lf
 *.ogg binary
 *.mp3 binary
 *.mp4 binary
+
+# PulseForge built-in content is part of the engine source tree. Large/binary
+# assets are versioned through Git LFS so `mods/` and `assets/menu/` contain the
+# real engine content without hitting GitHub's ordinary-blob size limits.
+# Keep textual documentation/configuration inside those trees as ordinary Git.
+assets/menu/*.mp3 filter=lfs diff=lfs merge=lfs -text
+assets/menu/*.ogg filter=lfs diff=lfs merge=lfs -text
+assets/menu/*.wav filter=lfs diff=lfs merge=lfs -text
+assets/menu/*.flac filter=lfs diff=lfs merge=lfs -text
+mods/**/*.ogg filter=lfs diff=lfs merge=lfs -text
+mods/**/*.mp3 filter=lfs diff=lfs merge=lfs -text
+mods/**/*.wav filter=lfs diff=lfs merge=lfs -text
+mods/**/*.flac filter=lfs diff=lfs merge=lfs -text
+mods/**/*.png filter=lfs diff=lfs merge=lfs -text
+mods/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+mods/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
+mods/**/*.webp filter=lfs diff=lfs merge=lfs -text
+mods/**/*.gif filter=lfs diff=lfs merge=lfs -text
+mods/**/*.mp4 filter=lfs diff=lfs merge=lfs -text
+mods/**/*.webm filter=lfs diff=lfs merge=lfs -text
+mods/**/*.avi filter=lfs diff=lfs merge=lfs -text
+mods/**/*.mov filter=lfs diff=lfs merge=lfs -text
+mods/**/*.ttf filter=lfs diff=lfs merge=lfs -text
+mods/**/*.otf filter=lfs diff=lfs merge=lfs -text
+mods/**/*.zip filter=lfs diff=lfs merge=lfs -text
+mods/**/*.7z filter=lfs diff=lfs merge=lfs -text
+mods/**/*.rar filter=lfs diff=lfs merge=lfs -text
+mods/**/*.exe filter=lfs diff=lfs merge=lfs -text
+mods/**/*.dll filter=lfs diff=lfs merge=lfs -text
+mods/**/*.so filter=lfs diff=lfs merge=lfs -text
+mods/**/*.dylib filter=lfs diff=lfs merge=lfs -text
+mods/**/*.bin filter=lfs diff=lfs merge=lfs -text
+mods/**/*.psd filter=lfs diff=lfs merge=lfs -text
+mods/**/*.fla filter=lfs diff=lfs merge=lfs -text
+mods/**/*.flp filter=lfs diff=lfs merge=lfs -text
+mods/**/*.sf2 filter=lfs diff=lfs merge=lfs -text
+mods/**/*.mid filter=lfs diff=lfs merge=lfs -text
+mods/**/*.midi filter=lfs diff=lfs merge=lfs -text

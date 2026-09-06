@@ -7,8 +7,8 @@ All notable public PulseForge changes are documented in this file.
 ### Definitive release
 
 - Promotes PulseForge to the stable `1.0.0` release line; `0.9.7` is retained as the preceding pre-release.
-- Validates against a complete 29-mod historical compatibility corpus without bloating Git history with approximately 15.0 GB of static third-party content; a Drive-root audit recovered two runnable mods omitted from the historical `modsList.txt`. Public OSS release assets contain the engine/platform packages, while third-party mod redistribution remains separate and license-dependent.
-- Adds a versioned mod-corpus manifest with Drive provenance, default enablement, file counts, unpacked byte counts and deterministic path/size inventory hashes.
+- Integrates the approved historical/current content corpus into the engine tree itself. Complete source/builds use the real `mods/`, `mods/modsList.txt` and `assets/menu/` directories; large/binary built-in assets are versioned with Git LFS instead of being replaced by external per-mod downloads.
+- Retains deterministic Drive/content provenance metadata with default enablement, historical file/byte minima and corpus inventory information without treating that metadata as a substitute for the runtime files.
 
 ### Fixed
 
@@ -20,6 +20,7 @@ All notable public PulseForge changes are documented in this file.
 
 - Adds a deterministic regression that models the nested `drive-pack-screboot-demo/SCReboot_Demo/bin/assets/shared/data` layout and proves sibling script roots are excluded.
 - Direct CLI launches without a catalog-selected mod retain the existing explicit-root behavior.
+- Complete content integration verifies 30 approved top-level collections, the historical/default `modsList.txt`, all 10 approved menu tracks, Git LFS pointer integrity and the exclusion of transient/private engine inputs.
 
 ## [0.9.7] - 2026-09-04
 
