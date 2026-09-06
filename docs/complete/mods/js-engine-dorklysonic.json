@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "js-engine-dorklysonic",
+  "slug": "js-engine-dorklysonic",
+  "drive_id": "1ELZMQUVXuAe-V43QeUheKgPY5CxAPPrW",
+  "min_files": 41,
+  "min_bytes": 3492318,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
