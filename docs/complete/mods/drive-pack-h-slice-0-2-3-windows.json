@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-pack-h-slice-0-2-3-windows",
+  "slug": "drive-pack-h-slice-0-2-3-windows",
+  "drive_id": "1g0oPwr9ey4vFgjlH701N-fETz5yeD_3c",
+  "min_files": 1488,
+  "min_bytes": 593846242,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
