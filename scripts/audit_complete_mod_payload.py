@@ -128,6 +128,18 @@ def meta(path):
     if m:d["needsVoices"]=m.group(1).lower()=="true"
     return d,False
 
+def event_rows(raw):
+    """Yield Psych event triplets from chart or standalone events JSON shapes."""
+    if isinstance(raw,dict):
+        song=raw.get("song",raw)
+        if isinstance(song,dict): raw=song.get("events",[])
+        else: raw=[]
+    if not isinstance(raw,list): return
+    for ev in raw:
+        if not (isinstance(ev,list) and len(ev)>1 and isinstance(ev[1],list)): continue
+        for q in ev[1]:
+            if isinstance(q,list) and q and isinstance(q[0],str): yield q
+
 def audit_character(cid,context,mod,files,local,stock,err,warn,checked):
     key=n(cid)
     if not key or stock_char(key) or key in checked:return
@@ -174,6 +186,21 @@ def audit(project,mod,desc):
         v=d.get("stage")
         if isinstance(v,str) and v and n(v) not in STOCK_STAGES and not ok(stages(v),False):err.append(f"{entry['chart']}: custom stage '{v}' missing")
         notes.update(d.get("notes",set())); events.update(d.get("events",set())); charts.append(entry)
+    # Standalone Psych data/<song>/events.json files carry the same runtime
+    # dependencies as inline chart events and must not be ignored.
+    for p in files:
+        if p.suffix.lower()!=".json" or p.stem.lower()!="events": continue
+        rel=p.relative_to(mod); low=[x.lower() for x in rel.parts]
+        if "data" not in low[:-1]: continue
+        raw=readj(p)
+        if raw is None:
+            warn.append(f"{p.relative_to(project)}: standalone events JSON unreadable within audit bound")
+            continue
+        for q in event_rows(raw):
+            events.add(q[0])
+            if n(q[0])=="change character" and len(q)>2 and isinstance(q[2],str) and q[2].strip():
+                refs.append((q[2].strip(),f"{p.relative_to(project)} Change Character event"))
+
     checked=set()
     for cid,ctx in refs:audit_character(cid,ctx,mod,files,local,stock,err,warn,checked)
     for v in notes:
@@ -201,8 +228,8 @@ def selftest():
     with tempfile.TemporaryDirectory() as td:
         r=Path(td); m=r/"mods"/"x"
         for d in ("data/custom","songs/custom","characters","stages","custom_notetypes","custom_events","images/characters","images/bg","videos","scripts"):(m/d).mkdir(parents=True,exist_ok=True)
-        j={"song":{"song":"custom","needsVoices":True,"player1":"bf","player2":"xchar","gfVersion":"gf","stage":"xstage","notes":[{"sectionNotes":[[0,0,0,"X Note"]]}],"events":[[0,[["X Event","",""],["Change Character","dad","xchar2"]]]]}}
-        (m/"data/custom/custom.json").write_text(json.dumps(j)); (m/"songs/custom/Inst.ogg").write_bytes(b"x"); (m/"songs/custom/Voices.ogg").write_bytes(b"x")
+        j={"song":{"song":"custom","needsVoices":True,"player1":"bf","player2":"xchar","gfVersion":"gf","stage":"xstage","notes":[{"sectionNotes":[[0,0,0,"X Note"]]}],"events":[[0,[["X Event","",""]]]]}}
+        (m/"data/custom/custom.json").write_text(json.dumps(j)); (m/"data/custom/events.json").write_text(json.dumps({"song":{"events":[[0,[["Change Character","dad","xchar2"]]]]}})); (m/"songs/custom/Inst.ogg").write_bytes(b"x"); (m/"songs/custom/Voices.ogg").write_bytes(b"x")
         for c in ("xchar","xchar2"):
             (m/f"characters/{c}.json").write_text(json.dumps({"image":f"characters/{c}","animations":[{"anim":"idle","name":"idle"}]})); (m/f"images/characters/{c}.png").write_bytes(b"x"); (m/f"images/characters/{c}.xml").write_text("<TextureAtlas/>")
         (m/"stages/xstage.lua").write_text("makeLuaSprite('x','bg/foo',0,0)\nstartVideo('intro')"); (m/"images/bg/foo.png").write_bytes(b"x"); (m/"videos/intro.mp4").write_bytes(b"x"); (m/"custom_notetypes/X Note.lua").write_text(""); (m/"custom_events/X Event.lua").write_text(""); (m/"scripts/a.lua").write_text("loadGraphic('x','bg/foo')\naddCharacterToList('xchar2','dad')")
