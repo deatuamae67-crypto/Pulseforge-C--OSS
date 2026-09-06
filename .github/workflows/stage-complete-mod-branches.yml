@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import glob, json, pathlib
+          import glob, json, pathlib, sys
           descriptors=[]; names=set(); slugs=set()
           for path in sorted(glob.glob('docs/complete/mods/*.json')):
               with open(path,encoding='utf-8') as f: spec=json.load(f)
@@ -63,7 +63,7 @@ jobs:
           specs=[{'slug':item['slug']} for item in descriptors if not (pathlib.Path('mods')/item['name']).exists()]
           deferred={'drive-2026-08-22-dek-v1','charts-feitos-no-flp'}
           specs.sort(key=lambda item:(item['slug'] in deferred,item['slug']))
-          print(f'Complete mods remaining to stage: {len(specs)}')
+          print(f'Complete mods remaining to stage: {len(specs)}', file=sys.stderr)
           print('matrix='+json.dumps({'include':specs},separators=(',',':')))
           PY
 
