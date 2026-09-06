@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "edition": "1.0.0-complete",
+  "name": "drive-pack-christmasred-edition",
+  "slug": "drive-pack-christmasred-edition",
+  "drive_id": "1_Z0ZzstG7rhDkqOfdQOvaEva96ssAQ3N",
+  "min_files": 1441,
+  "min_bytes": 851092276,
+  "enabled_by_default": true,
+  "default_state_basis": "historical modsList=1"
+}
