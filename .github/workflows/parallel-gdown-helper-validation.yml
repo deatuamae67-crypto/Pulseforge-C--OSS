@@ -1,0 +1,29 @@
+name: PulseForge parallel Drive helper validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/download_gdrive_folder_parallel.py'
+      - '.github/workflows/parallel-gdown-helper-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          lfs: false
+
+      - name: Compile and self-test helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/download_gdrive_folder_parallel.py
+          python3 scripts/download_gdrive_folder_parallel.py --self-test
