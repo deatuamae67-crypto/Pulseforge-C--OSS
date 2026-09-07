@@ -33,7 +33,7 @@ def safe_relative_path(raw: object) -> Path:
 
 def enumerate_folder(python: str, folder_url: str) -> list[tuple[str, Path]]:
     cmd = [python, "-m", "gdown", folder_url, "--folder", "--json", "--quiet"]
-    result = subprocess.run(cmd, check=True, text=True, capture_output=True)
+    result = subprocess.run(cmd, check=True, text=True, capture_output=True, timeout=300)
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -76,14 +76,30 @@ def write_manifest(items: list[tuple[str, Path]], path: Path) -> None:
     )
 
 
-def download_one(python: str, url: str, output: Path, log_dir: Path) -> tuple[bool, str]:
+def download_one(
+    python: str,
+    url: str,
+    output: Path,
+    log_dir: Path,
+    file_timeout: float,
+) -> tuple[bool, str]:
     output.parent.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     safe_name = f"{abs(hash(output.as_posix())):x}.log"
     log_path = log_dir / safe_name
     cmd = [python, "-m", "gdown", url, "--continue", "--quiet", "-O", str(output)]
-    with log_path.open("ab") as log:
-        proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT)
+    try:
+        with log_path.open("ab") as log:
+            proc = subprocess.run(
+                cmd,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                timeout=file_timeout,
+            )
+    except subprocess.TimeoutExpired:
+        with log_path.open("ab") as log:
+            log.write(f"\nPulseForge: gdown timed out after {file_timeout:.0f}s\n".encode("utf-8"))
+        return False, f"{output} (timed out after {file_timeout:.0f}s; log {log_path})"
     if proc.returncode == 0 and output.is_file():
         return True, ""
     return False, f"{output} (exit {proc.returncode}; log {log_path})"
@@ -97,6 +113,7 @@ def run_download(
     attempts: int,
     backoff: float,
     diagnostics: Path,
+    file_timeout: float,
 ) -> None:
     staging.mkdir(parents=True, exist_ok=True)
     diagnostics.mkdir(parents=True, exist_ok=True)
@@ -110,7 +127,14 @@ def run_download(
         print(f"download attempt {attempt}/{attempts}: {len(pending)} pending file(s)")
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gdown") as pool:
             futures = {
-                pool.submit(download_one, python, url, staging / rel, diagnostics / "files"): (url, rel)
+                pool.submit(
+                    download_one,
+                    python,
+                    url,
+                    staging / rel,
+                    diagnostics / "files",
+                    file_timeout,
+                ): (url, rel)
                 for url, rel in pending
             }
             completed = 0
@@ -155,6 +179,7 @@ def run_download(
         "materialized_bytes": total,
         "workers": workers,
         "attempts": attempts,
+        "file_timeout_seconds": file_timeout,
     }
     (diagnostics / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(f"materialized: {files} files, {total} bytes")
@@ -188,6 +213,7 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--attempts", type=int, default=5)
     parser.add_argument("--backoff-seconds", type=float, default=20.0)
+    parser.add_argument("--file-timeout-seconds", type=float, default=300.0)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -199,6 +225,8 @@ def main() -> int:
         parser.error("--workers must be 1..8")
     if not 1 <= args.attempts <= 10:
         parser.error("--attempts must be 1..10")
+    if not 30 <= args.file_timeout_seconds <= 3600:
+        parser.error("--file-timeout-seconds must be 30..3600")
     run_download(
         args.python,
         args.folder_url,
@@ -207,6 +235,7 @@ def main() -> int:
         args.attempts,
         args.backoff_seconds,
         args.diagnostics,
+        args.file_timeout_seconds,
     )
     return 0
 
