@@ -1,6 +1,32 @@
 {
   "schema_version": 1,
   "overrides": {
+    "drive-batata-static": {
+      "source_min_bytes": 1703938152,
+      "archival_charts": [
+        "assets/data/ingratiating/ingratiating-backup-easy-1.json",
+        "assets/data/ingratiating/ingratiating-backup-easy-2.json",
+        "assets/data/ingratiating/ingratiating-backup-easy-3.json",
+        "assets/data/ingratiating/ingratiating-backup-normal-1.json",
+        "assets/data/ingratiating/ingratiating-backup-normal-2.json"
+      ],
+      "archival_charts_basis": "PROVENANCE.md identifies these five ingratiating backup filenames as distinct surviving historical revisions retained by the static recovery pack; they are preserved byte-for-byte but are not asserted to have complete runtime dependencies.",
+      "chart_folder_audio_fallback": [
+        "assets/data/percipience/percipience.json"
+      ],
+      "chart_folder_audio_fallback_basis": "The recovered percipience chart carries the stale internal song id 'test', while its conventional instrumental is present under assets/songs/percipience/Inst.ogg. PulseForge runtime audio discovery also checks the chart-folder id, so the audit mirrors that existing runtime fallback without modifying the source chart.",
+      "known_missing_voices": [
+        "percipience"
+      ],
+      "known_missing_voices_basis": "The recovery pack retains source-duplicates/percipience-Voices-identical-to-Inst.ogg to document that the omitted Voices stem was byte-identical to Inst; runtime vocal discovery is fail-open when no separate stem is materialized."
+    },
+    "drive-pack-files": {
+      "source_min_bytes": 2390312362,
+      "materialized_min_bytes": 2390312308,
+      "materialized_min_bytes_basis": "The authoritative source threshold remains 2,390,312,362 bytes; the current checked-out Git/LFS materialization is 2,390,312,308 bytes as measured by the Complete staging audit.",
+      "audit_mode": "static_archive",
+      "audit_mode_basis": "pulseforge-import-report.json declares this payload scope as 'Static FNF data only' and records that engine/system binaries, binary directories, and nested non-runtime payloads were intentionally excluded. The pack is therefore provenance-checked and structurally validated, not represented as a runtime-complete mod."
+    },
     "js-engine-dorklysonic": {
       "source_min_bytes": 3492318,
       "materialized_min_bytes": 3468011,
