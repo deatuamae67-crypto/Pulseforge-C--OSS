@@ -76,8 +76,13 @@ jobs:
               names.add(name.casefold()); slugs.add(slug); descriptors.append({'slug':slug,'name':name})
           if len(descriptors)!=30: raise SystemExit(f'expected 30 built-in mod descriptors, found {len(descriptors)}')
           specs=[{'slug':item['slug']} for item in descriptors if not (pathlib.Path('mods')/item['name']).exists()]
+          priority={
+              'drive-loose-charts-2026-08-01':0,
+              'mr-shash-recovered':1,
+              'pulseforge-created':2,
+          }
           deferred={'drive-2026-08-22-dek-v1','charts-feitos-no-flp'}
-          specs.sort(key=lambda item:(item['slug'] in deferred,item['slug']))
+          specs.sort(key=lambda item:(priority.get(item['slug'],100),item['slug'] in deferred,item['slug']))
           print(f'Complete mods remaining to stage: {len(specs)}', file=sys.stderr)
           print('matrix='+json.dumps({'include':specs},separators=(',',':')))
           PY
