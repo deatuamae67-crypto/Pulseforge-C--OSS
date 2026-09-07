@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docs/complete/mods/*.json'
+      - '.github/workflows/complete-mod.yml'
 
 permissions:
   contents: read
@@ -18,40 +19,113 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require one valid provenance descriptor
+      - name: Require valid provenance descriptor changes
         shell: bash
         run: |
           set -euo pipefail
           base='${{ github.event.pull_request.base.sha }}'
           head='${{ github.event.pull_request.head.sha }}'
-          mapfile -t changed < <(git diff --name-only "$base" "$head" -- 'docs/complete/mods/*.json')
-          mapfile -t added < <(git diff --name-only --diff-filter=A "$base" "$head" -- 'docs/complete/mods/*.json')
 
-          # pull_request path filters can still schedule a synchronize run after a
-          # descriptor edit has been reverted. In that case the authoritative PR
-          # diff contains no descriptor change and this descriptor-only gate is a
-          # no-op. Any real descriptor change remains fail-closed below.
-          if (( ${#changed[@]} == 0 )); then
-            echo 'No Complete descriptor changes remain in the current PR diff.'
-            exit 0
-          fi
+          python3 - "$base" "$head" <<'PY'
+          import json
+          import pathlib
+          import re
+          import subprocess
+          import sys
 
-          if (( ${#changed[@]} != 1 || ${#added[@]} != 1 )) || [[ "${changed[0]}" != "${added[0]}" ]]; then
-            echo 'A descriptor PR must add exactly one docs/complete/mods/*.json provenance record.' >&2
-            exit 1
-          fi
-          spec="${added[0]}"
-          jq -e '
-            .schema_version == 1
-            and .edition == "1.0.0-complete"
-            and (.name | type == "string" and length > 0)
-            and (.slug | type == "string" and test("^[a-z0-9][a-z0-9-]*$"))
-            and (.drive_id | type == "string" and length > 10)
-            and (.min_files | type == "number" and . >= 1)
-            and (.min_bytes | type == "number" and . >= 1)
-            and (.enabled_by_default | type == "boolean")
-          ' "$spec" >/dev/null
-          expected="docs/complete/mods/$(jq -r '.slug' "$spec").json"
-          [[ "$spec" == "$expected" ]]
-          [[ "$(jq -r '.name' "$spec")" != '.autochart-staging' ]]
-          echo 'Descriptor is valid provenance metadata. Runtime content is versioned under mods/ and assets/menu/.'
+          base, head = sys.argv[1:3]
+          changed = subprocess.check_output(
+              ['git', 'diff', '--name-only', base, head, '--', 'docs/complete/mods/*.json'],
+              text=True,
+          ).splitlines()
+          statuses = {}
+          for row in subprocess.check_output(
+              ['git', 'diff', '--name-status', base, head, '--', 'docs/complete/mods/*.json'],
+              text=True,
+          ).splitlines():
+              if not row:
+                  continue
+              status, path = row.split('\t', 1)
+              statuses[path] = status
+
+          if not changed:
+              print('No Complete descriptor changes remain in the current PR diff.')
+              raise SystemExit(0)
+
+          def load_rev(rev: str, path: str):
+              raw = subprocess.check_output(['git', 'show', f'{rev}:{path}'], text=True)
+              return json.loads(raw)
+
+          def validate_shape(spec: dict, path: str):
+              if spec.get('schema_version') != 1:
+                  raise SystemExit(f'{path}: schema_version must be 1')
+              if spec.get('edition') != '1.0.0-complete':
+                  raise SystemExit(f'{path}: edition must be 1.0.0-complete')
+              if not isinstance(spec.get('name'), str) or not spec['name']:
+                  raise SystemExit(f'{path}: invalid name')
+              slug = spec.get('slug')
+              if not isinstance(slug, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]*', slug):
+                  raise SystemExit(f'{path}: invalid slug')
+              if not isinstance(spec.get('drive_id'), str) or len(spec['drive_id']) <= 10:
+                  raise SystemExit(f'{path}: invalid drive_id')
+              for key in ('min_files', 'min_bytes'):
+                  value = spec.get(key)
+                  if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                      raise SystemExit(f'{path}: {key} must be a positive integer')
+              if not isinstance(spec.get('enabled_by_default'), bool):
+                  raise SystemExit(f'{path}: enabled_by_default must be boolean')
+              if spec['name'] == '.autochart-staging':
+                  raise SystemExit(f'{path}: .autochart-staging must never be embedded')
+              expected = f"docs/complete/mods/{slug}.json"
+              if path != expected:
+                  raise SystemExit(f'{path}: expected descriptor path {expected}')
+
+          added = 0
+          modified = 0
+          for path in changed:
+              status = statuses.get(path, '')
+              if status.startswith('D'):
+                  raise SystemExit(f'{path}: descriptor deletion is forbidden')
+              current = load_rev(head, path)
+              validate_shape(current, path)
+
+              if status.startswith('A'):
+                  added += 1
+                  continue
+              if not status.startswith('M'):
+                  raise SystemExit(f'{path}: unsupported descriptor change status {status!r}')
+
+              modified += 1
+              previous = load_rev(base, path)
+              validate_shape(previous, path)
+
+              immutable = (
+                  'schema_version', 'edition', 'name', 'slug', 'drive_id',
+                  'min_bytes', 'enabled_by_default', 'default_state_basis',
+              )
+              for key in immutable:
+                  if current.get(key) != previous.get(key):
+                      raise SystemExit(f'{path}: existing descriptor field {key!r} is immutable in a materialization-threshold edit')
+
+              old_min = previous['min_files']
+              new_min = current['min_files']
+              if new_min != old_min:
+                  if new_min > old_min:
+                      raise SystemExit(f'{path}: min_files may not be raised by a recovery-threshold edit')
+                  if current.get('source_min_files') != old_min:
+                      raise SystemExit(f'{path}: source_min_files must preserve the previous historical min_files ({old_min})')
+                  if current.get('materialized_min_files') != new_min:
+                      raise SystemExit(f'{path}: materialized_min_files must equal the effective min_files ({new_min})')
+                  basis = current.get('materialized_min_files_basis')
+                  if not isinstance(basis, str) or len(basis.strip()) < 40:
+                      raise SystemExit(f'{path}: materialized_min_files_basis must document the recovered snapshot')
+
+          if added and modified:
+              raise SystemExit('Do not mix new descriptor additions with edits to existing descriptors in one PR')
+          if added > 1:
+              raise SystemExit('A descriptor-addition PR must add exactly one provenance descriptor')
+
+          print(f'Validated Complete descriptor changes: added={added}, modified={modified}')
+          PY
+
+          echo 'Descriptor provenance validation passed. Runtime content is still gated separately under mods/ and assets/menu/.'

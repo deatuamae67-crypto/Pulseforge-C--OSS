@@ -4,7 +4,10 @@
   "name": "mr-shash-recovered",
   "slug": "mr-shash-recovered",
   "drive_id": "1JXQZUnuOo9klZb9vg9OReaVIn55VGMQL",
-  "min_files": 516,
+  "source_min_files": 516,
+  "min_files": 16,
+  "materialized_min_files": 16,
+  "materialized_min_files_basis": "The current public recovery snapshot contains 13 chart JSON files, one OGG runtime audio file, mod.json and PROVENANCE.md. The historical 516-file source count is retained separately as source_min_files.",
   "min_bytes": 149594831,
   "enabled_by_default": true,
   "default_state_basis": "historical modsList=1"
