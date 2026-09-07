@@ -1,0 +1,74 @@
+name: PulseForge Complete testing draft snapshot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/complete-testing-draft.yml'
+      - 'scripts/update_complete_testing_draft.py'
+  push:
+    branches: [main]
+    paths:
+      - 'mods/**'
+      - '.github/workflows/complete-testing-draft.yml'
+      - 'scripts/update_complete_testing_draft.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pulseforge-complete-testing-draft-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          lfs: false
+
+      - name: Compile and validate testing-draft helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/update_complete_testing_draft.py
+          python3 scripts/update_complete_testing_draft.py --validate-only
+
+  update-testing-draft:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BEFORE_SHA: ${{ github.event.before }}
+    steps:
+      - name: Checkout exact merged source without eager LFS hydration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          lfs: false
+
+      - name: Install Git LFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v git-lfs >/dev/null 2>&1 || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends git-lfs
+          }
+          git lfs install --local
+
+      - name: Update private Complete testing tag, draft and mod overlays
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/update_complete_testing_draft.py --update --before "$BEFORE_SHA"
