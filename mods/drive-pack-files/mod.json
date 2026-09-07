@@ -1,0 +1,10 @@
+{
+    "id":  "user.drive.files",
+    "name":  "Drive pack: Files",
+    "version":  "2026.08.01",
+    "engineApi":  "2",
+    "license":  "LicenseRef-UserProvided",
+    "description":  "User-authorized FNF content imported without executable binaries.",
+    "sourceArchive":  "Files.zip",
+    "sourceSha256":  "0ef2987afe4e11d787aa1e21afa91a789ce13344a30b8407e9d04847776bcd60"
+}

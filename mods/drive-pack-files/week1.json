@@ -1,0 +1,131 @@
+{
+	"storyName": "CUM",
+	"difficulties": "",
+	"hideFreeplay": false,
+	"weekBackground": "stage",
+	"weekBefore": "tutorial",
+	"freeplayColor": [
+		146,
+		113,
+		253
+	],
+	"startUnlocked": true,
+	"hideStoryMode": false,
+	"songs": [
+		[
+			"end-of-the-world",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"eons",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"wasteland",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"quietus",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"lost-in-hell",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"nil",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"sacrifice",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"unknown-black-hole",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"taimuresu",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"Eclipse-Redacted",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"flocci",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		],
+		[
+			"something",
+			"dad",
+			[
+				146,
+				113,
+				253
+			]
+		]
+	],
+	"weekCharacters": [
+		"dad",
+		"bf",
+		"gf"
+	],
+	"hiddenUntilUnlocked": false,
+	"weekName": "Custom Week"
+}
