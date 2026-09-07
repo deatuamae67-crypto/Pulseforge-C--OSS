@@ -61,3 +61,4 @@ mods/**/*.flp filter=lfs diff=lfs merge=lfs -text
 mods/**/*.sf2 filter=lfs diff=lfs merge=lfs -text
 mods/**/*.mid filter=lfs diff=lfs merge=lfs -text
 mods/**/*.midi filter=lfs diff=lfs merge=lfs -text
+mods/taimuresu[[:space:]]spam[[:space:]]amplified/taimuresu/data/Taimuresu_overkill_mode/Taimuresu_overkill_mode.json filter=lfs diff=lfs merge=lfs -text
