@@ -1,0 +1,50 @@
+{
+  "format": "pulseforge-pfm-source-v1",
+  "keyCount": 4,
+  "kinds": [
+    "normal"
+  ],
+  "metadata": {
+    "artist": "Unknown",
+    "audio": {
+      "instrumental": "Inst.ogg",
+      "vocals": []
+    },
+    "charter": "Unknown",
+    "difficulty": "insane",
+    "girlfriend": "gf",
+    "noteStyle": "NOTE_assets",
+    "opponent": "dad",
+    "player": "bf",
+    "scrollSpeed": 1.0,
+    "stage": "stage",
+    "title": "Trillion Note PFM Example"
+  },
+  "notes": [],
+  "ppqn": 15360,
+  "runs": [
+    {
+      "count": 1000000000000,
+      "durationTicks": 0,
+      "flags": 0,
+      "intervalTicks": 1,
+      "kind": "normal",
+      "lanes": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "owner": "player",
+      "startTick": 0
+    }
+  ],
+  "tempos": [
+    {
+      "bpm": 244.0,
+      "denominator": 4,
+      "numerator": 4,
+      "tick": 0
+    }
+  ]
+}
