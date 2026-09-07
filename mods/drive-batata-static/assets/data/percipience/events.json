@@ -1,0 +1,106 @@
+{
+	"song": {
+		"events": [
+			[
+				42666.6666666667,
+				[
+					[
+						"Change Scroll Speed",
+						"10",
+						"3"
+					],
+					[
+						"Change Note Multiplier",
+						"128376761",
+						"2"
+					]
+				]
+			],
+			[
+				53333.3333333334,
+				[
+					[
+						"Change Note Multiplier",
+						"128376761",
+						"1"
+					],
+					[
+						"Change Note Multiplier",
+						"1",
+						"2"
+					]
+				]
+			],
+			[
+				64000,
+				[
+					[
+						"Change Note Multiplier",
+						"1",
+						"1"
+					],
+					[
+						"Change Note Multiplier",
+						"1",
+						"2"
+					],
+					[
+						"Change Scroll Speed",
+						"1",
+						""
+					]
+				]
+			],
+			[
+				106666.666666667,
+				[
+					[
+						"Change Note Multiplier",
+						"128376761",
+						"2"
+					],
+					[
+						"Change Scroll Speed",
+						"10",
+						"3"
+					]
+				]
+			],
+			[
+				117333.333333333,
+				[
+					[
+						"Change Note Multiplier",
+						"128376761",
+						"1"
+					],
+					[
+						"Change Note Multiplier",
+						"1",
+						"2"
+					]
+				]
+			],
+			[
+				128000,
+				[
+					[
+						"Change Note Multiplier",
+						"1",
+						"2"
+					],
+					[
+						"Change Note Multiplier",
+						"1",
+						"1"
+					],
+					[
+						"Change Scroll Speed",
+						"1",
+						""
+					]
+				]
+			]
+		]
+	}
+}

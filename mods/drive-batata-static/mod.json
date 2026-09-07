@@ -1,0 +1,9 @@
+{
+  "id": "user.drive.batata.static.2026-08-01",
+  "name": "Drive batata - unique static content",
+  "version": "2026.08.01",
+  "engineApi": "2",
+  "profile": "h-slice",
+  "license": "LicenseRef-UserProvided",
+  "description": "Unique charts and song stems recovered from the user-authorized batata folder without importing or executing binaries."
+}
