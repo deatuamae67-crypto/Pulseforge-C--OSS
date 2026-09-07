@@ -13,6 +13,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'mods/**'
       - 'docs/complete/mods/*.json'
       - 'docs/complete/materialization_overrides.json'
       - 'scripts/audit_complete_mod_payload.py'
@@ -295,10 +296,22 @@ jobs:
           OLD_SHA: ${{ steps.mod.outputs.old }}
         run: |
           set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          current_main="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$current_main" != "$GITHUB_SHA" ]]; then
+            echo "::warning title=Stale staging snapshot::Skipping publication of $ITEM_SLUG because main advanced from $GITHUB_SHA to $current_main. A fresh main-triggered staging run will retry it."
+            exit 0
+          fi
           while IFS= read -r -d '' file; do size="$(stat -c '%s' "$file")"; if (( size >= 25*1024*1024 )); then attr="$(git check-attr filter -- "$file" | sed 's/^.*: //')"; [[ "$attr" == lfs ]] || git lfs track "$file"; fi; done < <(find "$TARGET" -type f -print0)
           git add -- .gitattributes; git add -f -- "$TARGET"
           if git diff --cached --quiet; then echo "$ITEM_SLUG already identical to main"; exit 0; fi
           while IFS= read -r path; do [[ "$path" == '.gitattributes' || "$path" == "$TARGET"/* ]] || { echo "unexpected staged path: $path" >&2; exit 1; }; done < <(git diff --cached --name-only)
           while IFS= read -r -d '' file; do size="$(stat -c '%s' "$file")"; if (( size >= 95*1024*1024 )); then [[ "$(git check-attr filter -- "$file" | sed 's/^.*: //')" == lfs ]] || { echo "$file is $size bytes but is not LFS" >&2; exit 1; }; fi; done < <(find "$TARGET" -type f -print0)
           git commit -m "complete(content): embed $ITEM_SLUG"; git lfs fsck --pointers HEAD
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          current_main="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$current_main" != "$GITHUB_SHA" ]]; then
+            echo "::warning title=Stale staging snapshot::Refusing to push $ITEM_SLUG because main advanced from $GITHUB_SHA to $current_main after staging."
+            exit 0
+          fi
           if [[ -n "$OLD_SHA" ]]; then git push --force-with-lease="refs/heads/$BRANCH:$OLD_SHA" origin "HEAD:refs/heads/$BRANCH"; else git push origin "HEAD:refs/heads/$BRANCH"; fi
