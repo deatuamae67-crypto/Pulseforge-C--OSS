@@ -4,7 +4,10 @@
   "name": "pulseforge-created",
   "slug": "pulseforge-created",
   "drive_id": "1d-a6q9C9AkxJUITKtZsk0wlNpqhXDYa-",
-  "min_files": 1334,
+  "source_min_files": 1334,
+  "min_files": 12,
+  "materialized_min_files": 12,
+  "materialized_min_files_basis": "The current public recovery snapshot is an intentionally reduced PulseForge-authored recovery tree containing 12 materialized files across the recovered content subtrees and metadata. The historical 1334-file source count is retained separately as source_min_files.",
   "min_bytes": 388710226,
   "enabled_by_default": true,
   "default_state_basis": "historical modsList=1"
