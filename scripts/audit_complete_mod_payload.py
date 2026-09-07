@@ -160,8 +160,11 @@ def audit(project,mod,desc):
     files=[p for p in mod.rglob("*") if p.is_file()]
     if len(files)>600000:return {},["payload exceeds 600000-file audit bound"]
     total=sum(lsize(p) for p in files)
+    materialized_min_bytes=int(desc.get("materialized_min_bytes",desc.get("min_bytes",0)))
+    raw_known_missing_voices=desc.get("known_missing_voices",[])
+    known_missing_voices={song_id(x) for x in raw_known_missing_voices if isinstance(x,str) and x.strip()} if isinstance(raw_known_missing_voices,list) else set()
     if len(files)<int(desc.get("min_files",0)):err.append(f"{len(files)} files < descriptor minimum {desc.get('min_files')}")
-    if total<int(desc.get("min_bytes",0)):err.append(f"{total} bytes < descriptor minimum {desc.get('min_bytes')}")
+    if total<materialized_min_bytes:err.append(f"{total} bytes < materialized descriptor minimum {materialized_min_bytes}")
     local=idx(mod,files); sp=stock_provider(project); stock=set()
     if sp:
         a=Path(sp["assetsRoot"])
@@ -179,7 +182,10 @@ def audit(project,mod,desc):
         if not folder or stem=="events" or folder not in stem:continue
         d,full=meta(p); sid=song_id(d.get("song") or folder); entry={"chart":str(p.relative_to(project)),"song":sid,"full":full}
         if not ok(audio(sid,"inst"),sid in STOCK_SONGS):err.append(f"{entry['chart']}: missing Inst for '{sid}'")
-        if d.get("needsVoices") is True and not ok(voices(sid),sid in STOCK_SONGS):err.append(f"{entry['chart']}: needsVoices=true but Voices missing for '{sid}'")
+        if d.get("needsVoices") is True and not ok(voices(sid),sid in STOCK_SONGS):
+            message=f"{entry['chart']}: needsVoices=true but Voices missing for '{sid}'"
+            if sid in known_missing_voices:warn.append(message+" (declared source inconsistency; runtime discovery is fail-open)")
+            else:err.append(message)
         if d.get("needsVoices") is None:warn.append(f"{entry['chart']}: needsVoices not inspectable within bound")
         for k in ("player1","player2","gfVersion"):
             v=d.get(k)
@@ -228,7 +234,7 @@ def audit(project,mod,desc):
                 c={"image":img(r),"sound":gaudio(r,"sounds"),"music":gaudio(r,"music"),"video":video(r),"shader":shader(r),"script":childscript(r)}[kind]; allow=kind!="script"
                 if not ok(c,allow):err.append(f"{src}: unresolved {kind} '{r}'"+(" (no stock provider)" if allow and not sp else ""))
     if charts and len(files)<=2:err.append("chart-bearing payload is metadata/charts only; functional assets are missing")
-    rep={"format":"pulseforge-complete-mod-audit-v3","slug":desc.get("slug"),"files":len(files),"bytes":total,"stockProvider":sp,"charts":charts,"charactersChecked":sorted(checked),"luaReferencesChecked":lua_refs,"warnings":warn,"errors":err,"ok":not err}
+    rep={"format":"pulseforge-complete-mod-audit-v3","slug":desc.get("slug"),"files":len(files),"bytes":total,"materializedMinimumBytes":materialized_min_bytes,"knownMissingVoices":sorted(known_missing_voices),"stockProvider":sp,"charts":charts,"charactersChecked":sorted(checked),"luaReferencesChecked":lua_refs,"warnings":warn,"errors":err,"ok":not err}
     return rep,err
 
 def selftest():
@@ -240,8 +246,11 @@ def selftest():
         for c in ("bf-custom","xchar","xchar2","xchar3"):
             (m/f"characters/{c}.json").write_text(json.dumps({"image":f"characters/{c}","animations":[{"anim":"idle","name":"idle"}]})); (m/f"images/characters/{c}.png").write_bytes(b"x"); (m/f"images/characters/{c}.xml").write_text("<TextureAtlas/>")
         (m/"stages/xstage.lua").write_text("makeLuaSprite('x','bg/foo',0,0)\nmakeAnimatedLuaSprite('a','anim/foo',0,0)\nstartVideo('intro')"); (m/"images/bg/foo.png").write_bytes(b"x"); (m/"images/anim/foo.png").write_bytes(b"x"); (m/"images/anim/foo.xml").write_text("<TextureAtlas/>"); (m/"videos/intro.mp4").write_bytes(b"x"); (m/"custom_notetypes/X Note.lua").write_text(""); (m/"custom_events/X Event.lua").write_text(""); (m/"scripts/a.lua").write_text("loadGraphic('x','bg/foo')\naddCharacterToList('xchar2','dad')\ntriggerEvent('Change Character','dad','xchar3')")
-        d={"slug":"x","min_files":1,"min_bytes":1}; _,e=audit(r,m,d)
+        d={"slug":"x","min_files":1,"min_bytes":999999,"materialized_min_bytes":1}; _,e=audit(r,m,d)
         if e:print(e,file=sys.stderr); return 1
+        (m/"songs/custom/Voices.ogg").unlink(); d["known_missing_voices"]=["custom"]; rep,e=audit(r,m,d)
+        if e or not any("declared source inconsistency" in x for x in rep.get("warnings",[])):return 1
+        (m/"songs/custom/Voices.ogg").write_bytes(b"x"); d.pop("known_missing_voices",None)
         (m/"characters/bf-custom.json").unlink(); _,e=audit(r,m,d)
         if not any("bf-custom" in x and "definition missing" in x for x in e):return 1
         (m/"characters/bf-custom.json").write_text(json.dumps({"image":"characters/bf-custom","animations":[{"anim":"idle","name":"idle"}]}))
