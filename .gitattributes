@@ -77,3 +77,5 @@ mods/pulseforge-created/autosaves/ingratiating-backup-normal-1.autosave.pfchart.
 mods/pulseforge-created/projects/ingratiating-backup-normal-1.pfchart.json filter=lfs diff=lfs merge=lfs -text
 mods/pulseforge-created/charts/ingratiating/ingratiating-backup-normal-1.json filter=lfs diff=lfs merge=lfs -text
 mods/pulseforge-created/charts/ingratiating-backup-normal-1/ingratiating-backup-normal-1.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-loose-charts-2026-08-01/charts/unknown-black-hole-1.json filter=lfs diff=lfs merge=lfs -text
+mods/drive-loose-charts-2026-08-01/charts/unboundhusk-accurate.json filter=lfs diff=lfs merge=lfs -text

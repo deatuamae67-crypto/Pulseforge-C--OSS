@@ -1,0 +1,8 @@
+{
+  "id": "user.drive.loose-charts.2026-08-01",
+  "name": "Drive Loose Chart Library",
+  "version": "2026.08.01",
+  "engineApi": "2",
+  "license": "LicenseRef-UserProvided",
+  "description": "All directly stored JSON charts from the user-authorized Drive root, retained as separate versions with collision-safe filenames."
+}
