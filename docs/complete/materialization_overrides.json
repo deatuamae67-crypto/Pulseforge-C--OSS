@@ -1,6 +1,11 @@
 {
   "schema_version": 1,
   "overrides": {
+    "charts-feitos-no-flp": {
+      "source_min_bytes": 1,
+      "audit_mode": "static_archive",
+      "audit_mode_basis": "The Complete descriptor records this source as a disabled-by-default charts collection with only a minimal source threshold. The recovered payload contains chart metadata without its referenced Inst/Voices runtime audio, so it is preserved and validated as an archival chart payload rather than represented as a runtime-complete mod."
+    },
     "drive-batata-static": {
       "source_min_bytes": 1703938152,
       "archival_charts": [
