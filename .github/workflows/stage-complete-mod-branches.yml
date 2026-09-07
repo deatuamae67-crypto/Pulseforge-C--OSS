@@ -52,72 +52,70 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, pathlib
-          root=pathlib.Path('docs/complete/mods')
-          items=[]
-          for path in sorted(root.glob('*.json')):
-              d=json.loads(path.read_text(encoding='utf-8'))
-              if d.get('name')=='.autochart-staging': continue
-              items.append({'slug':d['slug'],'name':d['name'],'drive_id':d['drive_id'],'min_files':d['min_files'],'min_bytes':d['min_bytes']})
+          import glob, json, pathlib, sys
+          descriptors=[]; names=set(); slugs=set()
+          for path in sorted(glob.glob('docs/complete/mods/*.json')):
+              with open(path,encoding='utf-8') as f: spec=json.load(f)
+              name=spec.get('name'); slug=spec.get('slug')
+              if name=='.autochart-staging': raise SystemExit('.autochart-staging must never be embedded')
+              if not isinstance(name,str) or not name or '/' in name or '\\' in name: raise SystemExit(f'invalid mod name in {path}: {name!r}')
+              if not isinstance(slug,str) or not slug: raise SystemExit(f'invalid slug in {path}: {slug!r}')
+              if name.casefold() in names: raise SystemExit(f'duplicate Complete mod name: {name}')
+              if slug in slugs: raise SystemExit(f'duplicate Complete mod slug: {slug}')
+              names.add(name.casefold()); slugs.add(slug); descriptors.append({'slug':slug,'name':name})
+          if len(descriptors)!=30: raise SystemExit(f'expected 30 built-in mod descriptors, found {len(descriptors)}')
+          specs=[{'slug':item['slug']} for item in descriptors if not (pathlib.Path('mods')/item['name']).exists()]
           deferred={'drive-2026-08-22-dek-v1','charts-feitos-no-flp'}
-          items.sort(key=lambda x:(x['slug'] in deferred,x['slug']))
-          print('matrix='+json.dumps({'include':items},separators=(',',':')))
+          specs.sort(key=lambda item:(item['slug'] in deferred,item['slug']))
+          print(f'Complete mods remaining to stage: {len(specs)}', file=sys.stderr)
+          print('matrix='+json.dumps({'include':specs},separators=(',',':')))
           PY
 
       - name: Audit changed Complete mod payloads in this PR
         if: github.event_name == 'pull_request'
         shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          base='${{ github.event.pull_request.base.sha }}'
-          head='${{ github.event.pull_request.head.sha }}'
-          mapfile -t changed < <(git diff --name-only "$base" "$head" -- 'mods/**')
-          declare -A roots=()
-          for path in "${changed[@]}"; do
-            [[ "$path" == mods/*/* ]] || continue
-            rest="${path#mods/}"
-            root="${rest%%/*}"
-            roots["$root"]=1
-          done
-          if (( ${#roots[@]} == 0 )); then
-            echo 'No Complete mod payloads changed in this PR.'
-            exit 0
-          fi
-          for root in "${!roots[@]}"; do
-            descriptor=''
-            for candidate in docs/complete/mods/*.json; do
-              [[ "$(jq -r '.name' "$candidate")" == "$root" ]] || continue
-              descriptor="$candidate"
-              break
-            done
-            [[ -n "$descriptor" ]] || { echo "No descriptor for changed mod root: $root" >&2; exit 1; }
-            python3 scripts/audit_complete_mod_payload.py . \
-              --mod-root "mods/$root" \
-              --descriptor "$descriptor" \
-              --output "$RUNNER_TEMP/pr-audit-$(basename "$descriptor")"
-          done
+          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          python3 - <<'PY'
+          import json,os,pathlib,subprocess,sys
+          base=subprocess.check_output(['git','merge-base','HEAD',f'origin/{os.environ["BASE_REF"]}'],text=True).strip()
+          changed=subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
+          mods={p.parts[1] for x in changed if len((p:=pathlib.PurePosixPath(x)).parts)>=2 and p.parts[0]=='mods'}
+          desc={json.loads(p.read_text(encoding='utf-8'))['name']:p for p in pathlib.Path('docs/complete/mods').glob('*.json')}
+          audited=0
+          for name in sorted(mods,key=str.casefold):
+              root=pathlib.Path('mods')/name
+              if not root.exists(): continue
+              spec=desc.get(name)
+              if spec is None: raise SystemExit(f'changed Complete mod has no descriptor: {name}')
+              subprocess.check_call([sys.executable,'scripts/audit_complete_mod_payload.py','.','--mod-root',str(root),'--descriptor',str(spec),'--output',f'/tmp/pulseforge-audit-{spec.stem}.json'])
+              audited+=1
+          print(f'PR Complete payloads audited: {audited}')
+          PY
 
       - name: Confirm PR mode is validation-only
         if: github.event_name == 'pull_request'
-        run: echo 'Pull requests never download from Drive or publish branches.'
+        shell: bash
+        run: echo 'Complete mod dependency gate passed; staging branch writes are disabled for pull requests.'
 
   stage-one:
     if: github.event_name != 'pull_request'
     needs: prepare
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     env:
       ITEM_SLUG: ${{ matrix.slug }}
-      ITEM_NAME: ${{ matrix.name }}
-      ITEM_DRIVE_ID: ${{ matrix.drive_id }}
-      ITEM_MIN_FILES: ${{ matrix.min_files }}
-      ITEM_MIN_BYTES: ${{ matrix.min_bytes }}
     steps:
-      - name: Checkout exact main revision
+      - name: Checkout exact source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
@@ -150,6 +148,9 @@ jobs:
           git checkout -B "$branch" "$GITHUB_SHA"; git reset --hard "$GITHUB_SHA"
           printf 'name=%s\ndrive_id=%s\nmin_files=%s\nmin_bytes=%s\ndescriptor=%s\ntarget=%s\nbranch=%s\nold=%s\n' "$name" "$drive_id" "$min_files" "$min_bytes" "$descriptor" "$target" "$branch" "$old" >> "$GITHUB_OUTPUT"
 
+      # Prefer a payload already committed to the accumulated Git/LFS branch,
+      # but only when it still passes the current functional-dependency audit.
+      # A hydrated but stale/incomplete cache candidate falls back to Drive.
       - name: Reuse already embedded candidate when available
         id: embedded_candidate
         shell: bash
@@ -221,6 +222,8 @@ jobs:
           git worktree remove --force "$cache_worktree" || true
           git worktree prune || true
 
+      # Only the external Drive transfer is soft-failed. Descriptor, payload,
+      # redistribution-safety and functional-audit failures remain hard failures.
       - name: Download the entire source mod recursively
         id: source_download
         if: steps.embedded_candidate.outputs.hit != 'true'
