@@ -7,8 +7,10 @@ on:
       - 'mods/**'
       - 'docs/complete/mods/*.json'
       - 'docs/complete/materialization_overrides.json'
+      - 'docs/COMPLETE_CROSS_MOD_RECOVERY.md'
       - 'scripts/audit_complete_mod_payload.py'
       - 'scripts/audit_complete_mod_payload_core.py'
+      - 'scripts/recover_complete_mod_dependencies.py'
       - '.github/workflows/stage-complete-mod-branches.yml'
   push:
     branches: [main]
@@ -16,8 +18,10 @@ on:
       - 'mods/**'
       - 'docs/complete/mods/*.json'
       - 'docs/complete/materialization_overrides.json'
+      - 'docs/COMPLETE_CROSS_MOD_RECOVERY.md'
       - 'scripts/audit_complete_mod_payload.py'
       - 'scripts/audit_complete_mod_payload_core.py'
+      - 'scripts/recover_complete_mod_dependencies.py'
       - '.github/workflows/stage-complete-mod-branches.yml'
   workflow_dispatch:
 
@@ -46,6 +50,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/audit_complete_mod_payload.py --self-test
+
+      - name: Self-test Complete cross-mod recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/recover_complete_mod_dependencies.py --self-test
 
       - name: Build isolated mod matrix
         id: matrix
@@ -268,6 +278,17 @@ jobs:
           if (( ${#violations[@]} )); then printf 'Refusing private/non-redistributable inputs:\n' >&2; printf ' - %s\n' "${violations[@]}" >&2; exit 1; fi
           rm -rf "$TARGET"; mkdir -p "$(dirname "$TARGET")"; mv "$staging" "$TARGET"
 
+      - name: Recover missing runtime dependencies from verified sibling mods
+        if: success() && (steps.embedded_candidate.outputs.hit == 'true' || steps.source_download.outcome == 'success')
+        shell: bash
+        env:
+          TARGET: ${{ steps.mod.outputs.target }}
+        run: |
+          set -euo pipefail
+          python3 scripts/recover_complete_mod_dependencies.py . \
+            --target "$TARGET" \
+            --output "$RUNNER_TEMP/complete-mod-recovery-$ITEM_SLUG.json"
+
       - name: Audit functional dependency closure before Git LFS conversion
         if: success() && (steps.embedded_candidate.outputs.hit == 'true' || steps.source_download.outcome == 'success')
         shell: bash
@@ -278,12 +299,14 @@ jobs:
           set -euo pipefail
           python3 scripts/audit_complete_mod_payload.py . --mod-root "$TARGET" --descriptor "$DESCRIPTOR" --output "$RUNNER_TEMP/complete-mod-audit-$ITEM_SLUG.json"
 
-      - name: Upload dependency audit
+      - name: Upload dependency audit and recovery provenance
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: complete-mod-audit-${{ matrix.slug }}
-          path: ${{ runner.temp }}/complete-mod-audit-${{ matrix.slug }}.json
+          path: |
+            ${{ runner.temp }}/complete-mod-audit-${{ matrix.slug }}.json
+            ${{ runner.temp }}/complete-mod-recovery-${{ matrix.slug }}.json
           if-no-files-found: ignore
           retention-days: 7
 
