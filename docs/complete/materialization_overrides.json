@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "overrides": {
+    "js-engine-dorklysonic": {
+      "source_min_bytes": 3492318,
+      "materialized_min_bytes": 3468011,
+      "materialized_min_bytes_basis": "The authoritative 41-file Drive source is 3,492,318 bytes. Repository *.json text policy normalizes CRLF to LF, producing a 3,468,011-byte semantic-equivalent Git/LFS materialization.",
+      "known_missing_voices": [
+        "for-hire"
+      ],
+      "known_missing_voices_basis": "The authoritative source contains Inst.ogg but no vocal stem for for-hire. PulseForge conventional-audio discovery is fail-open when a requested vocal stem is absent."
+    }
+  }
+}
