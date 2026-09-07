@@ -26,6 +26,16 @@ jobs:
           head='${{ github.event.pull_request.head.sha }}'
           mapfile -t changed < <(git diff --name-only "$base" "$head" -- 'docs/complete/mods/*.json')
           mapfile -t added < <(git diff --name-only --diff-filter=A "$base" "$head" -- 'docs/complete/mods/*.json')
+
+          # pull_request path filters can still schedule a synchronize run after a
+          # descriptor edit has been reverted. In that case the authoritative PR
+          # diff contains no descriptor change and this descriptor-only gate is a
+          # no-op. Any real descriptor change remains fail-closed below.
+          if (( ${#changed[@]} == 0 )); then
+            echo 'No Complete descriptor changes remain in the current PR diff.'
+            exit 0
+          fi
+
           if (( ${#changed[@]} != 1 || ${#added[@]} != 1 )) || [[ "${changed[0]}" != "${added[0]}" ]]; then
             echo 'A descriptor PR must add exactly one docs/complete/mods/*.json provenance record.' >&2
             exit 1
