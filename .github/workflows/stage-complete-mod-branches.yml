@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 env:
-  GDOWN_VERSION: '6.0.0'
+  GDOWN_VERSION: '6.2.0'
   GIT_LFS_SKIP_SMUDGE: '1'
 
 jobs:
@@ -126,7 +126,7 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      max-parallel: 6
+      max-parallel: 2
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     env:
       ITEM_SLUG: ${{ matrix.slug }}
@@ -271,8 +271,9 @@ jobs:
           git worktree remove --force "$cache_worktree" || true
           git worktree prune || true
 
-      # Only the external Drive transfer is soft-failed. Descriptor, payload,
-      # redistribution-safety and functional-audit failures remain hard failures.
+      # Only the external Drive transfer is soft-failed long enough to persist its
+      # diagnostics. A later explicit gate turns an unavailable candidate into a
+      # real job failure so a zero-materialization run can never appear healthy.
       - name: Download the entire source mod recursively
         id: source_download
         if: steps.embedded_candidate.outputs.hit != 'true'
@@ -284,9 +285,11 @@ jobs:
         run: |
           set -euo pipefail
           staging="$RUNNER_TEMP/mod-$ITEM_SLUG"; rm -rf "$staging"; mkdir -p "$staging"
+          log="$RUNNER_TEMP/gdown-$ITEM_SLUG.log"; : > "$log"
           for attempt in 1 2 3 4 5; do
-            if "$RUNNER_TEMP/pulseforge-gdown/bin/python" -m gdown --continue --folder "https://drive.google.com/drive/folders/$DRIVE_ID" -O "$staging"; then exit 0; fi
-            [[ "$attempt" != 5 ]] || { echo "$NAME: Drive failed after 5 resumable attempts" >&2; exit 1; }
+            printf '\n===== gdown attempt %s/5 at %s =====\n' "$attempt" "$(date -u +%FT%TZ)" | tee -a "$log"
+            if "$RUNNER_TEMP/pulseforge-gdown/bin/python" -m gdown --continue --folder "https://drive.google.com/drive/folders/$DRIVE_ID" -O "$staging" 2>&1 | tee -a "$log"; then exit 0; fi
+            [[ "$attempt" != 5 ]] || { echo "$NAME: Drive failed after 5 resumable attempts" | tee -a "$log" >&2; exit 1; }
             sleep $((attempt*30))
           done
 
@@ -297,7 +300,7 @@ jobs:
           NAME: ${{ steps.mod.outputs.name }}
           DRIVE_ID: ${{ steps.mod.outputs.drive_id }}
         run: |
-          echo "::warning title=Authoritative candidate unavailable::$ITEM_SLUG ($NAME) could not be fully downloaded from Drive folder $DRIVE_ID after resumable retries. The source tree remains healthy; this candidate will be retried by a later staging run."
+          echo "::warning title=Authoritative candidate unavailable::$ITEM_SLUG ($NAME) could not be fully downloaded from Drive folder $DRIVE_ID after resumable retries. See the uploaded gdown diagnostic log."
 
       - name: Validate and materialize source mod
         if: steps.embedded_candidate.outputs.hit == 'true' || steps.source_download.outcome == 'success'
@@ -337,7 +340,7 @@ jobs:
           set -euo pipefail
           python3 scripts/audit_complete_mod_payload.py . --mod-root "$TARGET" --descriptor "$DESCRIPTOR" --output "$RUNNER_TEMP/complete-mod-audit-$ITEM_SLUG.json"
 
-      - name: Upload dependency audit and recovery provenance
+      - name: Upload dependency audit, recovery provenance and Drive diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -345,8 +348,16 @@ jobs:
           path: |
             ${{ runner.temp }}/complete-mod-audit-${{ matrix.slug }}.json
             ${{ runner.temp }}/complete-mod-recovery-${{ matrix.slug }}.json
+            ${{ runner.temp }}/gdown-${{ matrix.slug }}.log
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Require authoritative candidate availability
+        if: steps.embedded_candidate.outputs.hit != 'true' && steps.source_download.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "$ITEM_SLUG: authoritative Drive candidate was unavailable after all retries" >&2
+          exit 1
 
       - name: Commit and publish this mod branch
         if: success() && (steps.embedded_candidate.outputs.hit == 'true' || steps.source_download.outcome == 'success')
