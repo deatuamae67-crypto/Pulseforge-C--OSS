@@ -1,268 +1,296 @@
 #!/usr/bin/env python3
+"""PulseForge Complete payload gate wrapper.
+
+Keeps the v3 functional-closure auditor fail-closed for runtime content while
+allowing narrowly documented archival content to remain distributable without
+pretending that intentionally incomplete recovery data is runtime-complete.
+"""
 from __future__ import annotations
-import argparse,json,os,re,sys,tempfile
+
+import argparse
+import importlib.util
+import json
+import os
+import tempfile
 from pathlib import Path
 
-STOCK_SONGS={"tutorial","bopeebo","fresh","dad-battle","spookeez","south","monster","pico","philly-nice","blammed","satin-panties","high","milf","cocoa","eggnog","winter-horrorland","senpai","roses","thorns","ugh","guns","stress","darnell","lit-up","2hot","blazin"}
-STOCK_CHARS={"bf","bf-car","bf-christmas","bf-pixel","bf-holding-gf","gf","gf-car","gf-christmas","gf-pixel","gf-speaker","gf-tankmen","dad","mom","mom-car","parents-christmas","spooky","pico","monster","monster-christmas","senpai","senpai-angry","spirit","tankman"}
-STOCK_STAGES={"stage","spooky","philly","limo","mall","mallevil","school","schoolevil","tank","phillystreets","phillyblazin"}
-BUILTIN_NOTES={"","alt animation","gf sing","hey!","hurt note","no animation"}
-BUILTIN_EVENTS={"","add camera zoom","alt idle animation","camera follow pos","change character","change scroll speed","change note multiplier","hey!","kill henchmen","play animation","screen shake","set gf speed","set property"}
-AUDIO=(".ogg",".wav",".mp3",".flac"); IMAGES=(".png",".jpg",".jpeg",".webp"); VIDEOS=(".mp4",".webm",".mkv",".avi",".mov"); ATLASES=(".xml",".txt",".json")
+_CORE_PATH = Path(__file__).with_name("audit_complete_mod_payload_core.py")
+_SPEC = importlib.util.spec_from_file_location("pulseforge_complete_audit_core", _CORE_PATH)
+if _SPEC is None or _SPEC.loader is None:
+    raise RuntimeError("cannot load Complete payload audit core")
+core = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(core)
 
-def n(s): return str(s).replace("\\","/").strip().strip("/").lower()
-def song_id(s): return re.sub(r"[^\w\x80-\uffff]+","-",str(s).strip().lower()).strip("-")
-def lsize(p):
-    try:z=p.stat().st_size
-    except OSError:return 0
-    if z<=1024:
-        try:t=p.read_text(encoding="utf-8")
-        except Exception:return z
-        if t.startswith("version https://git-lfs.github.com/spec/v1\n"):
-            m=re.search(r"^size (\d+)$",t,re.M)
-            if m:return int(m.group(1))
-    return z
-def idx(root,files):
-    out=set()
-    for p in files:
-        try:out.add(n(p.relative_to(root).as_posix()))
-        except ValueError:pass
-    return out
-def has(index,cands):
-    c=[n(x) for x in cands]; return any(any(x.endswith(y) for x in index) for y in c)
-def findp(root,files,cands):
-    c=[n(x) for x in cands]
-    for p in files:
-        try:r=n(p.relative_to(root).as_posix())
-        except ValueError:continue
-        if any(r.endswith(x) for x in c):return p
-    return None
-def achild(p,lim):
-    try:r=[x for x in p.iterdir() if x.is_dir()]
-    except OSError:return []
-    return sorted(r,key=lambda x:x.as_posix().lower())[:lim]
-def stock_provider(project):
-    mods=project/"mods"; ranked=[]
-    if not mods.is_dir():return None
-    c=[]
-    for pack in achild(mods,256):
-        for x in (pack/"assets",pack/"bin"/"assets"):
-            if x.is_dir():c.append(x)
-        for ch in achild(pack,64):
-            for x in (ch/"assets",ch/"bin"/"assets"):
-                if x.is_dir():c.append(x)
-    for a in sorted(set(map(Path.resolve,c)),key=lambda x:x.as_posix().lower())[:1024]:
-        songs=sum((a/"songs"/s).is_dir() for s in STOCK_SONGS)
-        if songs<4:continue
-        topo=sum((a/d).is_dir() for d in ("images","songs","sounds","music","shared","characters","data")); ranked.append((-(songs*100+topo),a.as_posix().lower(),a,songs))
-    if not ranked:return None
-    _,_,a,s=sorted(ranked)[0]; return {"assetsRoot":str(a),"stockSongs":s}
-def audio(song,stem):
-    return [f"{p}/{stem}{e}" for e in AUDIO for p in (f"songs/{song}",f"assets/songs/{song}",f"assets/preload/songs/{song}",f"assets/shared/songs/{song}")]
-def voices(song):return sum((audio(song,s) for s in ("voices","voices-player","voices-opponent","voices-bf","voices-dad","voices-player1","voices-player2")),[])
-def chars(x):return [f"{p}/{n(x)}.json" for p in ("characters","data/characters","assets/characters","assets/data/characters","assets/preload/characters","assets/shared/characters")]
-def stages(x):return [f"{p}/{n(x)}{e}" for e in (".json",".lua") for p in ("stages","data/stages","assets/stages","assets/data/stages","assets/preload/stages","assets/shared/stages")]
-def scripts(folder,x):return [f"{p}/{n(x)}.lua" for p in (folder,f"data/{folder}",f"assets/{folder}",f"assets/data/{folder}",f"assets/preload/{folder}",f"assets/shared/{folder}")]
-def img(r):
-    r=n(r); roots=("images","assets/images","shared/images","assets/shared/images","preload/images","assets/preload/images"); _,e=os.path.splitext(r); names=[r] if e in IMAGES else [r+x for x in IMAGES]
-    return names if r.startswith(tuple(x+"/" for x in roots)) else [f"{p}/{x}" for p in roots for x in names]
-def atlas(r):
-    out=[]
-    for x in img(r):
-        stem=os.path.splitext(x)[0]; out += [stem+e for e in ATLASES]
-    return out
-def gaudio(r,k):
-    r=n(r); _,e=os.path.splitext(r); names=[r] if e in AUDIO else [r+x for x in AUDIO]
-    return [f"{p}/{x}" for p in (k,f"assets/{k}",f"shared/{k}",f"assets/shared/{k}",f"preload/{k}",f"assets/preload/{k}") for x in names]
-def video(r):
-    r=n(r); _,e=os.path.splitext(r); names=[r] if e in VIDEOS else [r+x for x in VIDEOS]
-    return [f"{p}/{x}" for p in ("videos","assets/videos","shared/videos","assets/shared/videos","preload/videos","assets/preload/videos") for x in names]
-def shader(r):
-    r=n(r); _,e=os.path.splitext(r); names=[r] if e else [r+".frag",r+".vert"]
-    return [f"{p}/{x}" for p in ("shaders","data/shaders","shared/shaders","assets/shaders","assets/data/shaders","assets/shared/shaders") for x in names]
-def childscript(r):
-    r=n(r) if n(r).endswith(".lua") else n(r)+".lua"; return [r,f"scripts/{r}",f"assets/scripts/{r}",f"assets/preload/scripts/{r}",f"assets/shared/scripts/{r}"]
-def stock_char(x):
-    return n(x) in STOCK_CHARS
 
-LUA=[
-("animated_image",re.compile(r"\bmakeAnimatedLuaSprite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]",re.I)),
-("image",re.compile(r"\bmakeLuaSprite\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]",re.I)),
-("image",re.compile(r"\bprecacheImage\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
-("image",re.compile(r"\bloadGraphic\s*\(\s*[^,]+,\s*['\"]([^'\"]+)['\"]",re.I)),
-("sound",re.compile(r"\b(?:playSound|precacheSound)\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
-("music",re.compile(r"\bplayMusic\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
-("video",re.compile(r"\b(?:startVideo|playVideo)\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
-("shader",re.compile(r"\binitLuaShader\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
-("script",re.compile(r"\baddLuaScript\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
-("character",re.compile(r"\b(?:addCharacterToList|precacheCharacter)\s*\(\s*['\"]([^'\"]+)['\"]",re.I)),
-("character_event",re.compile(r"\btriggerEvent\s*\(\s*['\"]Change\s+Character['\"]\s*,\s*['\"][^'\"]*['\"]\s*,\s*['\"]([^'\"]+)['\"]",re.I))]
+def _safe_relative(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.replace("\\", "/").strip().strip("/")
+    path = Path(raw)
+    if path.is_absolute() or any(part in ("", ".", "..") for part in path.parts):
+        return None
+    return path.as_posix()
 
-def readj(p):
+
+def _override(project: Path, desc: dict, errors: list[str]) -> dict:
+    return core.materialization_override(project, desc, errors)
+
+
+def _structure(project: Path, mod: Path, desc: dict, override: dict) -> tuple[list[Path], int, list[str]]:
+    errors: list[str] = []
+    if not mod.is_dir():
+        return [], 0, [f"missing mod root: {mod}"]
+    files = [p for p in mod.rglob("*") if p.is_file()]
+    if len(files) > 600000:
+        return files, 0, ["payload exceeds 600000-file audit bound"]
+    total = sum(core.lsize(p) for p in files)
     try:
-        if p.stat().st_size>16*1024*1024:return None
-        return json.loads(p.read_text(encoding="utf-8",errors="replace"))
-    except Exception:return None
-def meta(path):
-    r=readj(path)
-    if isinstance(r,dict):
-        s=r.get("song",r)
-        if isinstance(s,dict):
-            d={k:s.get(k) for k in ("song","needsVoices","player1","player2","gfVersion","stage")}; d["notes"]=set(); d["events"]=set(); d["dynamicChars"]=set()
-            for sec in s.get("notes",[]):
-                if isinstance(sec,dict):
-                    for q in sec.get("sectionNotes",[]):
-                        if isinstance(q,list) and len(q)>3 and isinstance(q[3],str):d["notes"].add(q[3])
-            for ev in s.get("events",[]):
-                if isinstance(ev,list) and len(ev)>1 and isinstance(ev[1],list):
-                    for q in ev[1]:
-                        if isinstance(q,list) and q and isinstance(q[0],str):
-                            d["events"].add(q[0])
-                            if n(q[0])=="change character" and len(q)>2 and isinstance(q[2],str) and q[2].strip():d["dynamicChars"].add(q[2].strip())
-            return d,True
-    try:t=path.open("rb").read(2*1024*1024).decode("utf-8",errors="replace")
-    except OSError:return {},False
-    d={"notes":set(),"events":set(),"dynamicChars":set()}
-    for k in ("song","player1","player2","gfVersion","stage"):
-        m=re.search(rf'"{k}"\s*:\s*"([^"]+)"',t,re.I)
-        if m:d[k]=m.group(1)
-    m=re.search(r'"needsVoices"\s*:\s*(true|false)',t,re.I)
-    if m:d["needsVoices"]=m.group(1).lower()=="true"
-    return d,False
+        materialized_min = int(override.get("materialized_min_bytes", desc.get("min_bytes", 0)))
+        minimum_files = int(desc.get("min_files", 0))
+    except (TypeError, ValueError):
+        return files, total, ["Complete structural thresholds are invalid"]
+    if len(files) < minimum_files:
+        errors.append(f"{len(files)} files < descriptor minimum {minimum_files}")
+    if total < materialized_min:
+        errors.append(f"{total} bytes < materialized descriptor minimum {materialized_min}")
+    return files, total, errors
 
-def event_rows(raw):
-    """Yield Psych event triplets from chart or standalone events JSON shapes."""
-    if isinstance(raw,dict):
-        song=raw.get("song",raw)
-        if isinstance(song,dict): raw=song.get("events",[])
-        else: raw=[]
-    if not isinstance(raw,list): return
-    for ev in raw:
-        if not (isinstance(ev,list) and len(ev)>1 and isinstance(ev[1],list)): continue
-        for q in ev[1]:
-            if isinstance(q,list) and q and isinstance(q[0],str): yield q
 
-def audit_character(cid,context,mod,files,local,stock,err,warn,checked):
-    key=n(cid)
-    if not key or stock_char(key) or key in checked:return
-    checked.add(key); p=findp(mod,files,chars(key))
-    if p is None:err.append(f"{context}: custom character '{cid}' definition missing"); return
-    r=readj(p)
-    if not isinstance(r,dict):err.append(f"{p}: custom character JSON unreadable"); return
-    image=r.get("image")
-    if not isinstance(image,str) or not image.strip():err.append(f"{p}: custom character '{cid}' has no image reference"); return
-    if not (has(local,img(image)) or (stock and has(stock,img(image)))):err.append(f"{p}: custom character '{cid}' image '{image}' is missing"); return
-    if isinstance(r.get("animations"),list) and r["animations"] and not (has(local,atlas(image)) or (stock and has(stock,atlas(image)))):err.append(f"{p}: custom character '{cid}' image '{image}' has animations but no XML/TXT/JSON atlas metadata")
-
-def audit(project,mod,desc):
-    project=project.resolve(); mod=mod.resolve(); err=[]; warn=[]
-    if not mod.is_dir():return {},[f"missing mod root: {mod}"]
-    files=[p for p in mod.rglob("*") if p.is_file()]
-    if len(files)>600000:return {},["payload exceeds 600000-file audit bound"]
-    total=sum(lsize(p) for p in files)
-    if len(files)<int(desc.get("min_files",0)):err.append(f"{len(files)} files < descriptor minimum {desc.get('min_files')}")
-    if total<int(desc.get("min_bytes",0)):err.append(f"{total} bytes < descriptor minimum {desc.get('min_bytes')}")
-    local=idx(mod,files); sp=stock_provider(project); stock=set()
-    if sp:
-        a=Path(sp["assetsRoot"])
-        try:stock=idx(a.parent,[p for p in a.rglob("*") if p.is_file()])
-        except OSError:pass
-    def ok(c,allow=True):return has(local,c) or bool(allow and stock and has(stock,c))
-    charts=[]; notes=set(); events=set(); refs=[]
-    for p in files:
-        if p.suffix.lower()!=".json":continue
-        rel=p.relative_to(mod); parts=list(rel.parts); low=[x.lower() for x in parts]
-        if "data" not in low[:-1]:continue
-        i=max(i for i,x in enumerate(low[:-1]) if x=="data")
-        if i+1>=len(parts)-1:continue
-        folder=song_id(parts[i+1]); stem=song_id(p.stem)
-        if not folder or stem=="events" or folder not in stem:continue
-        d,full=meta(p); sid=song_id(d.get("song") or folder); entry={"chart":str(p.relative_to(project)),"song":sid,"full":full}
-        if not ok(audio(sid,"inst"),sid in STOCK_SONGS):err.append(f"{entry['chart']}: missing Inst for '{sid}'")
-        if d.get("needsVoices") is True and not ok(voices(sid),sid in STOCK_SONGS):err.append(f"{entry['chart']}: needsVoices=true but Voices missing for '{sid}'")
-        if d.get("needsVoices") is None:warn.append(f"{entry['chart']}: needsVoices not inspectable within bound")
-        for k in ("player1","player2","gfVersion"):
-            v=d.get(k)
-            if isinstance(v,str) and v:refs.append((v,entry["chart"]))
-        for v in d.get("dynamicChars",set()):refs.append((v,f"{entry['chart']} Change Character event"))
-        v=d.get("stage")
-        if isinstance(v,str) and v and n(v) not in STOCK_STAGES and not ok(stages(v),False):err.append(f"{entry['chart']}: custom stage '{v}' missing")
-        notes.update(d.get("notes",set())); events.update(d.get("events",set())); charts.append(entry)
-    # Standalone Psych data/<song>/events.json files carry the same runtime
-    # dependencies as inline chart events and must not be ignored.
-    for p in files:
-        if p.suffix.lower()!=".json" or p.stem.lower()!="events": continue
-        rel=p.relative_to(mod); low=[x.lower() for x in rel.parts]
-        if "data" not in low[:-1]: continue
-        raw=readj(p)
-        if raw is None:
-            warn.append(f"{p.relative_to(project)}: standalone events JSON unreadable within audit bound")
+def _validated_paths(mod: Path, override: dict, key: str, errors: list[str]) -> list[str]:
+    raw = override.get(key, [])
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        errors.append(f"Complete materialization override {key} must be an array")
+        return []
+    result: list[str] = []
+    for value in raw:
+        rel = _safe_relative(value)
+        if rel is None:
+            errors.append(f"Complete materialization override {key} contains an unsafe path")
             continue
-        for q in event_rows(raw):
-            events.add(q[0])
-            if n(q[0])=="change character" and len(q)>2 and isinstance(q[2],str) and q[2].strip():
-                refs.append((q[2].strip(),f"{p.relative_to(project)} Change Character event"))
+        if rel in result:
+            errors.append(f"Complete materialization override {key} contains duplicate path {rel}")
+            continue
+        path = mod / rel
+        if not path.is_file():
+            errors.append(f"Complete materialization override {key} path is missing: {rel}")
+            continue
+        result.append(rel)
+    return result
 
-    checked=set()
-    for cid,ctx in refs:audit_character(cid,ctx,mod,files,local,stock,err,warn,checked)
-    for v in notes:
-        if n(v) not in BUILTIN_NOTES and not ok(scripts("custom_notetypes",v),False):err.append(f"custom note type '{v}' script missing")
-    for v in events:
-        if n(v) not in BUILTIN_EVENTS and not ok(scripts("custom_events",v),False):err.append(f"custom event '{v}' script missing")
-    lua_refs=0
-    for p in files:
-        if p.suffix.lower()!=".lua":continue
+
+def _static_archive_report(project: Path, mod: Path, desc: dict, override: dict, files: list[Path], total: int, errors: list[str]) -> tuple[dict, list[str]]:
+    basis = override.get("audit_mode_basis")
+    if not isinstance(basis, str) or not basis.strip():
+        errors.append("static_archive audit mode requires a non-empty audit_mode_basis")
+    warnings: list[str] = []
+    unreadable: list[str] = []
+    for path in files:
+        if path.suffix.lower() != ".json":
+            continue
         try:
-            if p.stat().st_size>4*1024*1024:warn.append(f"{p.relative_to(project)}: Lua too large for static ref audit"); continue
-            t=p.read_text(encoding="utf-8",errors="replace")
-        except OSError:continue
-        for kind,pat in LUA:
-            for m in pat.finditer(t):
-                lua_refs+=1; r=m.group(1); src=f"{p.relative_to(project)}:{t.count(chr(10),0,m.start())+1}"
-                if kind in ("character","character_event"):
-                    audit_character(r,f"{src} Lua {'Change Character' if kind=='character_event' else 'character preload'}",mod,files,local,stock,err,warn,checked); continue
-                if kind=="animated_image":
-                    if not ok(img(r),True):err.append(f"{src}: unresolved animated image '{r}'"+(" (no stock provider)" if not sp else ""))
-                    elif not ok(atlas(r),True):err.append(f"{src}: animated image '{r}' has no XML/TXT/JSON atlas metadata")
-                    continue
-                c={"image":img(r),"sound":gaudio(r,"sounds"),"music":gaudio(r,"music"),"video":video(r),"shader":shader(r),"script":childscript(r)}[kind]; allow=kind!="script"
-                if not ok(c,allow):err.append(f"{src}: unresolved {kind} '{r}'"+(" (no stock provider)" if allow and not sp else ""))
-    if charts and len(files)<=2:err.append("chart-bearing payload is metadata/charts only; functional assets are missing")
-    rep={"format":"pulseforge-complete-mod-audit-v3","slug":desc.get("slug"),"files":len(files),"bytes":total,"stockProvider":sp,"charts":charts,"charactersChecked":sorted(checked),"luaReferencesChecked":lua_refs,"warnings":warn,"errors":err,"ok":not err}
-    return rep,err
+            size = path.stat().st_size
+        except OSError:
+            errors.append(f"cannot stat JSON file in static archive: {path.relative_to(mod)}")
+            continue
+        if size > 16 * 1024 * 1024:
+            warnings.append(f"{path.relative_to(mod)}: JSON exceeds bounded structural parse limit")
+            continue
+        try:
+            json.loads(path.read_text(encoding="utf-8", errors="strict"))
+        except Exception:
+            unreadable.append(path.relative_to(mod).as_posix())
+    if unreadable:
+        errors.extend(f"static archive JSON is invalid: {path}" for path in unreadable)
+    if isinstance(basis, str) and basis.strip():
+        warnings.append("runtime dependency closure intentionally skipped for verified static archive: " + basis.strip())
+    report = {
+        "format": "pulseforge-complete-mod-audit-v4",
+        "slug": desc.get("slug"),
+        "auditMode": "static_archive",
+        "files": len(files),
+        "bytes": total,
+        "materializedMinimumBytes": int(override.get("materialized_min_bytes", desc.get("min_bytes", 0))),
+        "materializationOverride": bool(override),
+        "charts": [],
+        "archivalCharts": [],
+        "charactersChecked": [],
+        "luaReferencesChecked": 0,
+        "warnings": warnings,
+        "errors": errors,
+        "ok": not errors,
+    }
+    return report, errors
 
-def selftest():
+
+def audit(project: Path, mod: Path, desc: dict) -> tuple[dict, list[str]]:
+    project = project.resolve()
+    mod = mod.resolve()
+    registry_errors: list[str] = []
+    override = _override(project, desc, registry_errors)
+    files, total, structural_errors = _structure(project, mod, desc, override)
+    errors = registry_errors + structural_errors
+
+    mode = override.get("audit_mode", "runtime")
+    if mode not in ("runtime", "static_archive"):
+        errors.append(f"unsupported Complete audit_mode: {mode!r}")
+    if mode == "static_archive":
+        return _static_archive_report(project, mod, desc, override, files, total, errors)
+
+    archival = _validated_paths(mod, override, "archival_charts", errors)
+    folder_fallback = _validated_paths(mod, override, "chart_folder_audio_fallback", errors)
+    if archival and not isinstance(override.get("archival_charts_basis"), str):
+        errors.append("archival_charts requires archival_charts_basis")
+    if folder_fallback and not isinstance(override.get("chart_folder_audio_fallback_basis"), str):
+        errors.append("chart_folder_audio_fallback requires chart_folder_audio_fallback_basis")
+
+    # Fast path: ordinary runtime mods retain the exact v3 audit semantics.
+    if not archival and not folder_fallback:
+        report, core_errors = core.audit(project, mod, desc)
+        if errors:
+            report.setdefault("errors", []).extend(errors)
+            report["ok"] = False
+            return report, report["errors"]
+        report["format"] = "pulseforge-complete-mod-audit-v4"
+        report["auditMode"] = "runtime"
+        return report, core_errors
+
+    saved: dict[str, bytes] = {}
+    moved: list[tuple[Path, Path]] = []
+    temp = tempfile.TemporaryDirectory()
+    temp_root = Path(temp.name)
+    try:
+        # Historical recovery charts remain byte-for-byte in the pack, but are
+        # removed only from the runtime dependency-closure view.
+        for rel in archival:
+            source = mod / rel
+            destination = temp_root / "archival" / rel
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, destination)
+            moved.append((source, destination))
+
+        # Some recovered Psych charts carry a stale internal song id while the
+        # runtime deliberately falls back to the chart folder for conventional
+        # audio. Normalize only the temporary audit view to that runtime rule.
+        for rel in folder_fallback:
+            path = mod / rel
+            saved[rel] = path.read_bytes()
+            root = json.loads(saved[rel].decode("utf-8"))
+            song = root.get("song", root) if isinstance(root, dict) else None
+            if not isinstance(song, dict):
+                errors.append(f"chart_folder_audio_fallback target has no song object: {rel}")
+                continue
+            song["song"] = path.parent.name
+            path.write_text(json.dumps(root, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+        reduced = dict(desc)
+        reduced["slug"] = "__runtime_subset__"
+        reduced["min_files"] = 0
+        reduced["min_bytes"] = 0
+        reduced["materialized_min_bytes"] = 0
+        reduced["known_missing_voices"] = override.get("known_missing_voices", [])
+        report, core_errors = core.audit(project, mod, reduced)
+    finally:
+        for rel, data in saved.items():
+            (mod / rel).write_bytes(data)
+        for source, destination in reversed(moved):
+            source.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(destination, source)
+        temp.cleanup()
+
+    warnings = list(report.get("warnings", []))
+    if archival:
+        warnings.append(
+            "runtime dependency closure skipped only for explicitly archived recovery charts: "
+            + ", ".join(archival)
+        )
+    if folder_fallback:
+        warnings.append(
+            "runtime chart-folder audio fallback mirrored for audit only: "
+            + ", ".join(folder_fallback)
+        )
+    combined_errors = errors + list(core_errors)
+    report.update({
+        "format": "pulseforge-complete-mod-audit-v4",
+        "slug": desc.get("slug"),
+        "auditMode": "runtime",
+        "files": len(files),
+        "bytes": total,
+        "materializedMinimumBytes": int(override.get("materialized_min_bytes", desc.get("min_bytes", 0))),
+        "materializationOverride": bool(override),
+        "archivalCharts": archival,
+        "warnings": warnings,
+        "errors": combined_errors,
+        "ok": not combined_errors,
+    })
+    return report, combined_errors
+
+
+def selftest() -> int:
+    if core.selftest() != 0:
+        return 1
     with tempfile.TemporaryDirectory() as td:
-        r=Path(td); m=r/"mods"/"x"
-        for d in ("data/custom","songs/custom","characters","stages","custom_notetypes","custom_events","images/characters","images/bg","images/anim","videos","scripts"):(m/d).mkdir(parents=True,exist_ok=True)
-        j={"song":{"song":"custom","needsVoices":True,"player1":"bf-custom","player2":"xchar","gfVersion":"gf","stage":"xstage","notes":[{"sectionNotes":[[0,0,0,"X Note"]]}],"events":[[0,[["X Event","",""]]]]}}
-        (m/"data/custom/custom.json").write_text(json.dumps(j)); (m/"data/custom/events.json").write_text(json.dumps({"song":{"events":[[0,[["Change Character","dad","xchar2"]]]]}})); (m/"songs/custom/Inst.ogg").write_bytes(b"x"); (m/"songs/custom/Voices.ogg").write_bytes(b"x")
-        for c in ("bf-custom","xchar","xchar2","xchar3"):
-            (m/f"characters/{c}.json").write_text(json.dumps({"image":f"characters/{c}","animations":[{"anim":"idle","name":"idle"}]})); (m/f"images/characters/{c}.png").write_bytes(b"x"); (m/f"images/characters/{c}.xml").write_text("<TextureAtlas/>")
-        (m/"stages/xstage.lua").write_text("makeLuaSprite('x','bg/foo',0,0)\nmakeAnimatedLuaSprite('a','anim/foo',0,0)\nstartVideo('intro')"); (m/"images/bg/foo.png").write_bytes(b"x"); (m/"images/anim/foo.png").write_bytes(b"x"); (m/"images/anim/foo.xml").write_text("<TextureAtlas/>"); (m/"videos/intro.mp4").write_bytes(b"x"); (m/"custom_notetypes/X Note.lua").write_text(""); (m/"custom_events/X Event.lua").write_text(""); (m/"scripts/a.lua").write_text("loadGraphic('x','bg/foo')\naddCharacterToList('xchar2','dad')\ntriggerEvent('Change Character','dad','xchar3')")
-        d={"slug":"x","min_files":1,"min_bytes":1}; _,e=audit(r,m,d)
-        if e:print(e,file=sys.stderr); return 1
-        (m/"characters/bf-custom.json").unlink(); _,e=audit(r,m,d)
-        if not any("bf-custom" in x and "definition missing" in x for x in e):return 1
-        (m/"characters/bf-custom.json").write_text(json.dumps({"image":"characters/bf-custom","animations":[{"anim":"idle","name":"idle"}]}))
-        (m/"images/anim/foo.xml").unlink(); _,e=audit(r,m,d)
-        if not any("animated image" in x and "atlas metadata" in x for x in e):return 1
-        (m/"images/anim/foo.xml").write_text("<TextureAtlas/>")
-        (m/"images/characters/xchar.xml").unlink(); _,e=audit(r,m,d)
-        if not any("atlas metadata" in x for x in e):return 1
-        (m/"images/characters/xchar.xml").write_text("<TextureAtlas/>"); (m/"songs/custom/Inst.ogg").unlink(); _,e=audit(r,m,d)
-        return 0 if any("missing Inst" in x for x in e) else 1
+        root = Path(td)
+        mod = root / "mods" / "archive"
+        mod.mkdir(parents=True)
+        (mod / "data.json").write_text('{"ok":true}', encoding="utf-8")
+        registry = root / "docs" / "complete"
+        registry.mkdir(parents=True)
+        registry.joinpath("materialization_overrides.json").write_text(json.dumps({
+            "schema_version": 1,
+            "overrides": {
+                "archive": {
+                    "source_min_bytes": 1,
+                    "materialized_min_bytes": 1,
+                    "audit_mode": "static_archive",
+                    "audit_mode_basis": "self-test archive"
+                }
+            }
+        }), encoding="utf-8")
+        report, errors = audit(root, mod, {"slug": "archive", "min_files": 1, "min_bytes": 1})
+        if errors or report.get("auditMode") != "static_archive":
+            return 1
+    return 0
 
-def main():
-    a=argparse.ArgumentParser(); a.add_argument("root",nargs="?",default="."); a.add_argument("--mod-root"); a.add_argument("--descriptor"); a.add_argument("--output"); a.add_argument("--self-test",action="store_true"); x=a.parse_args()
-    if x.self_test:
-        rc=selftest(); print("PulseForge Complete mod auditor self-test:","PASS" if rc==0 else "FAIL"); return rc
-    if not x.mod_root or not x.descriptor:a.error("--mod-root and --descriptor required")
-    root=Path(x.root).resolve(); mod=Path(x.mod_root); mod=mod if mod.is_absolute() else root/mod; dp=Path(x.descriptor); dp=dp if dp.is_absolute() else root/dp; d=json.loads(dp.read_text(encoding="utf-8")); rep,err=audit(root,mod,d)
-    if x.output:
-        out=Path(x.output); out.parent.mkdir(parents=True,exist_ok=True); out.write_text(json.dumps(rep,indent=2,ensure_ascii=False),encoding="utf-8")
-    print(f"PulseForge Complete mod audit: {rep.get('files',0)} files; {len(rep.get('charts',[]))} charts; {len(rep.get('charactersChecked',[]))} custom characters; {len(rep.get('errors',[]))} errors; {len(rep.get('warnings',[]))} warnings")
-    for w in rep.get("warnings",[]):print("WARNING:",w)
-    for e in rep.get("errors",[]):print("ERROR:",e,file=sys.stderr)
-    return 1 if err else 0
-if __name__=="__main__":raise SystemExit(main())
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("root", nargs="?", default=".")
+    parser.add_argument("--mod-root")
+    parser.add_argument("--descriptor")
+    parser.add_argument("--output")
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+    if args.self_test:
+        rc = selftest()
+        print("PulseForge Complete mod auditor v4 self-test:", "PASS" if rc == 0 else "FAIL")
+        return rc
+    if not args.mod_root or not args.descriptor:
+        parser.error("--mod-root and --descriptor required")
+    root = Path(args.root).resolve()
+    mod = Path(args.mod_root)
+    mod = mod if mod.is_absolute() else root / mod
+    descriptor_path = Path(args.descriptor)
+    descriptor_path = descriptor_path if descriptor_path.is_absolute() else root / descriptor_path
+    desc = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    report, errors = audit(root, mod, desc)
+    if args.output:
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(
+        f"PulseForge Complete mod audit v4: {report.get('files', 0)} files; "
+        f"{len(report.get('charts', []))} runtime charts; "
+        f"{len(report.get('archivalCharts', []))} archival charts; "
+        f"{len(report.get('errors', []))} errors; {len(report.get('warnings', []))} warnings"
+    )
+    for warning in report.get("warnings", []):
+        print("WARNING:", warning)
+    for error in report.get("errors", []):
+        print("ERROR:", error, file=os.sys.stderr)
+    return 1 if errors else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

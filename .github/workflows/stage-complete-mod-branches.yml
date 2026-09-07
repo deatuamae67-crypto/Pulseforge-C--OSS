@@ -6,13 +6,17 @@ on:
     paths:
       - 'mods/**'
       - 'docs/complete/mods/*.json'
+      - 'docs/complete/materialization_overrides.json'
       - 'scripts/audit_complete_mod_payload.py'
+      - 'scripts/audit_complete_mod_payload_core.py'
       - '.github/workflows/stage-complete-mod-branches.yml'
   push:
     branches: [main]
     paths:
       - 'docs/complete/mods/*.json'
+      - 'docs/complete/materialization_overrides.json'
       - 'scripts/audit_complete_mod_payload.py'
+      - 'scripts/audit_complete_mod_payload_core.py'
       - '.github/workflows/stage-complete-mod-branches.yml'
   workflow_dispatch:
 
