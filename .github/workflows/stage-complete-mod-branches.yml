@@ -159,7 +159,10 @@ jobs:
           [[ "$name" != '.autochart-staging' && -n "$name" && "$name" != 'null' && "$name" != */* && "$name" != *\\* ]]
           [[ "$drive_id" =~ ^[A-Za-z0-9_-]+$ && "$min_files" =~ ^[0-9]+$ && "$min_bytes" =~ ^[0-9]+$ ]]
           target="mods/$name"; branch="complete/content-$ITEM_SLUG"
-          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Use an explicitly automated but non-GitHub-bot commit identity. PR
+          # workflow approval is keyed to the commit actor; bot-authored staged
+          # heads can otherwise remain in action_required without creating jobs.
+          git config user.name 'PulseForge Content Stager'; git config user.email 'pulseforge-content-stager@localhost'
           old=''; if git fetch origin "$branch"; then old="$(git rev-parse "refs/remotes/origin/$branch")"; fi
           git checkout -B "$branch" "$GITHUB_SHA"; git reset --hard "$GITHUB_SHA"
           printf 'name=%s\ndrive_id=%s\nmin_files=%s\nmin_bytes=%s\ndescriptor=%s\ntarget=%s\nbranch=%s\nold=%s\n' "$name" "$drive_id" "$min_files" "$min_bytes" "$descriptor" "$target" "$branch" "$old" >> "$GITHUB_OUTPUT"
