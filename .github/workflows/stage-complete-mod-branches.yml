@@ -145,7 +145,37 @@ jobs:
           set -euo pipefail
           command -v git-lfs >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y --no-install-recommends git-lfs; }
           git lfs install --local
-          python3 -m pip install --disable-pip-version-check "gdown==$GDOWN_VERSION"
+
+          # ubuntu-24.04 currently exposes gdown through a shared pipx environment.
+          # Do not trust that mutable runner image for authoritative Complete imports:
+          # create a clean per-job environment, bypass all caches, and verify that
+          # the loaded module really is the requested release without the obsolete
+          # pre-6.0 50-file folder cap.
+          gdown_venv="$RUNNER_TEMP/pulseforge-gdown"
+          rm -rf "$gdown_venv"
+          python3 -m venv "$gdown_venv"
+          "$gdown_venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            --force-reinstall \
+            "gdown==$GDOWN_VERSION"
+          "$gdown_venv/bin/python" - <<'PY'
+          import inspect
+          import os
+          from importlib.metadata import version
+          import gdown.download_folder as download_folder
+
+          expected = os.environ['GDOWN_VERSION']
+          actual = version('gdown')
+          module_path = inspect.getfile(download_folder)
+          print(f'gdown package version: {actual}')
+          print(f'gdown download_folder module: {module_path}')
+          if actual != expected:
+              raise SystemExit(f'expected gdown {expected}, got {actual}')
+          source = inspect.getsource(download_folder)
+          if 'has more than 50 files' in source:
+              raise SystemExit('gdown still contains the obsolete 50-file folder limit')
+          PY
 
       - name: Validate descriptor and prepare isolated branch
         id: mod
@@ -255,7 +285,7 @@ jobs:
           set -euo pipefail
           staging="$RUNNER_TEMP/mod-$ITEM_SLUG"; rm -rf "$staging"; mkdir -p "$staging"
           for attempt in 1 2 3 4 5; do
-            if gdown --continue --folder "https://drive.google.com/drive/folders/$DRIVE_ID" -O "$staging"; then exit 0; fi
+            if "$RUNNER_TEMP/pulseforge-gdown/bin/python" -m gdown --continue --folder "https://drive.google.com/drive/folders/$DRIVE_ID" -O "$staging"; then exit 0; fi
             [[ "$attempt" != 5 ]] || { echo "$NAME: Drive failed after 5 resumable attempts" >&2; exit 1; }
             sleep $((attempt*30))
           done
