@@ -5,17 +5,13 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/complete-testing-draft.yml'
+      - 'scripts/update_complete_testing_draft.py'
   push:
     branches: [main]
     paths:
       - 'mods/**'
-      - 'src/**'
-      - 'include/**'
-      - 'assets/**'
-      - 'platform/android/**'
-      - 'CMakeLists.txt'
-      - 'CMakePresets.json'
       - '.github/workflows/complete-testing-draft.yml'
+      - 'scripts/update_complete_testing_draft.py'
   workflow_dispatch:
 
 permissions:
@@ -24,11 +20,6 @@ permissions:
 concurrency:
   group: pulseforge-complete-testing-draft-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  COMPLETE_TAG: 'v1.0.0-complete'
-  RELEASE_TITLE: 'PulseForge 1.0.0 Complete'
-  CONTENT_SPEC: 'docs/COMPLETE_CONTENT_1.0.0.json'
 
 jobs:
   validate:
@@ -41,25 +32,12 @@ jobs:
           fetch-depth: 2
           lfs: false
 
-      - name: Validate testing-draft contract
+      - name: Compile and validate testing-draft helper
         shell: bash
         run: |
           set -euo pipefail
-          test -s "$CONTENT_SPEC"
-          test -s docs/RELEASE_NOTES_1.0.0_COMPLETE.md
-          jq -e '.schema_version == 2 and .edition == "1.0.0-complete" and .target_mod_count == 30' "$CONTENT_SPEC" >/dev/null
-          shopt -s nullglob
-          specs=(docs/complete/mods/*.json)
-          test "${#specs[@]}" -eq 30
-          python3 - <<'PY'
-          import json, pathlib
-          names=[]; slugs=[]
-          for path in sorted(pathlib.Path('docs/complete/mods').glob('*.json')):
-              spec=json.loads(path.read_text(encoding='utf-8'))
-              names.append(spec['name'].casefold()); slugs.append(spec['slug'])
-          if len(names)!=len(set(names)): raise SystemExit('duplicate Complete mod name')
-          if len(slugs)!=len(set(slugs)): raise SystemExit('duplicate Complete mod slug')
-          PY
+          python3 -m py_compile scripts/update_complete_testing_draft.py
+          python3 scripts/update_complete_testing_draft.py --validate-only
 
   update-testing-draft:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -79,193 +57,18 @@ jobs:
           fetch-depth: 2
           lfs: false
 
-      - name: Install packaging tools
+      - name: Install Git LFS
         shell: bash
         run: |
           set -euo pipefail
-          command -v git-lfs >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y --no-install-recommends git-lfs; }
-          command -v zip >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y --no-install-recommends zip; }
+          command -v git-lfs >/dev/null 2>&1 || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends git-lfs
+          }
           git lfs install --local
 
-      - name: Resolve changed Complete mods
-        id: changed
+      - name: Update private Complete testing tag, draft and mod overlays
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json, os, pathlib, subprocess
-          head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
-          before=os.environ.get('BEFORE_SHA','')
-          if not before or set(before)=={'0'}:
-              before=subprocess.check_output(['git','rev-parse','HEAD^'],text=True).strip()
-          changed=subprocess.check_output(['git','diff','--name-only',before,head,'--','mods'],text=True).splitlines()
-          descriptors={}
-          for p in pathlib.Path('docs/complete/mods').glob('*.json'):
-              spec=json.loads(p.read_text(encoding='utf-8'))
-              descriptors[spec['name']]=(spec['slug'],p)
-          names=[]
-          for item in changed:
-              parts=pathlib.PurePosixPath(item).parts
-              if len(parts) < 3 or parts[0] != 'mods':
-                  continue
-              name=parts[1]
-              if name in descriptors and (pathlib.Path('mods')/name).is_dir():
-                  names.append(name)
-          names=sorted(set(names),key=str.casefold)
-          out=pathlib.Path(os.environ['RUNNER_TEMP'])/'changed-complete-mods.tsv'
-          with out.open('w',encoding='utf-8') as f:
-              for name in names:
-                  f.write(f'{name}\t{descriptors[name][0]}\n')
-          print(f'Changed Complete mods: {len(names)}')
-          for name in names: print(f' - {name}')
-          with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as f:
-              f.write(f'count={len(names)}\n')
-          PY
-
-      - name: Hydrate and package changed mods for private testing
-        shell: bash
-        run: |
-          set -euo pipefail
-          assets="$RUNNER_TEMP/testing-assets"
-          mkdir -p "$assets"
-          : > "$RUNNER_TEMP/release-assets.paths"
-          while IFS=$'\t' read -r name slug; do
-            [[ -n "$name" && -n "$slug" ]] || continue
-            target="mods/$name"
-            git lfs pull --include="$target/**" --exclude=''
-            python3 - "$target" <<'PY'
-          import pathlib,sys
-          root=pathlib.Path(sys.argv[1])
-          for p in root.rglob('*'):
-              if not p.is_file(): continue
-              head=p.read_bytes()[:256]
-              if head.startswith(b'version https://git-lfs.github.com/spec/v1\n') and b'\noid sha256:' in head:
-                  raise SystemExit(f'unhydrated LFS pointer: {p}')
-          PY
-            base="PulseForge-v1.0.0-complete-TEST-ONLY-mod-$slug"
-            archive="$assets/$base.zip"
-            (cd mods && zip -q -r -0 "$archive" "$name")
-            (cd "$assets" && sha256sum "$base.zip" > "$base.zip.SHA256SUMS.txt")
-            python3 - "$target" "$assets/$base.manifest.json" "$name" "$slug" "$GITHUB_SHA" <<'PY'
-          import json,pathlib,sys
-          root=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
-          files=[p for p in root.rglob('*') if p.is_file()]
-          payload={
-            'schema_version':1,
-            'kind':'complete-testing-overlay',
-            'testing_only':True,
-            'commit':sys.argv[5],
-            'mod_name':sys.argv[3],
-            'slug':sys.argv[4],
-            'file_count':len(files),
-            'total_bytes':sum(p.stat().st_size for p in files),
-            'extract_into':'mods/'
-          }
-          out.write_text(json.dumps(payload,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
-          PY
-            size="$(stat -c '%s' "$archive")"
-            if (( size <= 1800*1024*1024 )); then
-              printf '%s\n' "$archive" >> "$RUNNER_TEMP/release-assets.paths"
-            else
-              split -b 1800M -d -a 3 "$archive" "$assets/$base.zip.part"
-              rm -f "$archive"
-              find "$assets" -maxdepth 1 -type f -name "$base.zip.part*" -print | sort >> "$RUNNER_TEMP/release-assets.paths"
-            fi
-            printf '%s\n' "$assets/$base.zip.SHA256SUMS.txt" "$assets/$base.manifest.json" >> "$RUNNER_TEMP/release-assets.paths"
-          done < "$RUNNER_TEMP/changed-complete-mods.tsv"
-
-      - name: Write exact testing snapshot manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - "$RUNNER_TEMP/changed-complete-mods.tsv" "$RUNNER_TEMP/PulseForge-v1.0.0-complete-TESTING-SNAPSHOT.json" <<'PY'
-          import json,pathlib,subprocess,sys
-          changed=[]
-          for line in pathlib.Path(sys.argv[1]).read_text(encoding='utf-8').splitlines():
-              if not line.strip(): continue
-              name,slug=line.split('\t',1); changed.append({'name':name,'slug':slug})
-          specs=[]
-          for p in pathlib.Path('docs/complete/mods').glob('*.json'):
-              spec=json.loads(p.read_text(encoding='utf-8'))
-              if (pathlib.Path('mods')/spec['name']).is_dir(): specs.append({'name':spec['name'],'slug':spec['slug']})
-          data={
-            'schema_version':1,
-            'edition':'1.0.0-complete',
-            'testing_only':True,
-            'commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
-            'merged_complete_mod_count':len(specs),
-            'merged_complete_mods':sorted(specs,key=lambda x:x['name'].casefold()),
-            'changed_in_this_snapshot':changed
-          }
-          pathlib.Path(sys.argv[2]).write_text(json.dumps(data,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
-          PY
-          printf '%s\n' "$RUNNER_TEMP/PulseForge-v1.0.0-complete-TESTING-SNAPSHOT.json" >> "$RUNNER_TEMP/release-assets.paths"
-
-      - name: Move testing tag and update draft release
-        id: release
-        shell: bash
-        run: |
-          set -euo pipefail
-          repo="$GITHUB_REPOSITORY"; tag="$COMPLETE_TAG"
-          existing="$(gh api "repos/$repo/releases" --paginate --jq ".[] | select(.tag_name == \"$tag\") | [.id,.draft] | @tsv" | head -n1 || true)"
-          if [[ -n "$existing" ]]; then
-            IFS=$'\t' read -r release_id draft <<< "$existing"
-            [[ "$draft" == 'true' ]] || { echo "$tag is public; refusing to move a public release tag" >&2; exit 1; }
-          fi
-
-          if gh api "repos/$repo/git/ref/tags/$tag" >/dev/null 2>&1; then
-            gh api --method PATCH "repos/$repo/git/refs/tags/$tag" -f sha="$GITHUB_SHA" -F force=true >/dev/null
-          else
-            gh api --method POST "repos/$repo/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
-          fi
-
-          if [[ -z "$existing" ]]; then
-            gh release create "$tag" --repo "$repo" --title "$RELEASE_TITLE" --notes-file docs/RELEASE_NOTES_1.0.0_COMPLETE.md --draft
-            release_id="$(gh api "repos/$repo/releases" --paginate --jq ".[] | select(.tag_name == \"$tag\" and .draft == true) | .id" | head -n1)"
-          fi
-          test -n "$release_id"
-          body="$(cat docs/RELEASE_NOTES_1.0.0_COMPLETE.md)
-
----
-
-**Private testing snapshot:** \`$GITHUB_SHA\`
-
-The Git tag and TEST-ONLY overlay assets below track the exact merged source. TEST-ONLY mod archives are for owner-side validation only; the final public Complete release remains an embedded-content distribution."
-          gh api --method PATCH "repos/$repo/releases/$release_id" \
-            -f name="$RELEASE_TITLE" -f target_commitish="$GITHUB_SHA" -f body="$body" \
-            -F draft=true -F prerelease=false >/dev/null
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-
-      - name: Replace stale TEST-ONLY assets for changed mods and upload snapshot
-        shell: bash
-        env:
-          RELEASE_ID: ${{ steps.release.outputs.release_id }}
-        run: |
-          set -euo pipefail
-          repo="$GITHUB_REPOSITORY"
-          while IFS=$'\t' read -r name slug; do
-            [[ -n "$slug" ]] || continue
-            prefix="PulseForge-v1.0.0-complete-TEST-ONLY-mod-$slug"
-            mapfile -t stale < <(gh api "repos/$repo/releases/$RELEASE_ID/assets?per_page=100" --paginate --jq ".[] | select(.name | startswith(\"$prefix\")) | .id")
-            for id in "${stale[@]}"; do gh api --method DELETE "repos/$repo/releases/assets/$id" >/dev/null; done
-          done < "$RUNNER_TEMP/changed-complete-mods.tsv"
-          snapshot_name='PulseForge-v1.0.0-complete-TESTING-SNAPSHOT.json'
-          mapfile -t stale_snapshot < <(gh api "repos/$repo/releases/$RELEASE_ID/assets?per_page=100" --paginate --jq ".[] | select(.name == \"$snapshot_name\") | .id")
-          for id in "${stale_snapshot[@]}"; do gh api --method DELETE "repos/$repo/releases/assets/$id" >/dev/null; done
-          mapfile -t files < "$RUNNER_TEMP/release-assets.paths"
-          (( ${#files[@]} > 0 ))
-          gh release upload "$COMPLETE_TAG" --repo "$repo" "${files[@]}"
-
-      - name: Verify private testing snapshot invariants
-        shell: bash
-        env:
-          RELEASE_ID: ${{ steps.release.outputs.release_id }}
-        run: |
-          set -euo pipefail
-          repo="$GITHUB_REPOSITORY"
-          test "$(gh api "repos/$repo/releases/$RELEASE_ID" --jq '.draft')" = 'true'
-          test "$(gh api "repos/$repo/releases/$RELEASE_ID" --jq '.tag_name')" = "$COMPLETE_TAG"
-          tag_sha="$(gh api "repos/$repo/git/ref/tags/$COMPLETE_TAG" --jq '.object.sha')"
-          test "$tag_sha" = "$GITHUB_SHA"
-          test "$(gh api "repos/$repo/releases/$RELEASE_ID" --jq '.target_commitish')" = "$GITHUB_SHA"
-          echo "Complete private testing draft now tracks $GITHUB_SHA exactly."
+          python3 scripts/update_complete_testing_draft.py --update --before "$BEFORE_SHA"
