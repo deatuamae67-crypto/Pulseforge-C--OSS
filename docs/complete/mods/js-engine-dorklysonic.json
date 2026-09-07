@@ -6,12 +6,6 @@
   "drive_id": "1ELZMQUVXuAe-V43QeUheKgPY5CxAPPrW",
   "min_files": 41,
   "min_bytes": 3492318,
-  "materialized_min_bytes": 3468011,
-  "materialized_min_bytes_basis": "Authoritative 41-file Drive source after Git text EOL normalization; source min_bytes remains enforced before materialization.",
-  "known_missing_voices": [
-    "for-hire"
-  ],
-  "known_missing_voices_basis": "Authoritative source contains Inst.ogg but no vocal stem for for-hire; PulseForge conventional-audio discovery is fail-open when no vocal stem exists.",
   "enabled_by_default": true,
   "default_state_basis": "historical modsList=1"
 }
