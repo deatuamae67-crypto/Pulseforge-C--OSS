@@ -6,10 +6,13 @@ on:
     paths:
       - '.github/workflows/complete-release.yml'
       - '.github/workflows/import-builtin-content.yml'
+      - '.github/workflows/stage-complete-mod-branches.yml'
       - '.gitattributes'
       - 'docs/COMPLETE_CONTENT_1.0.0.json'
       - 'docs/COMPLETE_EDITION.md'
+      - 'docs/COMPLETE_CROSS_MOD_RECOVERY.md'
       - 'docs/RELEASE_NOTES_1.0.0_COMPLETE.md'
+      - 'scripts/recover_complete_mod_dependencies.py'
       - 'mods/**'
       - 'assets/menu/**'
   workflow_dispatch:
@@ -53,11 +56,19 @@ jobs:
           grep -Fq 'assets/menu/*.mp3 filter=lfs' .gitattributes
           grep -Fq 'mods/**/*.ogg filter=lfs' .gitattributes
           grep -Fq 'part of the engine' docs/COMPLETE_EDITION.md
+          test -f docs/COMPLETE_CROSS_MOD_RECOVERY.md
+          test -f scripts/recover_complete_mod_dependencies.py
 
           # The old content-pack model must not return. Match executable command
           # lines only so these assertions cannot match their own grep text.
           ! grep -Eq '^[[:space:]]*gh[[:space:]]+release[[:space:]]+upload.*complete-mod-' .github/workflows/complete-mod.yml
           ! grep -Eq '^[[:space:]]*(gdown|python3[[:space:]]+-m[[:space:]]+gdown)([[:space:]]|$)' .github/workflows/complete-release.yml
+
+      - name: Self-test conservative cross-mod recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/recover_complete_mod_dependencies.py --self-test
 
       - name: Verify embedded tree when it is present
         shell: bash
