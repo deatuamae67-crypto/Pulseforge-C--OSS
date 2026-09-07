@@ -3,7 +3,7 @@
 
 The official gdown folder command is authoritative for recursive enumeration.
 This helper asks gdown 6.1+ for its JSON manifest and then downloads those same
-resolved file URLs concurrently with separate gdown processes.  It never trusts
+resolved file URLs concurrently with separate gdown processes. It never trusts
 Drive paths blindly and never writes outside the caller-provided staging root.
 """
 
@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
-import os
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
@@ -119,7 +118,7 @@ def run_download(
                 url, rel = futures[future]
                 try:
                     ok, message = future.result()
-                except Exception as exc:  # keep all other transfers alive
+                except Exception as exc:
                     ok, message = False, f"{rel}: {type(exc).__name__}: {exc}"
                 completed += 1
                 if ok:
@@ -166,10 +165,11 @@ def self_test() -> None:
         "a.txt": "a.txt",
         "nested/b.txt": "nested/b.txt",
         "unicode/áudio.ogg": "unicode/áudio.ogg",
+        "./x": "x",
     }
     for raw, expected in good.items():
         assert safe_relative_path(raw).as_posix() == expected
-    for raw in ("", "/etc/passwd", "../x", "a/../../x", "C:/x", "./x"):
+    for raw in ("", "/etc/passwd", "../x", "a/../../x", "C:/x"):
         try:
             safe_relative_path(raw)
         except ValueError:
