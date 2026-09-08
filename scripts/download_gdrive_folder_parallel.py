@@ -5,6 +5,11 @@ The official gdown folder command is authoritative for recursive enumeration.
 This helper asks gdown 6.1+ for its JSON manifest and then downloads those same
 resolved file URLs concurrently with separate gdown processes. It never trusts
 Drive paths blindly and never writes outside the caller-provided staging root.
+
+Completed downloads may be resumed across fresh runners by persisting a small
+success ledger alongside the staging directory. A cached file is skipped only
+when its path and resolved URL still match the current authoritative manifest
+and the file is still present on disk.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ import json
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -76,6 +82,70 @@ def write_manifest(items: list[tuple[str, Path]], path: Path) -> None:
     )
 
 
+def load_completed_state(
+    state_path: Path,
+    folder_url: str,
+    staging: Path,
+    items: list[tuple[str, Path]],
+) -> set[str]:
+    if not state_path.is_file():
+        return set()
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"warning: ignoring unreadable download state {state_path}: {exc}", file=sys.stderr)
+        return set()
+    if not isinstance(payload, dict):
+        print(f"warning: ignoring non-object download state {state_path}", file=sys.stderr)
+        return set()
+    if payload.get("schema_version") != 1 or payload.get("folder_url") != folder_url:
+        print(f"warning: ignoring stale/incompatible download state {state_path}", file=sys.stderr)
+        return set()
+
+    expected = {rel.as_posix(): url for url, rel in items}
+    entries = payload.get("completed")
+    if not isinstance(entries, list):
+        print(f"warning: ignoring download state with invalid completed list {state_path}", file=sys.stderr)
+        return set()
+
+    completed: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        raw_path = entry.get("path")
+        url = entry.get("url")
+        if not isinstance(raw_path, str) or expected.get(raw_path) != url:
+            continue
+        try:
+            rel = safe_relative_path(raw_path)
+        except ValueError:
+            continue
+        if (staging / rel).is_file():
+            completed.add(raw_path)
+    return completed
+
+
+def write_completed_state(
+    state_path: Path,
+    folder_url: str,
+    items: list[tuple[str, Path]],
+    completed: set[str],
+) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "folder_url": folder_url,
+        "completed": [
+            {"url": url, "path": rel.as_posix()}
+            for url, rel in items
+            if rel.as_posix() in completed
+        ],
+    }
+    tmp = state_path.with_name(state_path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(state_path)
+
+
 def download_one(
     python: str,
     url: str,
@@ -109,6 +179,7 @@ def run_download(
     python: str,
     folder_url: str,
     staging: Path,
+    state_path: Path,
     workers: int,
     attempts: int,
     backoff: float,
@@ -121,8 +192,15 @@ def run_download(
     write_manifest(items, diagnostics / "gdown-folder-manifest.json")
     print(f"gdown manifest entries: {len(items)}")
 
-    pending = list(items)
+    completed = load_completed_state(state_path, folder_url, staging, items)
+    restored_files = len(completed)
+    pending = [(url, rel) for url, rel in items if rel.as_posix() not in completed]
+    print(f"restored completed files: {restored_files}; pending: {len(pending)}")
+    write_completed_state(state_path, folder_url, items, completed)
+
     for attempt in range(1, attempts + 1):
+        if not pending:
+            break
         failures: list[tuple[str, Path]] = []
         print(f"download attempt {attempt}/{attempts}: {len(pending)} pending file(s)")
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gdown") as pool:
@@ -137,21 +215,33 @@ def run_download(
                 ): (url, rel)
                 for url, rel in pending
             }
-            completed = 0
+            processed = 0
+            success_this_attempt = 0
             for future in as_completed(futures):
                 url, rel = futures[future]
                 try:
                     ok, message = future.result()
                 except Exception as exc:
                     ok, message = False, f"{rel}: {type(exc).__name__}: {exc}"
-                completed += 1
+                processed += 1
                 if ok:
-                    if completed % 50 == 0 or completed == len(futures):
-                        print(f"  completed {completed}/{len(futures)}")
+                    completed.add(rel.as_posix())
+                    success_this_attempt += 1
+                    write_completed_state(state_path, folder_url, items, completed)
+                    if processed % 50 == 0 or processed == len(futures):
+                        print(
+                            f"  processed {processed}/{len(futures)}; "
+                            f"completed total {len(completed)}/{len(items)}"
+                        )
                 else:
                     print(f"  failed: {message}", file=sys.stderr)
                     failures.append((url, rel))
+        print(
+            f"attempt {attempt} added {success_this_attempt} completed file(s); "
+            f"{len(failures)} remain"
+        )
         if not failures:
+            pending = []
             break
         pending = failures
         if attempt != attempts:
@@ -164,17 +254,24 @@ def run_download(
             json.dumps([{"url": u, "path": p.as_posix()} for u, p in pending], indent=2) + "\n",
             encoding="utf-8",
         )
-        raise RuntimeError(f"{len(pending)} Drive file(s) still failed; see {failed_path}")
+        write_completed_state(state_path, folder_url, items, completed)
+        raise RuntimeError(
+            f"{len(pending)} Drive file(s) still failed; "
+            f"{len(completed)} completed file(s) were preserved in {state_path}; "
+            f"see {failed_path}"
+        )
 
     missing = [rel.as_posix() for _, rel in items if not (staging / rel).is_file()]
     if missing:
         raise RuntimeError(f"download reported success but {len(missing)} manifest file(s) are missing")
+    write_completed_state(state_path, folder_url, items, {rel.as_posix() for _, rel in items})
     files = sum(1 for p in staging.rglob("*") if p.is_file())
     total = sum(p.stat().st_size for p in staging.rglob("*") if p.is_file())
     summary = {
         "schema_version": 1,
         "folder_url": folder_url,
         "manifest_files": len(items),
+        "restored_files": restored_files,
         "materialized_files": files,
         "materialized_bytes": total,
         "workers": workers,
@@ -201,6 +298,36 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError(f"unsafe path accepted: {raw!r}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        staging = root / "staging"
+        state = root / "state.json"
+        staging.mkdir()
+        items = [
+            ("https://drive.google.com/uc?id=one", Path("a.txt")),
+            ("https://drive.google.com/uc?id=two", Path("nested/b.txt")),
+        ]
+        (staging / "a.txt").write_text("ok", encoding="utf-8")
+        completed = {"a.txt"}
+        write_completed_state(state, "https://drive.google.com/drive/folders/test", items, completed)
+        restored = load_completed_state(
+            state,
+            "https://drive.google.com/drive/folders/test",
+            staging,
+            items,
+        )
+        assert restored == {"a.txt"}
+        stale_items = [
+            ("https://drive.google.com/uc?id=changed", Path("a.txt")),
+            items[1],
+        ]
+        assert load_completed_state(
+            state,
+            "https://drive.google.com/drive/folders/test",
+            staging,
+            stale_items,
+        ) == set()
     print("parallel gdown helper self-test passed")
 
 
@@ -209,6 +336,7 @@ def main() -> int:
     parser.add_argument("--python", default=sys.executable, help="Python executable containing the pinned gdown")
     parser.add_argument("--folder-url")
     parser.add_argument("--staging", type=Path)
+    parser.add_argument("--state", type=Path)
     parser.add_argument("--diagnostics", type=Path)
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--attempts", type=int, default=5)
@@ -219,8 +347,13 @@ def main() -> int:
     if args.self_test:
         self_test()
         return 0
-    if not args.folder_url or args.staging is None or args.diagnostics is None:
-        parser.error("--folder-url, --staging and --diagnostics are required")
+    if (
+        not args.folder_url
+        or args.staging is None
+        or args.state is None
+        or args.diagnostics is None
+    ):
+        parser.error("--folder-url, --staging, --state and --diagnostics are required")
     if not 1 <= args.workers <= 8:
         parser.error("--workers must be 1..8")
     if not 1 <= args.attempts <= 10:
@@ -231,6 +364,7 @@ def main() -> int:
         args.python,
         args.folder_url,
         args.staging,
+        args.state,
         args.workers,
         args.attempts,
         args.backoff_seconds,
