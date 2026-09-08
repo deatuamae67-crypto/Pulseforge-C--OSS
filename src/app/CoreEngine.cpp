@@ -38,7 +38,7 @@ public:
             runner_.reset();
             state_ = exit_code == EXIT_SUCCESS
                 ? CoreEngineState::stopped
-                : CoreEngineStateState::failed;
+                : CoreEngineState::failed;
             return exit_code;
         } catch (...) {
             state_ = CoreEngineState::failed;
