@@ -4,7 +4,10 @@
   "name": "drive-pack-disable-sustains-legacy",
   "slug": "drive-pack-disable-sustains-legacy",
   "drive_id": "1nmrnSGijljg_u8Se9xZ9V9KItVJ1gMtx",
-  "min_files": 783,
+  "source_min_files": 783,
+  "min_files": 712,
+  "materialized_min_files": 712,
+  "materialized_min_files_basis": "The authoritative Google Drive manifest currently enumerates 712 files and materializes exactly 177125667 bytes, matching the historical byte threshold. The previous 783-file threshold is retained separately as source_min_files for provenance.",
   "min_bytes": 177125667,
   "enabled_by_default": true,
   "default_state_basis": "historical modsList=1"
