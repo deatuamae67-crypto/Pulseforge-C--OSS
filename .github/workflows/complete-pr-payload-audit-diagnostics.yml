@@ -1,0 +1,128 @@
+name: PulseForge Complete PR payload audit diagnostics
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mods/**'
+      - 'docs/complete/mods/*.json'
+      - 'docs/complete/materialization_overrides.json'
+      - 'scripts/audit_complete_mod_payload.py'
+      - 'scripts/audit_complete_mod_payload_core.py'
+      - '.github/workflows/complete-pr-payload-audit-diagnostics.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit-changed-payloads:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact PR revision with comparison history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          lfs: false
+
+      - name: Audit changed Complete payloads and preserve reports
+        id: audit
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          AUDIT_DIR: ${{ runner.temp }}/pulseforge-complete-pr-audits
+        run: |
+          set -euo pipefail
+          mkdir -p "$AUDIT_DIR"
+          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import sys
+
+          base = subprocess.check_output(
+              ['git', 'merge-base', 'HEAD', f"origin/{os.environ['BASE_REF']}"],
+              text=True,
+          ).strip()
+          changed = subprocess.check_output(
+              ['git', 'diff', '--name-only', base, 'HEAD'],
+              text=True,
+          ).splitlines()
+          mods = {
+              p.parts[1]
+              for raw in changed
+              if len((p := pathlib.PurePosixPath(raw)).parts) >= 2 and p.parts[0] == 'mods'
+          }
+          descriptors = {
+              json.loads(path.read_text(encoding='utf-8'))['name']: path
+              for path in pathlib.Path('docs/complete/mods').glob('*.json')
+          }
+          audit_dir = pathlib.Path(os.environ['AUDIT_DIR'])
+          failures = []
+          audited = 0
+
+          for name in sorted(mods, key=str.casefold):
+              root = pathlib.Path('mods') / name
+              if not root.exists():
+                  continue
+              descriptor = descriptors.get(name)
+              if descriptor is None:
+                  failures.append(f'changed Complete mod has no descriptor: {name}')
+                  continue
+              output = audit_dir / f'{descriptor.stem}.json'
+              proc = subprocess.run(
+                  [
+                      sys.executable,
+                      'scripts/audit_complete_mod_payload.py',
+                      '.',
+                      '--mod-root', str(root),
+                      '--descriptor', str(descriptor),
+                      '--output', str(output),
+                  ],
+                  check=False,
+              )
+              audited += 1
+              if proc.returncode:
+                  failures.append(f'{name}: audit exited {proc.returncode}')
+
+          status = {
+              'base': base,
+              'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'audited': audited,
+              'failures': failures,
+          }
+          (audit_dir / '_status.json').write_text(
+              json.dumps(status, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          print(json.dumps(status, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload Complete PR audit diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: complete-pr-payload-audit-${{ github.event.pull_request.number }}
+          path: ${{ runner.temp }}/pulseforge-complete-pr-audits/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce changed payload audit result
+        if: always()
+        shell: bash
+        env:
+          AUDIT_DIR: ${{ runner.temp }}/pulseforge-complete-pr-audits
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          status = json.loads((Path(os.environ['AUDIT_DIR']) / '_status.json').read_text(encoding='utf-8'))
+          if status['failures']:
+              raise SystemExit('Complete PR payload audit failed: ' + '; '.join(status['failures']))
+          print(f"Complete PR payload audits passed: {status['audited']}")
+          PY
