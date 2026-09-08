@@ -50,10 +50,13 @@ jobs:
               ['git', 'diff', '--name-only', base, 'HEAD'],
               text=True,
           ).splitlines()
+          # Only mods/<collection>/... paths identify a changed mod payload.
+          # Root-level files such as mods/modsList.txt are global catalog data.
           mods = {
               p.parts[1]
               for raw in changed
-              if len((p := pathlib.PurePosixPath(raw)).parts) >= 2 and p.parts[0] == 'mods'
+              if len((p := pathlib.PurePosixPath(raw)).parts) >= 3
+              and p.parts[0] == 'mods'
           }
           descriptors = {
               json.loads(path.read_text(encoding='utf-8'))['name']: path
