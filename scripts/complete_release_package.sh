@@ -24,12 +24,13 @@ PY
 )"
   echo "Uploading Complete candidate: $stable"
   curl --fail-with-body --silent --show-error \
+    --retry 3 --retry-all-errors --retry-delay 5 \
     -X POST \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer $GH_TOKEN" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
     -H "Content-Type: application/octet-stream" \
-    --data-binary "@$file" \
+    --upload-file "$file" \
     "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$encoded" \
     >/dev/null
 }
