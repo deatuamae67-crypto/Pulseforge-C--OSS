@@ -1,0 +1,23 @@
+This version is FINAL Update of hrk engine.
+I'm preparing on REDUX one, so please wait patient.
+
+This engine is NOT for play.
+
+Please turn off Sustains as One Note Option,
+or it may breaks whole engine.
+
+If you want to add my features in your engine,
+Please contact me before something happens.
+Because I don't like to be imitated so much.
+Credit isn't needed, but I'm glad if u did.
+Discord: hrk.exex
+X(Twitter): @Hrek_Hexex
+Bluesky: @hrekexexex.bsky.social
+
+also this build is for ME and not other people,
+so i don't add some features what i felt don't needed.
+
+CREDITS:
+	All inspiration: JS Engine (PsychEngine-NoBotplayLag)
+	Base of NoteGroup: Codename Engine
+	
