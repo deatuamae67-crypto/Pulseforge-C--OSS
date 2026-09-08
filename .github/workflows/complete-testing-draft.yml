@@ -1,27 +1,41 @@
-name: PulseForge Complete testing draft snapshot
+name: PulseForge 1.0.0 Complete compiled draft
 
 on:
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/complete-testing-draft.yml'
-      - 'scripts/update_complete_testing_draft.py'
-      - 'scripts/reconcile_complete_testing_drafts.py'
   push:
     branches: [main]
     paths:
       - 'mods/**'
+      - 'assets/**'
+      - 'include/**'
+      - 'src/**'
+      - 'platform/android/**'
+      - 'third_party/**'
+      - 'THIRD_PARTY_LICENSES/**'
+      - 'THIRD_PARTY.md'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'tools/**'
+      - 'docs/RELEASE_NOTES_1.0.0_COMPLETE.md'
       - '.github/workflows/complete-testing-draft.yml'
-      - 'scripts/update_complete_testing_draft.py'
-      - 'scripts/reconcile_complete_testing_drafts.py'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pulseforge-complete-testing-draft-${{ github.ref }}
-  cancel-in-progress: false
+  group: pulseforge-complete-compiled-draft-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPLETE_TAG: 'v1.0.0-complete'
+  RELEASE_TITLE: 'PulseForge 1.0.0 Complete'
+  PACKAGE_VERSION: '1.0.0-complete'
+  RELEASE_PART_LIMIT: '1887436800'
 
 jobs:
   validate:
@@ -34,50 +48,752 @@ jobs:
           fetch-depth: 2
           lfs: false
 
-      - name: Compile and validate testing-draft helpers
+      - name: Validate compiled Complete release contract
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/update_complete_testing_draft.py
-          python3 -m py_compile scripts/reconcile_complete_testing_drafts.py
-          python3 scripts/update_complete_testing_draft.py --validate-only
+          test -s docs/RELEASE_NOTES_1.0.0_COMPLETE.md
+          test -s docs/COMPLETE_CONTENT_1.0.0.json
+          jq -e '
+            .schema_version == 2
+            and .edition == "1.0.0-complete"
+            and .target_mod_count == 30
+          ' docs/COMPLETE_CONTENT_1.0.0.json >/dev/null
+          grep -Fq 'install(DIRECTORY assets/ DESTINATION bin/assets)' CMakeLists.txt
+          grep -Fq 'install(DIRECTORY mods/ DESTINATION bin/mods)' CMakeLists.txt
+          ! grep -Fq 'TEST-ONLY-mod-' .github/workflows/complete-testing-draft.yml
+          ! grep -Fq 'package_changed_mods' .github/workflows/complete-testing-draft.yml
+          grep -Fq 'mods/**' .github/workflows/complete-testing-draft.yml
+          grep -Fq 'CANDIDATE-${GITHUB_SHA}--' .github/workflows/complete-testing-draft.yml
+          echo 'Complete release contract: full compiled engine rebuild, no per-mod release assets.'
 
-  update-testing-draft:
+  prepare-draft:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve the single cumulative Complete draft
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          title="$RELEASE_TITLE"
+
+          mapfile -t drafts < <(
+            gh api "repos/$repo/releases?per_page=100" --paginate \
+              --jq ".[] | select(.draft == true and .name == \"$title\") | [.created_at, .id] | @tsv" \
+              | sort
+          )
+
+          if (( ${#drafts[@]} == 0 )); then
+            response="$(
+              gh api --method POST "repos/$repo/releases" \
+                -f tag_name="$COMPLETE_TAG" \
+                -f target_commitish="$GITHUB_SHA" \
+                -f name="$RELEASE_TITLE" \
+                -f body="PulseForge 1.0.0 Complete compiled candidate for $GITHUB_SHA" \
+                -F draft=true \
+                -F prerelease=false
+            )"
+            release_id="$(jq -r '.id' <<<"$response")"
+          else
+            IFS=$'\t' read -r _ release_id <<<"${drafts[0]}"
+            if (( ${#drafts[@]} > 1 )); then
+              echo "Multiple Complete drafts exist; refusing to guess which duplicate to destroy." >&2
+              printf '%s\n' "${drafts[@]}" >&2
+              exit 1
+            fi
+          fi
+
+          test -n "$release_id"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "Cumulative Complete draft: $release_id"
+
+      - name: Remove abandoned candidate uploads only
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          mapfile -t stale < <(
+            gh api "repos/$repo/releases/$RELEASE_ID/assets?per_page=100" --paginate \
+              --jq '.[] | select(.name | startswith("CANDIDATE-")) | .id'
+          )
+          for id in "${stale[@]}"; do
+            gh api --method DELETE "repos/$repo/releases/assets/$id" >/dev/null
+          done
+          echo "Removed ${#stale[@]} abandoned candidate asset(s)."
+
+  windows-x64:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [validate, prepare-draft]
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact engine source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          lfs: false
+
+      - name: Hydrate Windows build-time LFS dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git lfs install --local
+          git lfs pull --include="tools/**,third_party/**" --exclude="mods/**,assets/**"
+
+      - name: Configure and build Windows Release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --preset windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build --preset windows-release --parallel 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage compiled Windows engine without duplicated content
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'windows-stage'
+          cmake --install out/build/msvc --config Release --prefix "$stage"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binary = Join-Path $stage 'bin/pulseforge.exe'
+          if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "Missing $binary" }
+          foreach ($path in @((Join-Path $stage 'bin/assets'), (Join-Path $stage 'bin/mods'))) {
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+          }
+          "source_sha=$env:GITHUB_SHA" | Set-Content -LiteralPath (Join-Path $stage 'PULSEFORGE_SOURCE_SHA.txt') -Encoding ascii
+
+      - name: Upload compiled Windows stage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: complete-engine-stage-windows-x86_64
+          path: ${{ runner.temp }}/windows-stage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 1
+
+  linux-x86_64:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [validate, prepare-draft]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact engine source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          lfs: false
+
+      - name: Hydrate Linux build-time LFS dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          git lfs pull --include="tools/**,third_party/**" --exclude="mods/**,assets/**"
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config file \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
+
+      - name: Configure and build Linux Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset linux-release
+          cmake --build --preset linux-release --parallel 2
+
+      - name: Stage compiled Linux engine without duplicated content
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/linux-stage"
+          cmake --install out/build/linux-release --prefix "$stage"
+          test -x "$stage/bin/pulseforge"
+          ldd "$stage/bin/pulseforge" | tee "$stage/PulseForge.ldd.txt"
+          ! grep -q 'not found' "$stage/PulseForge.ldd.txt"
+          rm -rf "$stage/bin/assets" "$stage/bin/mods"
+          printf '%s\n' "$GITHUB_SHA" > "$stage/PULSEFORGE_SOURCE_SHA.txt"
+
+      - name: Upload compiled Linux stage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: complete-engine-stage-linux-x86_64
+          path: ${{ runner.temp }}/linux-stage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 1
+
+  macos:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [validate, prepare-draft]
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-26-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact engine source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          lfs: false
+
+      - name: Hydrate macOS build-time LFS dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          git lfs pull --include="tools/**,third_party/**" --exclude="mods/**,assets/**"
+
+      - name: Ensure build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v cmake >/dev/null || brew install cmake
+          command -v ninja >/dev/null || brew install ninja
+
+      - name: Configure and build macOS Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}'
+          cmake --build --preset macos-release --parallel 2
+
+      - name: Stage compiled macOS engine without duplicated content
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/macos-stage-${{ matrix.arch }}"
+          cmake --install out/build/macos-release --prefix "$stage"
+          app="$stage/PulseForge.app"
+          binary="$app/Contents/MacOS/pulseforge"
+          test -x "$binary"
+          test -f "$app/Contents/Info.plist"
+          rm -rf "$stage/bin/assets" "$stage/bin/mods"
+          rm -rf "$app/Contents/MacOS/assets"
+          codesign --deep --force --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          lipo -archs "$binary" | tee "$stage/PulseForge.arch.txt"
+          grep -qx '${{ matrix.arch }}' "$stage/PulseForge.arch.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$stage/PULSEFORGE_SOURCE_SHA.txt"
+
+      - name: Upload compiled macOS stage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: complete-engine-stage-macos-${{ matrix.arch }}
+          path: ${{ runner.temp }}/macos-stage-${{ matrix.arch }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 1
+
+  android-arm64:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [validate, prepare-draft]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact engine source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          lfs: false
+
+      - name: Hydrate Android runtime assets without hydrating the mod corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          git lfs pull --include="assets/**,third_party/**" --exclude="mods/**"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      - name: Install Android SDK, NDK and CMake
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager 'platforms;android-35' 'build-tools;36.0.0' \
+            'ndk;28.2.13676358' 'cmake;3.31.6'
+
+      - name: Build Android Release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x platform/android/gradlew
+          cd platform/android
+          ./gradlew --no-daemon --stacktrace \
+            -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android" \
+            :app:assembleRelease
+
+      - name: Align, test-sign and stage compiled Android engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/android-stage"
+          mkdir -p "$stage"
+          apk="$stage/PulseForge-v${PACKAGE_VERSION}-Android-arm64-test-signed.apk"
+          unsigned="$RUNNER_TEMP/pulseforge-android/gradle/outputs/apk/release/app-release-unsigned.apk"
+          aligned="$RUNNER_TEMP/pulseforge-complete-aligned.apk"
+          keystore="$RUNNER_TEMP/pulseforge-ci-test.jks"
+          test -f "$unsigned"
+          keytool -genkeypair -noprompt -keystore "$keystore" \
+            -storepass android -keypass android -alias pulseforge-ci \
+            -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname 'CN=PulseForge CI Test Build,OU=CI,O=PulseForge,C=PT'
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/zipalign" -P 16 -f 4 "$unsigned" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
+            --ks "$keystore" --ks-key-alias pulseforge-ci \
+            --ks-pass pass:android --key-pass pass:android \
+            --out "$apk" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk" \
+            > "$stage/PulseForge.android-signature.txt"
+          unzip -l "$apk" > "$stage/PulseForge.android-contents.txt"
+          grep -q 'lib/arm64-v8a/libmain.so' "$stage/PulseForge.android-contents.txt"
+          grep -q 'lib/arm64-v8a/libSDL3.so' "$stage/PulseForge.android-contents.txt"
+          printf '%s\n' "$GITHUB_SHA" > "$stage/PULSEFORGE_SOURCE_SHA.txt"
+
+      - name: Upload compiled Android stage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: complete-engine-stage-android-arm64
+          path: ${{ runner.temp }}/android-stage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 1
+
+  package-complete:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - prepare-draft
+      - windows-x64
+      - linux-x86_64
+      - macos
+      - android-arm64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_ID: ${{ needs.prepare-draft.outputs.release_id }}
+    steps:
+      - name: Checkout exact Complete source without eager LFS hydration
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          lfs: false
+
+      - name: Reclaim packaging disk and hydrate the full Complete tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git-lfs libarchive-tools
+          git lfs install --local
+          git lfs pull --include="assets/**,mods/**" --exclude=""
+          python3 - <<'PY'
+          from pathlib import Path
+          roots = [Path('assets'), Path('mods')]
+          pointer = b'version https://git-lfs.github.com/spec/v1\n'
+          for root in roots:
+              if not root.exists():
+                  raise SystemExit(f'missing Complete root: {root}')
+              for path in root.rglob('*'):
+                  if path.is_file() and path.read_bytes()[:80].startswith(pointer):
+                      raise SystemExit(f'unhydrated LFS pointer: {path}')
+          if not Path('mods/modsList.txt').is_file():
+              raise SystemExit('missing mods/modsList.txt')
+          print('All Complete assets/mods are hydrated.')
+          PY
+          df -h
+
+      - name: Download the compiled platform stages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v7
+        with:
+          pattern: complete-engine-stage-*
+          path: ${{ runner.temp }}/compiled
+          merge-multiple: false
+
+      - name: Define release upload helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/pulseforge-release-helpers.sh" <<'BASH'
+          set -euo pipefail
+
+          upload_candidate() {
+            local file="$1"
+            local stable
+            stable="$(basename "$file")"
+            local candidate="CANDIDATE-${GITHUB_SHA}--${stable}"
+            local encoded
+            encoded="$(python3 - "$candidate" <<'PY'
+          import sys, urllib.parse
+          print(urllib.parse.quote(sys.argv[1], safe=''))
+          PY
+          )"
+            echo "Uploading Complete candidate: $stable"
+            curl --fail-with-body --silent --show-error \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$file" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$encoded" \
+              >/dev/null
+          }
+
+          checksum_and_upload_parts() {
+            local output_dir="$1"
+            local checksum_name="$2"
+            shift 2
+            local files=("$@")
+            (( ${#files[@]} >= 1 ))
+            local checksums="$output_dir/$checksum_name"
+            : > "$checksums"
+            for file in "${files[@]}"; do
+              local size
+              size="$(stat -c '%s' "$file")"
+              (( size < 2147483648 )) || {
+                echo "release asset exceeds GitHub 2 GiB limit: $file ($size bytes)" >&2
+                exit 1
+              }
+              (cd "$output_dir" && sha256sum "$(basename "$file")") >> "$checksums"
+              upload_candidate "$file"
+              rm -f "$file"
+            done
+            upload_candidate "$checksums"
+            rm -f "$checksums"
+          }
+          BASH
+
+      - name: Package and upload full Windows Complete distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/pulseforge-release-helpers.sh"
+          package="PulseForge-v${PACKAGE_VERSION}-Windows-x86_64"
+          root="$RUNNER_TEMP/package-windows"
+          out="$RUNNER_TEMP/release-windows"
+          rm -rf "$root" "$out"
+          mkdir -p "$root/$package/bin" "$out"
+          cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-windows-x86_64/." "$root/$package/"
+          rm -rf "$root/$package/bin/assets" "$root/$package/bin/mods"
+          ln -s "$GITHUB_WORKSPACE/assets" "$root/$package/bin/assets"
+          ln -s "$GITHUB_WORKSPACE/mods" "$root/$package/bin/mods"
+          test -f "$root/$package/bin/pulseforge.exe"
+          test -f "$root/$package/bin/mods/modsList.txt"
+          bsdtar -L --format zip -cf - -C "$root" "$package" \
+            | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.zip.part-"
+          mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.zip.part-*" -print | sort)
+          checksum_and_upload_parts "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
+          rm -rf "$root"
+
+      - name: Package and upload full Linux Complete distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/pulseforge-release-helpers.sh"
+          package="PulseForge-v${PACKAGE_VERSION}-Linux-x86_64"
+          root="$RUNNER_TEMP/package-linux"
+          out="$RUNNER_TEMP/release-linux"
+          rm -rf "$root" "$out"
+          mkdir -p "$root/$package/bin" "$out"
+          cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-linux-x86_64/." "$root/$package/"
+          rm -rf "$root/$package/bin/assets" "$root/$package/bin/mods"
+          ln -s "$GITHUB_WORKSPACE/assets" "$root/$package/bin/assets"
+          ln -s "$GITHUB_WORKSPACE/mods" "$root/$package/bin/mods"
+          test -x "$root/$package/bin/pulseforge"
+          test -f "$root/$package/bin/mods/modsList.txt"
+          tar --dereference -C "$root" -cf - "$package" \
+            | gzip -1 \
+            | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.tar.gz.part-"
+          mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.tar.gz.part-*" -print | sort)
+          checksum_and_upload_parts "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
+          rm -rf "$root"
+
+      - name: Package and upload full macOS arm64 Complete distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/pulseforge-release-helpers.sh"
+          package="PulseForge-v${PACKAGE_VERSION}-macOS-arm64"
+          root="$RUNNER_TEMP/package-macos-arm64"
+          out="$RUNNER_TEMP/release-macos-arm64"
+          rm -rf "$root" "$out"
+          mkdir -p "$root/$package/bin" "$out"
+          cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-macos-arm64/." "$root/$package/"
+          rm -rf "$root/$package/bin/assets" "$root/$package/bin/mods"
+          ln -s "$GITHUB_WORKSPACE/assets" "$root/$package/bin/assets"
+          ln -s "$GITHUB_WORKSPACE/mods" "$root/$package/bin/mods"
+          app="$root/$package/PulseForge.app"
+          rm -rf "$app/Contents/MacOS/assets"
+          ln -s "$GITHUB_WORKSPACE/assets" "$app/Contents/MacOS/assets"
+          test -x "$app/Contents/MacOS/pulseforge"
+          test -f "$root/$package/bin/mods/modsList.txt"
+          tar --dereference -C "$root" -cf - "$package" \
+            | gzip -1 \
+            | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.tar.gz.part-"
+          mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.tar.gz.part-*" -print | sort)
+          checksum_and_upload_parts "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
+          rm -rf "$root"
+
+      - name: Package and upload full macOS x86_64 Complete distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/pulseforge-release-helpers.sh"
+          package="PulseForge-v${PACKAGE_VERSION}-macOS-x86_64"
+          root="$RUNNER_TEMP/package-macos-x86_64"
+          out="$RUNNER_TEMP/release-macos-x86_64"
+          rm -rf "$root" "$out"
+          mkdir -p "$root/$package/bin" "$out"
+          cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-macos-x86_64/." "$root/$package/"
+          rm -rf "$root/$package/bin/assets" "$root/$package/bin/mods"
+          ln -s "$GITHUB_WORKSPACE/assets" "$root/$package/bin/assets"
+          ln -s "$GITHUB_WORKSPACE/mods" "$root/$package/bin/mods"
+          app="$root/$package/PulseForge.app"
+          rm -rf "$app/Contents/MacOS/assets"
+          ln -s "$GITHUB_WORKSPACE/assets" "$app/Contents/MacOS/assets"
+          test -x "$app/Contents/MacOS/pulseforge"
+          test -f "$root/$package/bin/mods/modsList.txt"
+          tar --dereference -C "$root" -cf - "$package" \
+            | gzip -1 \
+            | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.tar.gz.part-"
+          mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.tar.gz.part-*" -print | sort)
+          checksum_and_upload_parts "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
+          rm -rf "$root"
+
+      - name: Package and upload full Android arm64 Complete distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/pulseforge-release-helpers.sh"
+          package="PulseForge-v${PACKAGE_VERSION}-Android-arm64"
+          root="$RUNNER_TEMP/package-android"
+          out="$RUNNER_TEMP/release-android"
+          rm -rf "$root" "$out"
+          mkdir -p "$root/$package" "$out"
+          cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-android-arm64/." "$root/$package/"
+          ln -s "$GITHUB_WORKSPACE/mods" "$root/$package/mods"
+
+          cat > "$root/$package/install-with-adb.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          apk="$(find "$here" -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$apk"
+          adb install -r "$apk"
+          adb shell mkdir -p /sdcard/Android/data/org.pulseforge.engine/files/mods
+          adb push "$here/mods/." /sdcard/Android/data/org.pulseforge.engine/files/mods/
+          echo 'PulseForge Complete installed with the bundled mod tree.'
+          SH
+          chmod +x "$root/$package/install-with-adb.sh"
+
+          cat > "$root/$package/install-with-adb.ps1" <<'PS1'
+          $ErrorActionPreference = 'Stop'
+          $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
+          $Apk = Get-ChildItem -LiteralPath $Here -Filter '*.apk' -File | Select-Object -First 1
+          if ($null -eq $Apk) { throw 'PulseForge APK not found.' }
+          & adb install -r $Apk.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & adb shell mkdir -p /sdcard/Android/data/org.pulseforge.engine/files/mods
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & adb push (Join-Path $Here 'mods/.') /sdcard/Android/data/org.pulseforge.engine/files/mods/
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host 'PulseForge Complete installed with the bundled mod tree.'
+          PS1
+
+          cat > "$root/$package/README-INSTALL.txt" <<EOF
+          PulseForge 1.0.0 Complete
+          Source commit: $GITHUB_SHA
+
+          This is one Complete Android distribution: the compiled/test-signed APK
+          and the same cumulative built-in mods tree used by the desktop packages.
+
+          Use install-with-adb.sh or install-with-adb.ps1 with Android platform-tools.
+          EOF
+
+          test -f "$root/$package/mods/modsList.txt"
+          tar --dereference -C "$root" -cf - "$package" \
+            | gzip -1 \
+            | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.tar.gz.part-"
+          mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.tar.gz.part-*" -print | sort)
+          checksum_and_upload_parts "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
+          rm -rf "$root"
+
+  finalize-draft:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [prepare-draft, package-complete]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      BEFORE_SHA: ${{ github.event.before }}
+      RELEASE_ID: ${{ needs.prepare-draft.outputs.release_id }}
     steps:
-      - name: Checkout exact merged source without eager LFS hydration
+      - name: Checkout release notes from the exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 2
+          fetch-depth: 1
           lfs: false
 
-      - name: Install Git LFS
+      - name: Verify candidate set before replacing the current compiled draft
         shell: bash
         run: |
           set -euo pipefail
-          command -v git-lfs >/dev/null 2>&1 || {
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends git-lfs
-          }
-          git lfs install --local
+          repo="$GITHUB_REPOSITORY"
+          prefix="CANDIDATE-${GITHUB_SHA}--"
+          names="$RUNNER_TEMP/candidate-names.txt"
+          gh api "repos/$repo/releases/$RELEASE_ID/assets?per_page=100" --paginate \
+            --jq ".[] | select(.name | startswith(\"$prefix\")) | .name" \
+            | sed "s/^$prefix//" | sort > "$names"
 
-      - name: Reconcile one cumulative Complete draft
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 scripts/reconcile_complete_testing_drafts.py
+          for platform in \
+            Windows-x86_64 \
+            Linux-x86_64 \
+            macOS-arm64 \
+            macOS-x86_64 \
+            Android-arm64
+          do
+            grep -Fxq "PulseForge-v${PACKAGE_VERSION}-${platform}.SHA256SUMS.txt" "$names"
+            grep -Eq "^PulseForge-v${PACKAGE_VERSION}-${platform}.*\\.part-[0-9]{3}$" "$names"
+          done
 
-      - name: Update cumulative Complete testing tag, draft and content snapshot
+          ! grep -Fq 'TEST-ONLY' "$names"
+          ! grep -Fq -- '-mod-' "$names"
+          echo "Verified candidate assets for all five full compiled platform distributions."
+
+      - name: Atomically promote the new compiled Complete candidate
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/update_complete_testing_draft.py --update --before "$BEFORE_SHA"
+          repo="$GITHUB_REPOSITORY"
+          prefix="CANDIDATE-${GITHUB_SHA}--"
+
+          mapfile -t old_ids < <(
+            gh api "repos/$repo/releases/$RELEASE_ID/assets?per_page=100" --paginate \
+              --jq ".[] | select(.name | startswith(\"$prefix\") | not) | .id"
+          )
+          for id in "${old_ids[@]}"; do
+            gh api --method DELETE "repos/$repo/releases/assets/$id" >/dev/null
+          done
+
+          gh api "repos/$repo/releases/$RELEASE_ID/assets?per_page=100" --paginate \
+            --jq ".[] | select(.name | startswith(\"$prefix\")) | [.id, .name] | @tsv" \
+            > "$RUNNER_TEMP/candidates.tsv"
+
+          while IFS=$'\t' read -r id name; do
+            stable="${name#"$prefix"}"
+            gh api --method PATCH "repos/$repo/releases/assets/$id" -f name="$stable" >/dev/null
+          done < "$RUNNER_TEMP/candidates.tsv"
+
+          if gh api "repos/$repo/git/ref/tags/$COMPLETE_TAG" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/$repo/git/refs/tags/$COMPLETE_TAG" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/$repo/git/refs" \
+              -f ref="refs/tags/$COMPLETE_TAG" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+          body="$(
+            cat docs/RELEASE_NOTES_1.0.0_COMPLETE.md
+            cat <<EOF
+
+          ---
+
+          **Compiled Complete snapshot:** \`$GITHUB_SHA\`
+
+          Every platform package in this draft was rebuilt from this exact commit.
+          Each distribution contains the cumulative Complete content present in the
+          engine tree at that commit. There are no per-mod release assets.
+
+          Platform archives are split only when needed to remain below GitHub's
+          per-asset upload limit; the accompanying SHA256SUMS file authenticates
+          every part.
+          EOF
+          )"
+
+          gh api --method PATCH "repos/$repo/releases/$RELEASE_ID" \
+            -f tag_name="$COMPLETE_TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="$RELEASE_TITLE" \
+            -f body="$body" \
+            -F draft=true \
+            -F prerelease=false >/dev/null
+
+      - name: Verify the cumulative Complete draft and tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          test "$(gh api "repos/$repo/releases/$RELEASE_ID" --jq '.draft')" = 'true'
+          test "$(gh api "repos/$repo/releases/$RELEASE_ID" --jq '.target_commitish')" = "$GITHUB_SHA"
+          test "$(gh api "repos/$repo/releases/$RELEASE_ID" --jq '.tag_name')" = "$COMPLETE_TAG"
+          test "$(gh api "repos/$repo/git/ref/tags/$COMPLETE_TAG" --jq '.object.sha')" = "$GITHUB_SHA"
+
+          assets="$RUNNER_TEMP/final-assets.txt"
+          gh api "repos/$repo/releases/$RELEASE_ID/assets?per_page=100" --paginate --jq '.[].name' | sort > "$assets"
+          ! grep -Fq 'CANDIDATE-' "$assets"
+          ! grep -Fq 'TEST-ONLY' "$assets"
+          ! grep -Fq -- '-mod-' "$assets"
+
+          for platform in \
+            Windows-x86_64 \
+            Linux-x86_64 \
+            macOS-arm64 \
+            macOS-x86_64 \
+            Android-arm64
+          do
+            grep -Fxq "PulseForge-v${PACKAGE_VERSION}-${platform}.SHA256SUMS.txt" "$assets"
+            grep -Eq "^PulseForge-v${PACKAGE_VERSION}-${platform}.*\\.part-[0-9]{3}$" "$assets"
+          done
+
+          printf 'PulseForge Complete draft now represents compiled engine commit %s\n' "$GITHUB_SHA"
