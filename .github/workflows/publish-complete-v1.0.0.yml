@@ -1,0 +1,95 @@
+name: Publish PulseForge 1.0.0 Complete
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-complete-v1.0.0.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: publish-pulseforge-v1.0.0-complete
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_ID: '383421802'
+      COMPLETE_RUN_ID: '34287599425'
+      COMPLETE_TAG: 'v1.0.0-complete'
+      COMPLETE_SOURCE_SHA: '85ea717ae87a0a1d058cf7cb3b00c04ca13914ac'
+      RELEASE_TITLE: 'PulseForge 1.0.0 Complete'
+    steps:
+      - name: Verify green Complete build, tag and release assets
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPLETE_RUN_ID")"
+          test "$(jq -r '.status' <<<"$run_json")" = 'completed'
+          test "$(jq -r '.conclusion' <<<"$run_json")" = 'success'
+          test "$(jq -r '.head_sha' <<<"$run_json")" = "$COMPLETE_SOURCE_SHA"
+          test "$(jq -r '.event' <<<"$run_json")" = 'push'
+
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$COMPLETE_TAG" --jq '.object.sha')"
+          test "$tag_sha" = "$COMPLETE_SOURCE_SHA"
+
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          test "$(jq -r '.tag_name' <<<"$release_json")" = "$COMPLETE_TAG"
+          test "$(jq -r '.target_commitish' <<<"$release_json")" = "$COMPLETE_SOURCE_SHA"
+          test "$(jq -r '.name' <<<"$release_json")" = "$RELEASE_TITLE"
+          test "$(jq -r '.prerelease' <<<"$release_json")" = 'false'
+
+          names="$RUNNER_TEMP/complete-release-assets.txt"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --paginate --jq '.[].name' | sort > "$names"
+
+          ! grep -Fq 'CANDIDATE-' "$names"
+          ! grep -Fq 'STAGE-' "$names"
+          ! grep -Fq 'TEST-ONLY' "$names"
+          ! grep -Fq -- '-mod-' "$names"
+
+          for platform in Windows-x86_64 Linux-x86_64 macOS-arm64 macOS-x86_64 Android-arm64; do
+            grep -Fxq "PulseForge-v1.0.0-complete-${platform}.SHA256SUMS.txt" "$names"
+            grep -Eq "^PulseForge-v1\.0\.0-complete-${platform}.*\.part-[0-9]{3}$" "$names"
+          done
+
+          draft="$(jq -r '.draft' <<<"$release_json")"
+          published_at="$(jq -r '.published_at // empty' <<<"$release_json")"
+          if [[ "$draft" == 'false' ]]; then
+            test -n "$published_at"
+            echo 'already_public=true' >> "$GITHUB_OUTPUT"
+          else
+            test "$draft" = 'true'
+            test -z "$published_at"
+            echo 'already_public=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish verified Complete release
+        if: steps.verify.outputs.already_public != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false \
+            -F prerelease=false \
+            >/dev/null
+
+      - name: Verify public release points to verified engine commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")"
+          test "$(jq -r '.draft' <<<"$release_json")" = 'false'
+          test "$(jq -r '.prerelease' <<<"$release_json")" = 'false'
+          test "$(jq -r '.tag_name' <<<"$release_json")" = "$COMPLETE_TAG"
+          test "$(jq -r '.target_commitish' <<<"$release_json")" = "$COMPLETE_SOURCE_SHA"
+          test -n "$(jq -r '.published_at // empty' <<<"$release_json")"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$COMPLETE_TAG" --jq '.object.sha')" = "$COMPLETE_SOURCE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.html_url'
