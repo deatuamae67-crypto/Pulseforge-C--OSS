@@ -1,7 +1,7 @@
 #include "pulseforge/CoreEngine.h"
 
 #include "application_runner.hpp"
-#include "complete_content_runtime.hpp"
+#include "complete_content_gate.hpp"
 
 #include <cstdlib>
 #include <stdexcept>
@@ -12,11 +12,7 @@ namespace pulseforge {
 class CoreEngine::Impl final {
 public:
     explicit Impl(AppLaunchOptions options)
-        : runner_(detail::make_application(std::move(options))) {
-        if (runner_ == nullptr) {
-            throw std::runtime_error("failed to create the application runtime");
-        }
-    }
+        : options_(std::move(options)) {}
 
     [[nodiscard]] int run() {
         if (state_ != CoreEngineState::ready) {
@@ -25,6 +21,15 @@ public:
 
         state_ = CoreEngineState::running;
         try {
+            // Complete releases may ship a lightweight Drive manifest instead
+            // of embedding the heavy mod corpus. The gate is optional and
+            // fail-open; ordinary OSS/dev builds without that manifest follow
+            // the exact previous startup path.
+            detail::run_complete_content_gate(options_);
+            runner_ = detail::make_application(std::move(options_));
+            if (runner_ == nullptr) {
+                throw std::runtime_error("failed to create the application runtime");
+            }
             const int exit_code = runner_->run();
             // Tear down window, devices, audio and Lua before returning to the
             // embedding application, rather than waiting for CoreEngine's
@@ -47,6 +52,7 @@ public:
     }
 
 private:
+    AppLaunchOptions options_;
     std::unique_ptr<detail::ApplicationRunner> runner_;
     CoreEngineState state_{CoreEngineState::ready};
 };
