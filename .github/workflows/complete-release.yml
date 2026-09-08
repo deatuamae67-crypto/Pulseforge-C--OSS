@@ -75,12 +75,21 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! -f mods/modsList.txt ]]; then
-            echo 'Built-in content has not been materialized on this branch yet; definition-only validation passed.'
+            echo 'Built-in mod catalog has not been materialized on this branch yet; definition-only validation passed.'
             exit 0
           fi
 
           test ! -e mods/.autochart-staging
-          test "$(find assets/menu -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')" -eq 10
+          menu_count="$(find assets/menu -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')"
+          if [[ "$menu_count" != '0' && "$menu_count" != '10' ]]; then
+            echo "Partial Complete menu materialization is forbidden: found $menu_count/10 MP3 tracks" >&2
+            exit 1
+          fi
+          if [[ "$menu_count" == '0' ]]; then
+            echo 'Complete menu music is not materialized yet; validating the mod catalog independently.'
+          else
+            echo 'Complete menu music is fully materialized: 10/10 tracks.'
+          fi
 
           python3 - <<'PY'
           import json
