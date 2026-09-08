@@ -1,0 +1,11 @@
+{
+  "id": "user.drive.2026-08-22.vs-bambi-b-side-9k",
+  "name": "Vs Bambi B-side 9K (Drive 2026-08-22)",
+  "version": "2026.08.22",
+  "engineApi": "2",
+  "license": "LicenseRef-UserProvided",
+  "description": "User-supplied 1K-9K Kade-family chart variants and media; executable/build files excluded.",
+  "sourceArchive": "Vs Bambi B-side 9keys.zip",
+  "sourceSha256": "f61965d053c2cc9ef7df7cbf4b1a8b67b11db26658c8edd68ba6e93465cd4370",
+  "sourceUrl": "https://drive.google.com/drive/folders/1Z7aO0Fm5rS1PXkNBev_yZ3bdlWitW4ut?usp=drive_link"
+}
