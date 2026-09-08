@@ -35,6 +35,11 @@
       "materialized_min_bytes": 137192602,
       "materialized_min_bytes_basis": "The authoritative 396-file Drive source is 137,192,805 bytes. Repository text normalization during Git/LFS materialization produces a 137,192,602-byte semantic-equivalent checkout while preserving the complete 396-file payload."
     },
+    "drive-pack-disable-sustains-legacy": {
+      "source_min_bytes": 177125667,
+      "materialized_min_bytes": 177125341,
+      "materialized_min_bytes_basis": "The authoritative 712-file Drive source is 177,125,667 bytes. Repository text normalization during Git/LFS materialization produces a 177,125,341-byte semantic-equivalent checkout while preserving the complete 712-file payload."
+    },
     "drive-pack-files": {
       "source_min_bytes": 2390312362,
       "materialized_min_bytes": 2390312308,
