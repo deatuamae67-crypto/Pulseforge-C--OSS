@@ -7,6 +7,7 @@ on:
       - '.github/workflows/complete-testing-draft.yml'
       - 'scripts/update_complete_testing_draft.py'
       - 'scripts/reconcile_complete_testing_drafts.py'
+      - 'scripts/update_complete_cumulative_draft.py'
   push:
     branches: [main]
     paths:
@@ -14,6 +15,7 @@ on:
       - '.github/workflows/complete-testing-draft.yml'
       - 'scripts/update_complete_testing_draft.py'
       - 'scripts/reconcile_complete_testing_drafts.py'
+      - 'scripts/update_complete_cumulative_draft.py'
   workflow_dispatch:
 
 permissions:
@@ -40,6 +42,7 @@ jobs:
           set -euo pipefail
           python3 -m py_compile scripts/update_complete_testing_draft.py
           python3 -m py_compile scripts/reconcile_complete_testing_drafts.py
+          python3 -m py_compile scripts/update_complete_cumulative_draft.py
           python3 scripts/update_complete_testing_draft.py --validate-only
 
   update-testing-draft:
@@ -70,14 +73,8 @@ jobs:
           }
           git lfs install --local
 
-      - name: Reconcile one cumulative Complete draft
+      - name: Update one cumulative Complete draft by release ID
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/reconcile_complete_testing_drafts.py
-
-      - name: Update cumulative Complete testing tag, draft and content snapshot
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 scripts/update_complete_testing_draft.py --update --before "$BEFORE_SHA"
+          python3 scripts/update_complete_cumulative_draft.py --before "$BEFORE_SHA"
