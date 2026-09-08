@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           python3 scripts/recover_complete_mod_dependencies.py --self-test
 
-      - name: Verify embedded tree when it is present
+      - name: Verify incrementally materialized embedded tree
         shell: bash
         run: |
           set -euo pipefail
@@ -80,16 +80,85 @@ jobs:
           fi
 
           test ! -e mods/.autochart-staging
-          test "$(stat -c '%s' mods/modsList.txt)" -eq 839
           test "$(find assets/menu -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')" -eq 10
 
-          shopt -s nullglob
-          specs=(docs/complete/mods/*.json)
-          for spec in "${specs[@]}"; do
-            name="$(jq -r '.name' "$spec")"
-            test -d "mods/$name" || { echo "missing built-in collection: mods/$name" >&2; exit 1; }
-            test -n "$(find "mods/$name" -type f -print -quit)" || { echo "empty built-in collection: mods/$name" >&2; exit 1; }
-          done
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          descriptors = {}
+          for path in sorted(Path('docs/complete/mods').glob('*.json')):
+              spec = json.loads(path.read_text(encoding='utf-8'))
+              name = spec['name']
+              if name in descriptors:
+                  raise SystemExit(f'duplicate Complete descriptor name: {name}')
+              descriptors[name] = spec
+
+          target_count = json.loads(
+              Path('docs/COMPLETE_CONTENT_1.0.0.json').read_text(encoding='utf-8')
+          )['target_mod_count']
+          if len(descriptors) != target_count:
+              raise SystemExit(
+                  f'Complete descriptor count mismatch: {len(descriptors)} != {target_count}'
+              )
+
+          materialized = sorted(
+              path.name
+              for path in Path('mods').iterdir()
+              if path.is_dir() and path.name != '.autochart-staging'
+          )
+          if not materialized:
+              raise SystemExit('modsList.txt exists but no built-in mod directories are materialized')
+
+          listed = []
+          states = {}
+          for number, raw in enumerate(
+              Path('mods/modsList.txt').read_text(encoding='utf-8-sig').splitlines(),
+              start=1,
+          ):
+              line = raw.strip()
+              if not line:
+                  continue
+              if '|' not in line:
+                  raise SystemExit(f'modsList.txt:{number}: expected <folder>|<0|1>')
+              folder, state = line.rsplit('|', 1)
+              folder = folder.strip()
+              state = state.strip()
+              if not folder or state not in {'0', '1'}:
+                  raise SystemExit(f'modsList.txt:{number}: invalid entry {raw!r}')
+              if folder in states:
+                  raise SystemExit(f'modsList.txt:{number}: duplicate folder {folder!r}')
+              states[folder] = state == '1'
+              listed.append(folder)
+
+          listed_sorted = sorted(listed)
+          if listed_sorted != materialized:
+              missing = sorted(set(materialized) - set(listed))
+              extra = sorted(set(listed) - set(materialized))
+              raise SystemExit(
+                  'modsList/materialized tree mismatch; '
+                  f'missing_from_list={missing}, missing_from_tree={extra}'
+              )
+
+          for name in materialized:
+              spec = descriptors.get(name)
+              if spec is None:
+                  raise SystemExit(f'materialized mod has no Complete descriptor: {name}')
+              root = Path('mods') / name
+              if not any(path.is_file() for path in root.rglob('*')):
+                  raise SystemExit(f'empty built-in collection: {root}')
+              expected = bool(spec['enabled_by_default'])
+              if states[name] != expected:
+                  raise SystemExit(
+                      f'modsList default-state mismatch for {name}: '
+                      f'{int(states[name])} != descriptor {int(expected)}'
+                  )
+
+          print(
+              f'Validated incremental Complete tree: {len(materialized)}/{target_count} '
+              'collections materialized and catalogued.'
+          )
+          PY
 
           command -v git-lfs >/dev/null 2>&1 || {
             sudo apt-get update
@@ -100,4 +169,4 @@ jobs:
           oversized="$(git ls-tree -r -l HEAD | awk '$4 ~ /^[0-9]+$/ && $4 >= 99614720 {print $4, $5}')"
           [[ -z "$oversized" ]] || { printf 'ordinary Git blobs >=95 MiB remain:\n%s\n' "$oversized" >&2; exit 1; }
 
-          echo 'Complete source tree contains the built-in mod/menu content model.'
+          echo 'Complete source tree contains a consistent incrementally materialized mod/menu content model.'
