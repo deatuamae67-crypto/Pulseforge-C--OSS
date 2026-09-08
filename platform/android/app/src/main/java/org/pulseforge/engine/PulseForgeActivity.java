@@ -1,7 +1,13 @@
 package org.pulseforge.engine;
 
+import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 
 import org.libsdl.app.SDLActivity;
@@ -12,13 +18,16 @@ import java.io.File;
 public final class PulseForgeActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // PulseForge is a landscape-only game. SENSOR_LANDSCAPE allows the two
+        // landscape rotations (0/180 relative to one another) while refusing a
+        // 90-degree portrait surface that would make the 1280x720 renderer tiny.
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         super.onCreate(savedInstanceState);
         if (mBrokenLibraries) {
             return;
         }
 
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        applyImmersiveMode();
+        enforceGamePresentation();
         initializeDiscordSocialSdkIfPresent();
 
         final File assets = new File(getFilesDir(), "pulseforge/assets");
@@ -33,17 +42,66 @@ public final class PulseForgeActivity extends SDLActivity {
         nativeSetenv("PULSEFORGE_ASSET_ROOT", assets.getAbsolutePath());
         nativeSetenv("PULSEFORGE_MOD_ROOT", mods.getAbsolutePath());
     }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        enforceGamePresentation();
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // Android can recreate the Surface/insets while preserving this
+        // Activity. Reassert the contract immediately so SDL never receives a
+        // portrait-sized or system-bar-constrained gameplay surface.
+        enforceGamePresentation();
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            applyImmersiveMode();
+            enforceGamePresentation();
         }
     }
 
     @SuppressWarnings("deprecation")
-    private void applyImmersiveMode() {
-        getWindow().getDecorView().setSystemUiVisibility(
+    private void enforceGamePresentation() {
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+
+        final Window window = getWindow();
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                | WindowManager.LayoutParams.FLAG_FULLSCREEN
+        );
+        window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            final WindowManager.LayoutParams attributes = window.getAttributes();
+            attributes.layoutInDisplayCutoutMode =
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            window.setAttributes(attributes);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Give SDL the complete physical display surface. Letterboxing to
+            // PulseForge's 1280x720 logical space is then performed exactly once
+            // by SDL instead of once by Android and again by the engine.
+            window.setDecorFitsSystemWindows(false);
+            final WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                controller.hide(
+                    WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars()
+                );
+                controller.setSystemBarsBehavior(
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                );
+            }
+            return;
+        }
+
+        window.getDecorView().setSystemUiVisibility(
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                 | View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
@@ -84,5 +142,4 @@ public final class PulseForgeActivity extends SDLActivity {
     public boolean eraseDiscordRefreshToken(String applicationId) {
         return DiscordCredentialStore.erase(this, applicationId);
     }
-
 }
