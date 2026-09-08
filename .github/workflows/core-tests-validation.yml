@@ -40,6 +40,11 @@ jobs:
           ref: ${{ env.SOURCE_REF }}
           fetch-depth: 1
 
+      - name: Validate Complete Drive runtime manifest generator
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 scripts/generate_complete_drive_runtime_manifest.py --self-test
+
       - name: Configure deterministic core tests
         if: runner.os != 'Windows'
         shell: bash
