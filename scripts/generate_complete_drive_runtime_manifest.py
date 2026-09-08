@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate the lightweight PulseForge Complete runtime download manifest.
 
-The heavy mod corpus stays in Google Drive.  This script asks gdown only for
-folder metadata (JSON paths + resolved HTTPS download URLs); it never downloads
-mod payload bytes.  The resulting manifest can therefore be embedded in every
+The heavy mod corpus stays in Google Drive. This script asks gdown only for
+folder metadata (JSON paths + stable Drive download URLs); it never downloads
+mod payload bytes. The resulting manifest can therefore be embedded in every
 platform runtime without duplicating the Complete corpus in Git/LFS or release
 packages.
 """
@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTORS = ROOT / "docs" / "complete" / "mods"
+SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+DRIVE_URL_PREFIXES = (
+    "https://drive.google.com/",
+    "https://drive.usercontent.google.com/",
+)
 
 
 def safe_relative_path(raw: object) -> PurePosixPath:
@@ -60,8 +66,8 @@ def enumerate_folder(python: str, drive_id: str) -> list[dict[str, str]]:
         if not isinstance(entry, dict):
             raise RuntimeError(f"invalid gdown manifest entry: {entry!r}")
         url = entry.get("url")
-        if not isinstance(url, str) or not url.startswith("https://"):
-            raise RuntimeError(f"invalid gdown manifest URL: {url!r}")
+        if not isinstance(url, str) or not url.startswith(DRIVE_URL_PREFIXES):
+            raise RuntimeError(f"invalid/non-Drive gdown manifest URL: {url!r}")
         path = safe_relative_path(entry.get("path")).as_posix()
         folded_path = path.casefold()
         if path in exact:
@@ -91,6 +97,8 @@ def load_descriptors(directory: Path) -> list[dict[str, Any]]:
         enabled = payload["enabled_by_default"]
         if not all(isinstance(value, str) and value for value in (slug, name, drive_id)):
             raise RuntimeError(f"descriptor {path.name} has invalid identity fields")
+        if not SLUG_RE.fullmatch(slug) or len(slug) > 96:
+            raise RuntimeError(f"descriptor {path.name} has a non-portable slug")
         if not isinstance(enabled, bool):
             raise RuntimeError(f"descriptor {path.name} has invalid enabled_by_default")
         descriptors.append(payload)
@@ -102,8 +110,8 @@ def load_descriptors(directory: Path) -> list[dict[str, Any]]:
     return descriptors
 
 
-def compute_revision(mods: list[dict[str, Any]]) -> str:
-    canonical = json.dumps(mods, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+def compute_revision(value: Any) -> str:
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -126,17 +134,16 @@ def build_manifest(
             raise RuntimeError(
                 f"{slug}: Drive manifest has {len(files)} files, expected >= {minimum_files}"
             )
-        mods.append(
-            {
-                "slug": slug,
-                "name": descriptor["name"],
-                "drive_id": descriptor["drive_id"],
-                "enabled_by_default": descriptor["enabled_by_default"],
-                "expected_min_files": minimum_files,
-                "expected_min_bytes": int(descriptor.get("min_bytes", 0)),
-                "files": files,
-            }
-        )
+        revision_basis = {
+            "slug": slug,
+            "name": descriptor["name"],
+            "drive_id": descriptor["drive_id"],
+            "enabled_by_default": descriptor["enabled_by_default"],
+            "expected_min_files": minimum_files,
+            "expected_min_bytes": int(descriptor.get("min_bytes", 0)),
+            "files": files,
+        }
+        mods.append({**revision_basis, "revision": compute_revision(revision_basis)})
     revision = compute_revision(mods)
     return {
         "schema_version": 1,
@@ -161,11 +168,13 @@ def self_test() -> None:
         else:
             raise AssertionError(f"unsafe path accepted: {bad!r}")
 
-    first = [{"slug": "a", "files": [{"path": "x", "url": "https://example/x"}]}]
-    second = [{"slug": "a", "files": [{"path": "x", "url": "https://example/x"}]}]
+    first = {"slug": "a", "files": [{"path": "x", "url": "https://drive.google.com/uc?id=x"}]}
+    second = json.loads(json.dumps(first))
     assert compute_revision(first) == compute_revision(second)
-    second[0]["files"][0]["path"] = "y"
+    second["files"][0]["path"] = "y"
     assert compute_revision(first) != compute_revision(second)
+    assert SLUG_RE.fullmatch("drive-pack-example-9k")
+    assert not SLUG_RE.fullmatch("Bad Slug")
 
     with tempfile.TemporaryDirectory() as raw:
         root = Path(raw)

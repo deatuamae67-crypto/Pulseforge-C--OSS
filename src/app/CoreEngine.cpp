@@ -1,6 +1,7 @@
 #include "pulseforge/CoreEngine.h"
 
 #include "application_runner.hpp"
+#include "complete_content_runtime.hpp"
 
 #include <cstdlib>
 #include <stdexcept>
