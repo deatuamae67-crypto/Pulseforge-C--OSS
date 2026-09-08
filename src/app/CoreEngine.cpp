@@ -1,7 +1,7 @@
 #include "pulseforge/CoreEngine.h"
 
 #include "application_runner.hpp"
-#include "complete_content_gate.hpp"
+#include "complete_content_sdl3_compat.hpp"
 
 #include <cstdlib>
 #include <stdexcept>
@@ -38,7 +38,7 @@ public:
             runner_.reset();
             state_ = exit_code == EXIT_SUCCESS
                 ? CoreEngineState::stopped
-                : CoreEngineState::failed;
+                : CoreEngineStateState::failed;
             return exit_code;
         } catch (...) {
             state_ = CoreEngineState::failed;
