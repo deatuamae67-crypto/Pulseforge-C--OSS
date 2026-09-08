@@ -14,7 +14,10 @@
 namespace pulseforge::detail::complete_sdl3_compat {
 
 #if !defined(_WIN32) && !defined(__ANDROID__)
-[[nodiscard]] inline void* load_function(void* const object, const char* const name) {
+[[nodiscard]] inline SDL_FunctionPointer load_function(
+    void* const object,
+    const char* const name
+) {
     return SDL_LoadFunction(static_cast<SDL_SharedObject*>(object), name);
 }
 
