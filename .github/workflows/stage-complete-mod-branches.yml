@@ -82,9 +82,10 @@ jobs:
               names.add(name.casefold()); slugs.add(slug)
               descriptors.append({'slug':slug,'name':name,'min_files':min_files,'min_bytes':min_bytes})
           if len(descriptors)!=30: raise SystemExit(f'expected 30 built-in mod descriptors, found {len(descriptors)}')
-          specs=[x for x in descriptors if not (pathlib.Path('mods')/x['name']).exists()]
-          specs.sort(key=lambda x:(x['min_bytes'],x['min_files'],x['slug']))
-          print(f'Complete mods remaining to stage: {len(specs)}', file=sys.stderr)
+          remaining=[x for x in descriptors if not (pathlib.Path('mods')/x['name']).exists()]
+          remaining.sort(key=lambda x:(x['min_bytes'],x['min_files'],x['slug']))
+          specs=remaining[:2]
+          print(f'Complete mods remaining to stage: {len(remaining)}; current batch: {len(specs)}', file=sys.stderr)
           for item in specs: print(f" - {item['slug']}: >= {item['min_files']} files, >= {item['min_bytes']} bytes", file=sys.stderr)
           print('matrix='+json.dumps({'include':[{'slug':x['slug']} for x in specs]},separators=(',',':')))
           PY
@@ -176,6 +177,16 @@ jobs:
           git checkout -B "$branch" "$GITHUB_SHA"; git reset --hard "$GITHUB_SHA"
           printf 'name=%s\ndrive_id=%s\nmin_files=%s\nmin_bytes=%s\ndescriptor=%s\ntarget=%s\nbranch=%s\nold=%s\n' "$name" "$drive_id" "$min_files" "$min_bytes" "$descriptor" "$target" "$branch" "$old" >> "$GITHUB_OUTPUT"
 
+      - name: Restore partial Drive staging cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/mod-${{ matrix.slug }}
+            ${{ runner.temp }}/gdown-state-${{ matrix.slug }}
+          key: complete-drive-stage-v1-${{ matrix.slug }}-${{ steps.mod.outputs.drive_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            complete-drive-stage-v1-${{ matrix.slug }}-${{ steps.mod.outputs.drive_id }}-
+
       - name: Download authoritative Drive candidate in bounded parallel
         id: source_download
         continue-on-error: true
@@ -185,16 +196,28 @@ jobs:
         run: |
           set -euo pipefail
           staging="$RUNNER_TEMP/mod-$ITEM_SLUG"
+          state="$RUNNER_TEMP/gdown-state-$ITEM_SLUG/completed.json"
           diagnostics="$RUNNER_TEMP/gdown-$ITEM_SLUG"
-          rm -rf "$staging" "$diagnostics"
+          rm -rf "$diagnostics"
+          mkdir -p "$(dirname "$state")"
           python3 scripts/download_gdrive_folder_parallel.py \
             --python "$RUNNER_TEMP/pulseforge-gdown/bin/python" \
             --folder-url "https://drive.google.com/drive/folders/$DRIVE_ID" \
             --staging "$staging" \
+            --state "$state" \
             --diagnostics "$diagnostics" \
             --workers 3 \
-            --attempts 5 \
+            --attempts 1 \
             --backoff-seconds 20
+
+      - name: Save partial Drive staging cache
+        if: steps.source_download.outcome == 'failure'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/mod-${{ matrix.slug }}
+            ${{ runner.temp }}/gdown-state-${{ matrix.slug }}
+          key: complete-drive-stage-v1-${{ matrix.slug }}-${{ steps.mod.outputs.drive_id }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Report upstream candidate unavailable
         if: steps.source_download.outcome == 'failure'
@@ -202,7 +225,8 @@ jobs:
         env:
           NAME: ${{ steps.mod.outputs.name }}
           DRIVE_ID: ${{ steps.mod.outputs.drive_id }}
-        run: echo "::warning title=Authoritative candidate unavailable::$ITEM_SLUG ($NAME) failed from Drive folder $DRIVE_ID; see uploaded diagnostics."
+        run: |
+          echo "::warning title=Authoritative candidate unavailable::$ITEM_SLUG ($NAME) stopped after a bounded Drive pass; completed files were cached for the next fresh runner. Folder: $DRIVE_ID."
 
       - name: Validate and materialize source mod
         if: steps.source_download.outcome == 'success'
@@ -262,7 +286,7 @@ jobs:
         if: steps.source_download.outcome == 'failure'
         shell: bash
         run: |
-          echo "$ITEM_SLUG: authoritative Drive candidate was unavailable after all retries" >&2
+          echo "$ITEM_SLUG: Drive pass incomplete; partial progress was cached for rerun on a fresh runner" >&2
           exit 1
 
       - name: Commit and publish this mod branch
