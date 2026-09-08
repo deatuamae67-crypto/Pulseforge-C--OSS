@@ -6,12 +6,14 @@ on:
     paths:
       - '.github/workflows/complete-testing-draft.yml'
       - 'scripts/update_complete_testing_draft.py'
+      - 'scripts/reconcile_complete_testing_drafts.py'
   push:
     branches: [main]
     paths:
       - 'mods/**'
       - '.github/workflows/complete-testing-draft.yml'
       - 'scripts/update_complete_testing_draft.py'
+      - 'scripts/reconcile_complete_testing_drafts.py'
   workflow_dispatch:
 
 permissions:
@@ -32,11 +34,12 @@ jobs:
           fetch-depth: 2
           lfs: false
 
-      - name: Compile and validate testing-draft helper
+      - name: Compile and validate testing-draft helpers
         shell: bash
         run: |
           set -euo pipefail
           python3 -m py_compile scripts/update_complete_testing_draft.py
+          python3 -m py_compile scripts/reconcile_complete_testing_drafts.py
           python3 scripts/update_complete_testing_draft.py --validate-only
 
   update-testing-draft:
@@ -67,7 +70,13 @@ jobs:
           }
           git lfs install --local
 
-      - name: Update private Complete testing tag, draft and mod overlays
+      - name: Reconcile one cumulative Complete draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/reconcile_complete_testing_drafts.py
+
+      - name: Update cumulative Complete testing tag, draft and content snapshot
         shell: bash
         run: |
           set -euo pipefail
