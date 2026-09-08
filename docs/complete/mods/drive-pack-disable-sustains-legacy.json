@@ -4,7 +4,7 @@
   "name": "drive-pack-disable-sustains-legacy",
   "slug": "drive-pack-disable-sustains-legacy",
   "drive_id": "1nmrnSGijljg_u8Se9xZ9V9KItVJ1gMtx",
-  "min_files": 783,
+  "min_files": 712,
   "min_bytes": 177125667,
   "enabled_by_default": true,
   "default_state_basis": "historical modsList=1"
