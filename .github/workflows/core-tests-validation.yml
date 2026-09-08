@@ -45,6 +45,11 @@ jobs:
         shell: bash
         run: python3 scripts/generate_complete_drive_runtime_manifest.py --self-test
 
+      - name: Validate Complete runtime transport source invariants
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 scripts/complete_runtime_transport_selftest.py
+
       - name: Configure deterministic core tests
         if: runner.os != 'Windows'
         shell: bash
