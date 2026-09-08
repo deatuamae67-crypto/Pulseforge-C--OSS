@@ -4,9 +4,10 @@
 Keeps the v4 runtime/archival implementation intact while making static-archive
 PR validation aware of canonical, unhydrated Git LFS JSON pointers. Runtime
 structural auditing remains fail-closed; v4 may explicitly record incomplete
-chart/audio counterparts as non-blocking source gaps for later restoration.
-Known legacy stage labels may likewise be retained as warnings when the runtime
-can safely fall back instead of treating them as missing custom content.
+chart/audio counterparts and source-native Psych metadata as non-blocking gaps
+without inventing same-named Lua dependencies. Known legacy stage labels may
+likewise be retained as warnings when the runtime can safely fall back instead
+of treating them as missing custom content.
 """
 from __future__ import annotations
 

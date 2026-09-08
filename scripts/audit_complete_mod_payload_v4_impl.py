@@ -11,6 +11,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -20,6 +21,15 @@ if _SPEC is None or _SPEC.loader is None:
     raise RuntimeError("cannot load Complete payload audit core")
 core = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(core)
+
+# These are Psych source-format events with engine/stage semantics. Their
+# presence in a chart does not imply that a same-named custom_events/*.lua
+# dependency must exist in the source pack.
+_NATIVE_PSYCH_EVENTS = {
+    "blammed lights",
+    "dadbattle spotlight",
+    "philly glow",
+}
 
 
 def _safe_relative(value: object) -> str | None:
@@ -112,6 +122,52 @@ def _allow_partial_chart_audio(report: dict, errors: list[str]) -> list[str]:
     return remaining
 
 
+def _allow_non_script_psych_metadata(report: dict, errors: list[str]) -> list[str]:
+    """Do not invent Lua dependencies for source-native Psych metadata.
+
+    Historical charts sometimes serialize numeric note-type metadata as a
+    string. PulseForge's note-kind classifier is fail-open for unknown kinds,
+    so values such as ``1`` or ``750`` do not imply ``custom_notetypes/1.lua``
+    or ``custom_notetypes/750.lua``. Likewise, several stage-specific Psych
+    events are source-native event identifiers rather than custom Lua event
+    names. These cases remain visible as warnings; named custom note types,
+    custom events, stages, characters and Lua dependencies remain blocking.
+    """
+    remaining: list[str] = []
+    accepted: list[str] = []
+    numeric_note = re.compile(
+        r"^custom note type '([+-]?(?:\d+(?:\.\d*)?|\.\d+))' script missing$"
+    )
+    event_error = re.compile(r"^custom event '([^']+)' script missing$")
+    for error in errors:
+        if numeric_note.fullmatch(error):
+            accepted.append(error)
+            continue
+        match = event_error.fullmatch(error)
+        if match and match.group(1).strip().lower() in _NATIVE_PSYCH_EVENTS:
+            accepted.append(error)
+            continue
+        remaining.append(error)
+    if accepted:
+        warnings = list(report.get("warnings", []))
+        for error in accepted:
+            if numeric_note.fullmatch(error):
+                warnings.append(
+                    error
+                    + " (numeric Psych note metadata accepted; no same-named Lua dependency is implied)"
+                )
+            else:
+                warnings.append(
+                    error
+                    + " (source-native Psych event accepted; no same-named custom event Lua is implied)"
+                )
+        report["warnings"] = warnings
+    report["nonScriptPsychMetadata"] = accepted
+    report["errors"] = remaining
+    report["ok"] = not remaining
+    return remaining
+
+
 def _static_archive_report(project: Path, mod: Path, desc: dict, override: dict, files: list[Path], total: int, errors: list[str]) -> tuple[dict, list[str]]:
     basis = override.get("audit_mode_basis")
     if not isinstance(basis, str) or not basis.strip():
@@ -178,10 +234,12 @@ def audit(project: Path, mod: Path, desc: dict) -> tuple[dict, list[str]]:
         errors.append("chart_folder_audio_fallback requires chart_folder_audio_fallback_basis")
 
     # Fast path: ordinary runtime mods retain v3 dependency semantics, except
-    # that missing chart/audio counterparts are accepted as partial source.
+    # that missing chart/audio counterparts are accepted as partial source and
+    # source-native Psych metadata is not mistaken for a Lua dependency.
     if not archival and not folder_fallback:
         report, core_errors = core.audit(project, mod, desc)
         core_errors = _allow_partial_chart_audio(report, list(core_errors))
+        core_errors = _allow_non_script_psych_metadata(report, list(core_errors))
         if errors:
             combined = list(core_errors) + errors
             report["errors"] = combined
@@ -235,6 +293,7 @@ def audit(project: Path, mod: Path, desc: dict) -> tuple[dict, list[str]]:
         temp.cleanup()
 
     core_errors = _allow_partial_chart_audio(report, list(core_errors))
+    core_errors = _allow_non_script_psych_metadata(report, list(core_errors))
     warnings = list(report.get("warnings", []))
     if archival:
         warnings.append(
@@ -283,6 +342,33 @@ def selftest() -> int:
         return 1
     if len(policy_report.get("warnings", [])) != 3:
         return 1
+
+    metadata_report = {
+        "warnings": [],
+        "errors": [
+            "custom note type '750' script missing",
+            "custom note type '1' script missing",
+            "custom event 'Dadbattle Spotlight' script missing",
+            "custom event 'Philly Glow' script missing",
+            "custom event 'Blammed Lights' script missing",
+            "custom event 'Actually Custom' script missing",
+            "custom stage 'broken' missing",
+        ],
+        "ok": False,
+    }
+    metadata_errors = _allow_non_script_psych_metadata(
+        metadata_report, list(metadata_report["errors"])
+    )
+    if metadata_errors != [
+        "custom event 'Actually Custom' script missing",
+        "custom stage 'broken' missing",
+    ]:
+        return 1
+    if len(metadata_report.get("nonScriptPsychMetadata", [])) != 5:
+        return 1
+    if len(metadata_report.get("warnings", [])) != 5:
+        return 1
+
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         mod = root / "mods" / "archive"
