@@ -60,15 +60,42 @@ bool RuntimePostEffects::begin_frame(
     frame_active_ = renderer != nullptr && effect_ != PostEffect::off;
     rgb_staged_ = false;
     rgb_fallback_ = false;
+    logical_presentation_saved_ = false;
+    previous_logical_width_ = 0;
+    previous_logical_height_ = 0;
+    previous_logical_mode_ = SDL_LOGICAL_PRESENTATION_DISABLED;
 
     if (!frame_active_ || effect_ != PostEffect::rgb_split) {
         return true;
     }
+
+    // RGB Split temporarily switches the renderer to STRETCH while drawing to
+    // its exact-size staging texture. Preserve the caller's presentation first
+    // (normally 1280x720 LETTERBOX on gameplay). Without this restoration a
+    // non-16:9 Android surface can keep STRETCH after the effect and make both
+    // the image and touch coordinates diverge from the gameplay viewport.
+    logical_presentation_saved_ = SDL_GetRenderLogicalPresentation(
+        renderer_,
+        &previous_logical_width_,
+        &previous_logical_height_,
+        &previous_logical_mode_
+    );
+    if (!logical_presentation_saved_) {
+        assign_warning(
+            warning,
+            "RGB Split fell back to an overlay because the renderer presentation could not be saved: "
+                + std::string(SDL_GetError())
+        );
+        rgb_fallback_ = true;
+        return true;
+    }
+
     if (!prepare_rgb_target(warning)) {
-        if (SDL_GetRenderTarget(renderer_) != destination_) {
+        if (SDL_GetRenderTarget(renderer_) != destination_
+            || logical_presentation_saved_) {
             assign_warning(
                 warning,
-                "Post-effect staging could not restore the frame destination: "
+                "Post-effect staging could not restore the frame presentation: "
                     + std::string(SDL_GetError())
             );
             frame_active_ = false;
@@ -78,6 +105,26 @@ bool RuntimePostEffects::begin_frame(
         // deterministic lightweight overlay in finish_frame().
         rgb_fallback_ = true;
     }
+    return true;
+}
+
+bool RuntimePostEffects::restore_logical_presentation(std::string* const error) {
+    if (!logical_presentation_saved_) {
+        return true;
+    }
+    if (!SDL_SetRenderLogicalPresentation(
+            renderer_,
+            previous_logical_width_,
+            previous_logical_height_,
+            previous_logical_mode_
+        )) {
+        if (error != nullptr) {
+            *error = "RGB Split could not restore the renderer presentation: "
+                + std::string(SDL_GetError());
+        }
+        return false;
+    }
+    logical_presentation_saved_ = false;
     return true;
 }
 
@@ -92,6 +139,7 @@ bool RuntimePostEffects::prepare_rgb_target(std::string* const warning) {
                 &texture_width,
                 &texture_height
             )) {
+            static_cast<void>(restore_logical_presentation(nullptr));
             assign_warning(
                 warning,
                 "RGB Split fell back to an overlay because the destination size is unavailable: "
@@ -102,6 +150,7 @@ bool RuntimePostEffects::prepare_rgb_target(std::string* const warning) {
         width = checked_texture_extent(texture_width);
         height = checked_texture_extent(texture_height);
     } else if (!SDL_GetRenderOutputSize(renderer_, &width, &height)) {
+        static_cast<void>(restore_logical_presentation(nullptr));
         assign_warning(
             warning,
             "RGB Split fell back to an overlay because the render output size is unavailable: "
@@ -110,6 +159,7 @@ bool RuntimePostEffects::prepare_rgb_target(std::string* const warning) {
         return false;
     }
     if (width <= 0 || height <= 0) {
+        static_cast<void>(restore_logical_presentation(nullptr));
         assign_warning(
             warning,
             "RGB Split fell back to an overlay because the render output has invalid dimensions"
@@ -131,6 +181,7 @@ bool RuntimePostEffects::prepare_rgb_target(std::string* const warning) {
             height
         );
         if (rgb_target_ == nullptr) {
+            static_cast<void>(restore_logical_presentation(nullptr));
             assign_warning(
                 warning,
                 "RGB Split fell back to an overlay because this renderer cannot create a target texture: "
@@ -149,6 +200,7 @@ bool RuntimePostEffects::prepare_rgb_target(std::string* const warning) {
     }
 
     if (!SDL_SetRenderTarget(renderer_, rgb_target_)) {
+        static_cast<void>(restore_logical_presentation(nullptr));
         assign_warning(
             warning,
             "RGB Split fell back to an overlay because this renderer rejected the staging target: "
@@ -170,10 +222,15 @@ bool RuntimePostEffects::prepare_rgb_target(std::string* const warning) {
         if (SDL_SetRenderTarget(renderer_, destination_)) {
             rgb_staged_ = false;
         }
+        std::string restore_error;
+        const bool restored = restore_logical_presentation(&restore_error);
         assign_warning(
             warning,
-            "RGB Split fell back to an overlay because its logical target could not be configured: "
-                + logical_error
+            restored
+                ? "RGB Split fell back to an overlay because its logical target could not be configured: "
+                    + logical_error
+                : "RGB Split could not restore its logical presentation after staging failed: "
+                    + restore_error
         );
         return false;
     }
@@ -225,6 +282,9 @@ bool RuntimePostEffects::composite_rgb_split(std::string* const error) {
             *error = "RGB Split could not restore the frame destination: "
                 + std::string(SDL_GetError());
         }
+        return false;
+    }
+    if (!restore_logical_presentation(error)) {
         return false;
     }
 
@@ -392,9 +452,13 @@ void RuntimePostEffects::reset() noexcept {
         && SDL_GetRenderTarget(renderer_) == rgb_target_) {
         may_destroy_rgb_target = SDL_SetRenderTarget(renderer_, destination_);
     }
+    if (renderer_ != nullptr && may_destroy_rgb_target) {
+        static_cast<void>(restore_logical_presentation(nullptr));
+    }
     frame_active_ = false;
     rgb_staged_ = false;
     rgb_fallback_ = false;
+    logical_presentation_saved_ = false;
     destination_ = nullptr;
     if (rgb_target_ != nullptr && may_destroy_rgb_target) {
         SDL_DestroyTexture(rgb_target_);
@@ -406,6 +470,9 @@ void RuntimePostEffects::reset() noexcept {
     rgb_target_ = nullptr;
     rgb_target_width_ = 0;
     rgb_target_height_ = 0;
+    previous_logical_width_ = 0;
+    previous_logical_height_ = 0;
+    previous_logical_mode_ = SDL_LOGICAL_PRESENTATION_DISABLED;
     renderer_ = nullptr;
     scanline_vertices_.clear();
     scanline_indices_.clear();
