@@ -3,7 +3,8 @@
 
 Keeps the v4 runtime/archival implementation intact while making static-archive
 PR validation aware of canonical, unhydrated Git LFS JSON pointers. Runtime
-payload auditing remains fail-closed and unchanged.
+structural auditing remains fail-closed; v4 may explicitly record incomplete
+chart/audio counterparts as non-blocking source gaps for later restoration.
 """
 from __future__ import annotations
 
