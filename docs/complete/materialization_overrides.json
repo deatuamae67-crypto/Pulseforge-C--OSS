@@ -25,6 +25,11 @@
       ],
       "known_missing_voices_basis": "The recovery pack retains source-duplicates/percipience-Voices-identical-to-Inst.ogg to document that the omitted Voices stem was byte-identical to Inst; runtime vocal discovery is fail-open when no separate stem is materialized."
     },
+    "drive-2026-08-22-vs-bambi-b-side-9k": {
+      "source_min_bytes": 137192805,
+      "materialized_min_bytes": 137192602,
+      "materialized_min_bytes_basis": "The authoritative 396-file Drive source is 137,192,805 bytes. Repository text normalization during Git/LFS materialization produces a 137,192,602-byte semantic-equivalent checkout while preserving the complete 396-file payload."
+    },
     "drive-pack-files": {
       "source_min_bytes": 2390312362,
       "materialized_min_bytes": 2390312308,
