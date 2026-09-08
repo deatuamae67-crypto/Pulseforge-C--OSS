@@ -5,6 +5,8 @@ Keeps the v4 runtime/archival implementation intact while making static-archive
 PR validation aware of canonical, unhydrated Git LFS JSON pointers. Runtime
 structural auditing remains fail-closed; v4 may explicitly record incomplete
 chart/audio counterparts as non-blocking source gaps for later restoration.
+Known legacy stage labels may likewise be retained as warnings when the runtime
+can safely fall back instead of treating them as missing custom content.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ _LFS_POINTER_RE = re.compile(
     r"oid sha256:[0-9a-f]{64}\n"
     r"size ([0-9]+)\n?\Z"
 )
+_LEGACY_HALLOWEEN_STAGE_ERROR = "custom stage 'halloween' missing"
 
 
 def _lfs_pointer_size(path: Path) -> int | None:
@@ -114,12 +117,60 @@ def _static_archive_report(project, mod, desc, override, files, total, errors):
     return report, errors
 
 
+def _apply_legacy_stage_policy(report, errors):
+    """Downgrade only the known legacy Week-2 `halloween` stage gap.
+
+    Old source charts may use `stage: halloween` where modern Psych/PulseForge
+    content uses the stock Week-2 `spooky` stage. RuntimeScene is already
+    fail-soft for an unavailable stage descriptor, so retain the authoritative
+    chart unchanged, record the missing legacy stage for later restoration, and
+    keep every other missing custom stage fail-closed.
+    """
+    remaining: list[str] = []
+    tolerated: list[str] = []
+    for error in errors:
+        if _LEGACY_HALLOWEEN_STAGE_ERROR in error.lower():
+            tolerated.append(error)
+        else:
+            remaining.append(error)
+
+    if tolerated:
+        warnings = report.setdefault("warnings", [])
+        warnings.extend(
+            error
+            + " (legacy Week-2 stage reference accepted; runtime may use its safe fallback until the stage asset is restored)"
+            for error in tolerated
+        )
+        report["errors"] = remaining
+        report["ok"] = not remaining
+    return report, remaining
+
+
 _original_selftest = impl.selftest
+_original_audit = impl.audit
 impl._static_archive_report = _static_archive_report
+
+
+def audit(project, mod, desc):
+    report, errors = _original_audit(project, mod, desc)
+    return _apply_legacy_stage_policy(report, errors)
 
 
 def selftest() -> int:
     if _original_selftest() != 0:
+        return 1
+
+    probe_report = {"warnings": [], "errors": [], "ok": False}
+    probe_errors = [
+        "chart.json: custom stage 'halloween' missing",
+        "chart.json: custom stage 'actually-custom' missing",
+    ]
+    checked_report, checked_errors = _apply_legacy_stage_policy(
+        probe_report, probe_errors
+    )
+    if checked_errors != ["chart.json: custom stage 'actually-custom' missing"]:
+        return 1
+    if len(checked_report.get("warnings", [])) != 1 or checked_report.get("ok"):
         return 1
 
     with tempfile.TemporaryDirectory() as td:
@@ -153,7 +204,7 @@ def selftest() -> int:
             "min_files": 1,
             "min_bytes": 123,
         }
-        report, errors = impl.audit(root, mod, descriptor)
+        report, errors = audit(root, mod, descriptor)
         if errors or report.get("lfsPointersChecked") != 1:
             return 1
 
@@ -163,13 +214,14 @@ def selftest() -> int:
             "size 123\n",
             encoding="utf-8",
         )
-        _, errors = impl.audit(root, mod, descriptor)
+        _, errors = audit(root, mod, descriptor)
         if not errors:
             return 1
 
     return 0
 
 
+impl.audit = audit
 impl.selftest = selftest
 
 audit = impl.audit
