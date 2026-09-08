@@ -25,6 +25,11 @@
       ],
       "known_missing_voices_basis": "The recovery pack retains source-duplicates/percipience-Voices-identical-to-Inst.ogg to document that the omitted Voices stem was byte-identical to Inst; runtime vocal discovery is fail-open when no separate stem is materialized."
     },
+    "drive-2026-08-22-evil-tsukareta-b-side": {
+      "source_min_bytes": 134693528,
+      "materialized_min_bytes": 134693352,
+      "materialized_min_bytes_basis": "The authoritative 393-file Drive source is 134,693,528 bytes. Repository text normalization during Git/LFS materialization produces a 134,693,352-byte semantic-equivalent checkout while preserving the complete 393-file payload."
+    },
     "drive-pack-files": {
       "source_min_bytes": 2390312362,
       "materialized_min_bytes": 2390312308,
