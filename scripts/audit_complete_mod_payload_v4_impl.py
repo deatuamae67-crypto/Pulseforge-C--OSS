@@ -2,8 +2,8 @@
 """PulseForge Complete payload gate wrapper.
 
 Keeps the v3 functional-closure auditor fail-closed for runtime content while
-allowing narrowly documented archival content to remain distributable without
-pretending that intentionally incomplete recovery data is runtime-complete.
+allowing narrowly documented archival content and incomplete chart/audio pairs
+to remain distributable without pretending that missing source assets exist.
 """
 from __future__ import annotations
 
@@ -80,6 +80,38 @@ def _validated_paths(mod: Path, override: dict, key: str, errors: list[str]) -> 
     return result
 
 
+def _allow_partial_chart_audio(report: dict, errors: list[str]) -> list[str]:
+    """Downgrade only missing chart/audio counterparts to explicit warnings.
+
+    Complete staging mirrors the authoritative source as-is. A chart whose
+    Inst/Voices asset is absent, or a chart-only recovery payload, is therefore
+    publishable and remains visibly incomplete for later asset restoration.
+    All unrelated dependency and structural failures remain blocking.
+    """
+    remaining: list[str] = []
+    partial: list[str] = []
+    for error in errors:
+        if (
+            ": missing Inst for '" in error
+            or "needsVoices=true but Voices missing for '" in error
+            or error == "chart-bearing payload is metadata/charts only; functional assets are missing"
+        ):
+            partial.append(error)
+        else:
+            remaining.append(error)
+    if partial:
+        warnings = list(report.get("warnings", []))
+        warnings.extend(
+            error + " (partial authoritative source accepted; missing counterpart may be supplied later)"
+            for error in partial
+        )
+        report["warnings"] = warnings
+    report["partialChartAudioGaps"] = partial
+    report["errors"] = remaining
+    report["ok"] = not remaining
+    return remaining
+
+
 def _static_archive_report(project: Path, mod: Path, desc: dict, override: dict, files: list[Path], total: int, errors: list[str]) -> tuple[dict, list[str]]:
     basis = override.get("audit_mode_basis")
     if not isinstance(basis, str) or not basis.strip():
@@ -145,13 +177,16 @@ def audit(project: Path, mod: Path, desc: dict) -> tuple[dict, list[str]]:
     if folder_fallback and not isinstance(override.get("chart_folder_audio_fallback_basis"), str):
         errors.append("chart_folder_audio_fallback requires chart_folder_audio_fallback_basis")
 
-    # Fast path: ordinary runtime mods retain the exact v3 audit semantics.
+    # Fast path: ordinary runtime mods retain v3 dependency semantics, except
+    # that missing chart/audio counterparts are accepted as partial source.
     if not archival and not folder_fallback:
         report, core_errors = core.audit(project, mod, desc)
+        core_errors = _allow_partial_chart_audio(report, list(core_errors))
         if errors:
-            report.setdefault("errors", []).extend(errors)
+            combined = list(core_errors) + errors
+            report["errors"] = combined
             report["ok"] = False
-            return report, report["errors"]
+            return report, combined
         report["format"] = "pulseforge-complete-mod-audit-v4"
         report["auditMode"] = "runtime"
         return report, core_errors
@@ -199,6 +234,7 @@ def audit(project: Path, mod: Path, desc: dict) -> tuple[dict, list[str]]:
             os.replace(destination, source)
         temp.cleanup()
 
+    core_errors = _allow_partial_chart_audio(report, list(core_errors))
     warnings = list(report.get("warnings", []))
     if archival:
         warnings.append(
@@ -229,6 +265,23 @@ def audit(project: Path, mod: Path, desc: dict) -> tuple[dict, list[str]]:
 
 def selftest() -> int:
     if core.selftest() != 0:
+        return 1
+    policy_report = {
+        "warnings": [],
+        "errors": [
+            "mods/x/data/foo/foo.json: missing Inst for 'foo'",
+            "mods/x/data/bar/bar.json: needsVoices=true but Voices missing for 'bar'",
+            "chart-bearing payload is metadata/charts only; functional assets are missing",
+            "custom stage 'broken' missing",
+        ],
+        "ok": False,
+    }
+    policy_errors = _allow_partial_chart_audio(policy_report, list(policy_report["errors"]))
+    if policy_errors != ["custom stage 'broken' missing"]:
+        return 1
+    if len(policy_report.get("partialChartAudioGaps", [])) != 3:
+        return 1
+    if len(policy_report.get("warnings", [])) != 3:
         return 1
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
