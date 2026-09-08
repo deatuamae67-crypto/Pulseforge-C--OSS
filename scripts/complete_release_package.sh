@@ -91,10 +91,15 @@ package_unix_desktop() {
   if [[ "$stage_key" == linux-* ]]; then
     test -x "$root/$package/bin/pulseforge"
   else
-    local app="$root/$package/PulseForge.app"
+    # CMake derives the bundle filename from the lowercase target name
+    # `pulseforge`. macOS normally hides this mismatch because its default
+    # filesystem is case-insensitive; the Ubuntu packaging runner does not.
+    local app="$root/$package/pulseforge.app"
+    test -d "$app/Contents/MacOS"
+    test -f "$app/Contents/Info.plist"
+    test -x "$app/Contents/MacOS/pulseforge"
     rm -rf "$app/Contents/MacOS/assets"
     ln -s "$GITHUB_WORKSPACE/assets" "$app/Contents/MacOS/assets"
-    test -x "$app/Contents/MacOS/pulseforge"
   fi
   test -f "$root/$package/bin/mods/modsList.txt"
   tar --dereference -C "$root" -cf - "$package" \
