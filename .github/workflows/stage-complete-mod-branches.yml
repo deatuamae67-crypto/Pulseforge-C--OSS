@@ -102,7 +102,9 @@ jobs:
           import json,os,pathlib,subprocess,sys
           base=subprocess.check_output(['git','merge-base','HEAD',f'origin/{os.environ["BASE_REF"]}'],text=True).strip()
           changed=subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
-          mods={p.parts[1] for x in changed if len((p:=pathlib.PurePosixPath(x)).parts)>=2 and p.parts[0]=='mods'}
+          # Only mods/<collection>/... is a mod payload. Root-level files such
+          # as mods/modsList.txt are global Complete catalog metadata.
+          mods={p.parts[1] for x in changed if len((p:=pathlib.PurePosixPath(x)).parts)>=3 and p.parts[0]=='mods'}
           desc={json.loads(p.read_text(encoding='utf-8'))['name']:p for p in pathlib.Path('docs/complete/mods').glob('*.json')}
           audited=0
           for name in sorted(mods,key=str.casefold):
