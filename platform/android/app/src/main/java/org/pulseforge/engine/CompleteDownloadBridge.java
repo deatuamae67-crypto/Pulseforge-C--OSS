@@ -7,7 +7,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
-import java.net.HttpCookie;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -153,7 +152,7 @@ public final class CompleteDownloadBridge {
             resume > 0L ? "bytes=" + resume + "-" : null
         );
         int status = connection.getResponseCode();
-        if (status == HttpURLConnection.HTTP_REQUESTED_RANGE_NOT_SATISFIABLE) {
+        if (status == 416) {
             connection.disconnect();
             if (part.exists() && !part.delete()) {
                 throw new IOException("não foi possível reiniciar o download parcial");
@@ -214,7 +213,7 @@ public final class CompleteDownloadBridge {
                 if (entry.getKey() == null || entry.getValue() == null) continue;
                 connection.setRequestProperty(
                     entry.getKey(),
-                    String.join("; ", entry.getValue())
+                    joinHeaderValues(entry.getValue())
                 );
             }
 
@@ -265,7 +264,9 @@ public final class CompleteDownloadBridge {
 
         matcher = DOWNLOAD_FORM.matcher(html);
         if (matcher.find()) {
-            final String formTag = html.substring(matcher.start(), html.indexOf('>', matcher.start()) + 1);
+            final int tagEnd = html.indexOf('>', matcher.start());
+            if (tagEnd < 0) return null;
+            final String formTag = html.substring(matcher.start(), tagEnd + 1);
             final Map<String, String> formAttributes = attributes(formTag);
             final String action = formAttributes.get("action");
             if (action != null && action.startsWith("https://")) {
@@ -305,6 +306,16 @@ public final class CompleteDownloadBridge {
             result.put(matcher.group(1).toLowerCase(java.util.Locale.ROOT), matcher.group(2));
         }
         return result;
+    }
+
+    private static String joinHeaderValues(List<String> values) {
+        final StringBuilder output = new StringBuilder();
+        for (String value : values) {
+            if (value == null) continue;
+            if (output.length() != 0) output.append("; ");
+            output.append(value);
+        }
+        return output.toString();
     }
 
     private static String htmlUnescape(String value) {
