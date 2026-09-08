@@ -18,6 +18,8 @@ on:
       - 'THIRD_PARTY.md'
       - 'CMakeLists.txt'
       - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'tools/**'
       - 'docs/RELEASE_NOTES_1.0.0_COMPLETE.md'
       - '.github/workflows/complete-testing-draft.yml'
   workflow_dispatch:
@@ -27,7 +29,7 @@ permissions:
 
 concurrency:
   group: pulseforge-complete-compiled-draft-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   COMPLETE_TAG: 'v1.0.0-complete'
@@ -143,6 +145,13 @@ jobs:
           fetch-depth: 1
           lfs: false
 
+      - name: Hydrate Windows build-time LFS dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git lfs install --local
+          git lfs pull --include="tools/**,third_party/**" --exclude="mods/**,assets/**"
+
       - name: Configure and build Windows Release
         shell: pwsh
         run: |
@@ -188,6 +197,13 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
           lfs: false
+
+      - name: Hydrate Linux build-time LFS dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          git lfs pull --include="tools/**,third_party/**" --exclude="mods/**,assets/**"
 
       - name: Install Linux build dependencies
         shell: bash
@@ -253,6 +269,13 @@ jobs:
           fetch-depth: 1
           lfs: false
 
+      - name: Hydrate macOS build-time LFS dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          git lfs pull --include="tools/**,third_party/**" --exclude="mods/**,assets/**"
+
       - name: Ensure build tools
         shell: bash
         run: |
@@ -307,6 +330,13 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
           lfs: false
+
+      - name: Hydrate Android runtime assets without hydrating the mod corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          git lfs pull --include="assets/**,third_party/**" --exclude="mods/**"
 
       - name: Set up JDK 17
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
@@ -404,8 +434,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends git-lfs libarchive-tools
           git lfs install --local
-          git lfs pull
-          git lfs fsck
+          git lfs pull --include="assets/**,mods/**" --exclude=""
           python3 - <<'PY'
           from pathlib import Path
           roots = [Path('assets'), Path('mods')]
