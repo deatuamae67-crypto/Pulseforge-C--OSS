@@ -4,6 +4,9 @@ import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.util.Log;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -16,31 +19,52 @@ import java.io.File;
 
 /** SDL host that gives the native runtime stable, writable content roots. */
 public final class PulseForgeActivity extends SDLActivity {
+    private static final String TAG = "PulseForge";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         // PulseForge is a landscape-only game. SENSOR_LANDSCAPE allows the two
         // landscape rotations (0/180 relative to one another) while refusing a
         // 90-degree portrait surface that would make the 1280x720 renderer tiny.
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
-        super.onCreate(savedInstanceState);
-        if (mBrokenLibraries) {
-            return;
-        }
 
-        enforceGamePresentation();
-        initializeDiscordSocialSdkIfPresent();
-
+        // SDLActivity can start the native thread from super.onCreate(). The
+        // native entry point needs these paths before that can happen; setting
+        // them afterwards creates a race where locate_assets() falls back to an
+        // unusable Android working directory and the process exits immediately.
         final File assets = new File(getFilesDir(), "pulseforge/assets");
         File mods = getExternalFilesDir("mods");
         if (mods == null) {
             mods = new File(getFilesDir(), "pulseforge/mods");
         }
-        if (!mods.isDirectory()) {
-            mods.mkdirs();
+        if (!mods.isDirectory() && !mods.mkdirs() && !mods.isDirectory()) {
+            Log.e(TAG, "Unable to create Android mod root: " + mods);
         }
 
+        setProcessEnvironment("PULSEFORGE_ASSET_ROOT", assets.getAbsolutePath());
+        setProcessEnvironment("PULSEFORGE_MOD_ROOT", mods.getAbsolutePath());
+
+        super.onCreate(savedInstanceState);
+        if (mBrokenLibraries) {
+            return;
+        }
+
+        // Synchronize SDL's native environment as well. The process-level
+        // environment above is the startup-critical path; these calls retain
+        // compatibility with SDL's own environment handling after libraries load.
         nativeSetenv("PULSEFORGE_ASSET_ROOT", assets.getAbsolutePath());
         nativeSetenv("PULSEFORGE_MOD_ROOT", mods.getAbsolutePath());
+
+        enforceGamePresentation();
+        initializeDiscordSocialSdkIfPresent();
+    }
+
+    private static void setProcessEnvironment(String name, String value) {
+        try {
+            Os.setenv(name, value, true);
+        } catch (ErrnoException exception) {
+            Log.e(TAG, "Unable to set Android process environment variable " + name, exception);
+        }
     }
 
     @Override
@@ -122,8 +146,8 @@ public final class PulseForgeActivity extends SDLActivity {
         } catch (ClassNotFoundException ignored) {
             // Discord Social SDK is optional; Rich Presence remains fail-open.
         } catch (ReflectiveOperationException exception) {
-            android.util.Log.w(
-                "PulseForge",
+            Log.w(
+                TAG,
                 "Discord Social SDK activity initialization failed",
                 exception
             );
