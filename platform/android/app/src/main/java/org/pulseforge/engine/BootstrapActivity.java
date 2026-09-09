@@ -15,10 +15,15 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.TextView;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -28,7 +33,12 @@ import java.nio.charset.StandardCharsets;
  */
 public final class BootstrapActivity extends Activity {
     private static final String PAYLOAD_ROOT = "pulseforge";
-    private static final String PAYLOAD_VERSION = "v8.0.14-mobile-assets-3";
+    private static final String PAYLOAD_VERSION = "v8.0.15-mobile-assets-4";
+    private static final String[] REQUIRED_PAYLOAD_FILES = {
+        "assets/settings.json",
+        "assets/demo/chart.json"
+    };
+
     private TextView status;
     private int copiedFiles;
 
@@ -107,10 +117,24 @@ public final class BootstrapActivity extends Activity {
         try {
             final File installRoot = new File(getFilesDir(), PAYLOAD_ROOT);
             final File marker = new File(installRoot, "." + PAYLOAD_VERSION);
-            if (!marker.isFile()) {
+            final File settings = new File(installRoot, "assets/settings.json");
+
+            // A previous interrupted install or malformed settings file must not
+            // become permanent merely because a bootstrap marker exists. Keep a
+            // backup for diagnosis/user recovery, then reinstall the packaged
+            // default settings instead of repeatedly crashing the native runtime.
+            if (settings.isFile() && !isValidJsonObject(settings)) {
+                quarantineCorruptSettings(settings);
+            }
+
+            if (!marker.isFile() || !payloadLooksComplete(installRoot)) {
                 copyTree(getAssets(), PAYLOAD_ROOT, getFilesDir(), getFilesDir());
+                if (!payloadLooksComplete(installRoot)) {
+                    throw new IOException("os recursos Android ficaram incompletos após a instalação");
+                }
                 writeAtomically(marker, PAYLOAD_VERSION.getBytes(StandardCharsets.UTF_8));
             }
+
             runOnUiThread(() -> {
                 startActivity(new Intent(this, PulseForgeActivity.class));
                 finish();
@@ -134,6 +158,50 @@ public final class BootstrapActivity extends Activity {
         new Thread(this::prepareAndLaunch, "PulseForge-asset-bootstrap-retry").start();
     }
 
+    private static boolean payloadLooksComplete(File installRoot) {
+        for (String relativePath : REQUIRED_PAYLOAD_FILES) {
+            final File file = new File(installRoot, relativePath);
+            if (!file.isFile() || file.length() <= 0) {
+                return false;
+            }
+        }
+        return isValidJsonObject(new File(installRoot, "assets/settings.json"));
+    }
+
+    private static boolean isValidJsonObject(File file) {
+        if (!file.isFile() || file.length() <= 0) {
+            return false;
+        }
+        try (BufferedReader reader = new BufferedReader(
+            new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8)
+        )) {
+            final StringBuilder json = new StringBuilder();
+            final char[] buffer = new char[8192];
+            int read;
+            while ((read = reader.read(buffer)) != -1) {
+                json.append(buffer, 0, read);
+            }
+            new JSONObject(json.toString());
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static void quarantineCorruptSettings(File settings) throws IOException {
+        final File parent = settings.getParentFile();
+        if (parent == null) {
+            throw new IOException("settings.json não tem diretório pai");
+        }
+        final File backup = new File(
+            parent,
+            "settings.corrupt-" + System.currentTimeMillis() + ".json"
+        );
+        if (!settings.renameTo(backup)) {
+            throw new IOException("não foi possível guardar uma cópia do settings.json corrompido");
+        }
+    }
+
     private void copyTree(
         AssetManager assets,
         String assetPath,
@@ -154,8 +222,11 @@ public final class BootstrapActivity extends Activity {
 
         final File destination = checkedDestination(outputBase, securityRoot, assetPath);
         // Settings are user data after first launch; engine upgrades must not
-        // silently reset keybinds, volume, latency offsets or visual options.
-        if (assetPath.endsWith("/assets/settings.json") && destination.isFile()) {
+        // silently reset valid keybinds, volume, latency offsets or visual options.
+        if (assetPath.endsWith("/assets/settings.json")
+            && destination.isFile()
+            && destination.length() > 0
+            && isValidJsonObject(destination)) {
             return;
         }
         final File parent = destination.getParentFile();
