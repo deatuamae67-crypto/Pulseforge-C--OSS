@@ -4,7 +4,10 @@
   "name": "drive-library-2026-04-30",
   "slug": "drive-library-2026-04-30",
   "drive_id": "1PTa0ldHNt0reXMOhnz6vTJVt5RkokHu0",
-  "min_files": 1012,
+  "source_min_files": 1012,
+  "min_files": 592,
+  "materialized_min_files": 592,
+  "materialized_min_files_basis": "The current public recovery snapshot deterministically enumerates 592 files and 389579119 bytes, matching docs/MOD_CORPUS_1.0.0.json and the retained historical byte threshold. The previous 1012-file threshold is preserved separately as source_min_files for provenance.",
   "min_bytes": 389579119,
   "enabled_by_default": true,
   "default_state_basis": "historical modsList=1"
