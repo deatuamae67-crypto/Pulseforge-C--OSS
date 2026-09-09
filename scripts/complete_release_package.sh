@@ -17,14 +17,25 @@ upload_candidate() {
   local stable candidate encoded
   stable="$(basename "$file")"
   candidate="CANDIDATE-${GITHUB_SHA}--${stable}"
+
+  # Make a failed package/finalize attempt safely retryable without requiring
+  # another prepare job first.
+  mapfile -t duplicates < <(
+    gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --paginate \
+      --jq ".[] | select(.name == \"$candidate\") | .id"
+  )
+  for id in "${duplicates[@]}"; do
+    gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id" >/dev/null
+  done
+
   encoded="$(python3 - "$candidate" <<'PY'
 import sys, urllib.parse
 print(urllib.parse.quote(sys.argv[1], safe=''))
 PY
 )"
-  echo "Uploading Complete candidate: $stable"
+  echo "Uploading Complete runtime candidate: $stable"
   curl --fail-with-body --silent --show-error \
-    --retry 3 --retry-all-errors --retry-delay 5 \
+    --retry 5 --retry-all-errors --retry-delay 5 \
     -X POST \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer $GH_TOKEN" \
@@ -35,7 +46,7 @@ PY
     >/dev/null
 }
 
-checksum_and_upload_parts() {
+checksum_and_upload_files() {
   local output_dir="$1"
   local checksum_name="$2"
   shift 2
@@ -58,6 +69,17 @@ checksum_and_upload_parts() {
   rm -f "$checksums"
 }
 
+require_runtime_manifest() {
+  local manifest="$GITHUB_WORKSPACE/assets/complete-runtime-manifest.json"
+  test -s "$manifest"
+  jq -e '
+    .schema_version == 1
+    and .edition == "1.0.0-complete"
+    and .mod_count == 30
+    and (.mods | length) == 30
+  ' "$manifest" >/dev/null
+}
+
 package_windows() {
   local package="PulseForge-v${PACKAGE_VERSION}-Windows-x86_64"
   local root="$RUNNER_TEMP/package-windows"
@@ -67,13 +89,13 @@ package_windows() {
   cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-windows-x86_64/." "$root/$package/"
   rm -rf "$root/$package/bin/assets" "$root/$package/bin/mods"
   ln -s "$GITHUB_WORKSPACE/assets" "$root/$package/bin/assets"
-  ln -s "$GITHUB_WORKSPACE/mods" "$root/$package/bin/mods"
   test -f "$root/$package/bin/pulseforge.exe"
-  test -f "$root/$package/bin/mods/modsList.txt"
+  test -f "$root/$package/bin/assets/complete-runtime-manifest.json"
+  test ! -e "$root/$package/bin/mods"
   bsdtar -L --format zip -cf - -C "$root" "$package" \
     | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.zip.part-"
   mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.zip.part-*" -print | sort)
-  checksum_and_upload_parts "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
+  checksum_and_upload_files "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
   rm -rf "$root"
 }
 
@@ -87,82 +109,50 @@ package_unix_desktop() {
   cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-${stage_key}/." "$root/$package/"
   rm -rf "$root/$package/bin/assets" "$root/$package/bin/mods"
   ln -s "$GITHUB_WORKSPACE/assets" "$root/$package/bin/assets"
-  ln -s "$GITHUB_WORKSPACE/mods" "$root/$package/bin/mods"
   if [[ "$stage_key" == linux-* ]]; then
     test -x "$root/$package/bin/pulseforge"
   else
-    # CMake derives the bundle filename from the lowercase target name
-    # `pulseforge`. macOS normally hides this mismatch because its default
-    # filesystem is case-insensitive; the Ubuntu packaging runner does not.
     local app="$root/$package/pulseforge.app"
     test -d "$app/Contents/MacOS"
     test -f "$app/Contents/Info.plist"
     test -x "$app/Contents/MacOS/pulseforge"
     rm -rf "$app/Contents/MacOS/assets"
     ln -s "$GITHUB_WORKSPACE/assets" "$app/Contents/MacOS/assets"
+    test -f "$app/Contents/MacOS/assets/complete-runtime-manifest.json"
   fi
-  test -f "$root/$package/bin/mods/modsList.txt"
+  test -f "$root/$package/bin/assets/complete-runtime-manifest.json"
+  test ! -e "$root/$package/bin/mods"
   tar --dereference -C "$root" -cf - "$package" \
-    | gzip -1 \
+    | gzip -9 \
     | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.tar.gz.part-"
   mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.tar.gz.part-*" -print | sort)
-  checksum_and_upload_parts "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
+  checksum_and_upload_files "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
   rm -rf "$root"
 }
 
 package_android() {
   local package="PulseForge-v${PACKAGE_VERSION}-Android-arm64"
-  local root="$RUNNER_TEMP/package-android"
+  local stage="$RUNNER_TEMP/compiled/complete-engine-stage-android-arm64"
   local out="$RUNNER_TEMP/release-android"
-  rm -rf "$root" "$out"
-  mkdir -p "$root/$package" "$out"
-  cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-android-arm64/." "$root/$package/"
-  ln -s "$GITHUB_WORKSPACE/mods" "$root/$package/mods"
+  rm -rf "$out"
+  mkdir -p "$out"
 
-  cat > "$root/$package/install-with-adb.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-apk="$(find "$here" -maxdepth 1 -type f -name '*.apk' -print -quit)"
-test -n "$apk"
-adb install -r "$apk"
-adb shell mkdir -p /sdcard/Android/data/org.pulseforge.engine/files/mods
-adb push "$here/mods/." /sdcard/Android/data/org.pulseforge.engine/files/mods/
-echo 'PulseForge Complete installed with the bundled mod tree.'
-SH
-  chmod +x "$root/$package/install-with-adb.sh"
+  local source_apk
+  source_apk="$(find "$stage" -maxdepth 1 -type f -name '*.apk' -print -quit)"
+  test -n "$source_apk"
+  local apk="$out/${package}-test-signed.apk"
+  cp -a "$source_apk" "$apk"
 
-  cat > "$root/$package/install-with-adb.ps1" <<'PS1'
-$ErrorActionPreference = 'Stop'
-$Here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Apk = Get-ChildItem -LiteralPath $Here -Filter '*.apk' -File | Select-Object -First 1
-if ($null -eq $Apk) { throw 'PulseForge APK not found.' }
-& adb install -r $Apk.FullName
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& adb shell mkdir -p /sdcard/Android/data/org.pulseforge.engine/files/mods
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& adb push (Join-Path $Here 'mods/.') /sdcard/Android/data/org.pulseforge.engine/files/mods/
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-Write-Host 'PulseForge Complete installed with the bundled mod tree.'
-PS1
+  unzip -l "$apk" > "$out/${package}.contents.txt"
+  grep -q 'assets/pulseforge/assets/complete-runtime-manifest.json' "$out/${package}.contents.txt"
+  grep -q 'lib/arm64-v8a/libmain.so' "$out/${package}.contents.txt"
+  grep -q 'lib/arm64-v8a/libSDL3.so' "$out/${package}.contents.txt"
+  ! grep -Eq '(^|[ /])mods/' "$out/${package}.contents.txt"
 
-  cat > "$root/$package/README-INSTALL.txt" <<EOF
-PulseForge 1.0.0 Complete
-Source commit: $GITHUB_SHA
-
-This is one Complete Android distribution: the compiled/test-signed APK
-and the same cumulative built-in mods tree used by the desktop packages.
-
-Use install-with-adb.sh or install-with-adb.ps1 with Android platform-tools.
-EOF
-
-  test -f "$root/$package/mods/modsList.txt"
-  tar --dereference -C "$root" -cf - "$package" \
-    | gzip -1 \
-    | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.tar.gz.part-"
-  mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.tar.gz.part-*" -print | sort)
-  checksum_and_upload_parts "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
-  rm -rf "$root"
+  # Android Complete is now the installable runtime itself. The 30-mod corpus is
+  # downloaded on demand from Drive after the user accepts the startup prompt.
+  checksum_and_upload_files "$out" "$package.SHA256SUMS.txt" "$apk"
+  rm -f "$out/${package}.contents.txt"
 }
 
 verify_candidates() {
@@ -171,21 +161,30 @@ verify_candidates() {
   gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --paginate \
     --jq ".[] | select(.name | startswith(\"$prefix\")) | .name" \
     | sed "s/^$prefix//" | sort > "$names"
-  for platform in Windows-x86_64 Linux-x86_64 macOS-arm64 macOS-x86_64 Android-arm64; do
+
+  for platform in Windows-x86_64 Linux-x86_64 macOS-arm64 macOS-x86_64; do
     grep -Fxq "PulseForge-v${PACKAGE_VERSION}-${platform}.SHA256SUMS.txt" "$names"
     grep -Eq "^PulseForge-v${PACKAGE_VERSION}-${platform}.*\\.part-[0-9]{3}$" "$names"
   done
+  grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Android-arm64.SHA256SUMS.txt" "$names"
+  grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Android-arm64-test-signed.apk" "$names"
+  ! grep -Eq "^PulseForge-v${PACKAGE_VERSION}-Android-arm64.*\\.part-[0-9]{3}$" "$names"
   ! grep -Fq 'TEST-ONLY' "$names"
   ! grep -Fq -- '-mod-' "$names"
-  echo 'Verified candidate assets for all five full compiled platform distributions.'
+  echo 'Verified five lightweight Complete runtime candidate sets.'
 }
 
 finalize_release() {
   verify_candidates
   local prefix="CANDIDATE-${GITHUB_SHA}--"
+  local was_draft
+  was_draft="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')"
+
+  # Candidates coexist with the current stable assets until every runtime has
+  # been uploaded and verified. Only then are the previous stable assets removed.
   mapfile -t old_ids < <(
     gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --paginate \
-      --jq ".[] | select(.name | startswith(\"$prefix\") | not) | .id"
+      --jq ".[] | select((.name | startswith(\"$prefix\")) | not) | .id"
   )
   for id in "${old_ids[@]}"; do
     gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id" >/dev/null
@@ -214,15 +213,18 @@ finalize_release() {
 
 ---
 
-**Compiled Complete snapshot:** \`$GITHUB_SHA\`
+**Compiled Complete runtime snapshot:** \`$GITHUB_SHA\`
 
-Every platform package in this draft was rebuilt from this exact commit.
-Each distribution contains the cumulative Complete content present in the
-engine tree at that commit. There are no per-mod release assets.
+The five platform downloads are lightweight engine runtimes. They do **not**
+bundle the 30-mod corpus. Each runtime carries only the small
+\`complete-runtime-manifest.json\`; when content is missing or outdated,
+PulseForge asks the user whether to download the required mods directly from
+the canonical Google Drive folders.
 
-Platform archives are split only when needed to remain below GitHub's
-per-asset upload limit; the accompanying SHA256SUMS file authenticates
-every part.
+Android is distributed as the installable test-signed APK itself rather than a
+large archive containing a duplicate \`mods/\` tree. Desktop archives may be
+split only to respect GitHub's per-asset limit; SHA256SUMS authenticates every
+published file.
 EOF
   )"
   gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
@@ -230,28 +232,33 @@ EOF
     -f target_commitish="$GITHUB_SHA" \
     -f name="$RELEASE_TITLE" \
     -f body="$body" \
-    -F draft=true \
+    -F draft="$was_draft" \
     -F prerelease=false >/dev/null
 
-  test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')" = 'true'
+  test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')" = "$was_draft"
   test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.target_commitish')" = "$GITHUB_SHA"
   test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.tag_name')" = "$COMPLETE_TAG"
   test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$COMPLETE_TAG" --jq '.object.sha')" = "$GITHUB_SHA"
+
   local assets="$RUNNER_TEMP/final-assets.txt"
   gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --paginate --jq '.[].name' | sort > "$assets"
   ! grep -Fq 'CANDIDATE-' "$assets"
   ! grep -Fq 'STAGE-' "$assets"
   ! grep -Fq 'TEST-ONLY' "$assets"
   ! grep -Fq -- '-mod-' "$assets"
-  for platform in Windows-x86_64 Linux-x86_64 macOS-arm64 macOS-x86_64 Android-arm64; do
+  for platform in Windows-x86_64 Linux-x86_64 macOS-arm64 macOS-x86_64; do
     grep -Fxq "PulseForge-v${PACKAGE_VERSION}-${platform}.SHA256SUMS.txt" "$assets"
     grep -Eq "^PulseForge-v${PACKAGE_VERSION}-${platform}.*\\.part-[0-9]{3}$" "$assets"
   done
-  printf 'PulseForge Complete draft now represents compiled engine commit %s\n' "$GITHUB_SHA"
+  grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Android-arm64.SHA256SUMS.txt" "$assets"
+  grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Android-arm64-test-signed.apk" "$assets"
+  ! grep -Eq "^PulseForge-v${PACKAGE_VERSION}-Android-arm64.*\\.part-[0-9]{3}$" "$assets"
+  printf 'PulseForge Complete release now represents lightweight runtime commit %s\n' "$GITHUB_SHA"
 }
 
 case "${1:-}" in
   package)
+    require_runtime_manifest
     package_windows
     package_unix_desktop Linux-x86_64 linux-x86_64
     package_unix_desktop macOS-arm64 macos-arm64

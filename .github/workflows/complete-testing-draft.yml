@@ -1,12 +1,17 @@
-name: PulseForge 1.0.0 Complete compiled draft
+name: PulseForge 1.0.0 Complete lightweight runtimes
 
 on:
   pull_request:
     branches: [main]
     paths:
       - '.github/workflows/complete-testing-draft.yml'
+      - 'platform/android/app/build.gradle'
       - 'scripts/complete_release_stage_transport.py'
       - 'scripts/complete_release_package.sh'
+      - 'scripts/generate_complete_drive_runtime_manifest.py'
+      - 'scripts/complete_runtime_transport_selftest.py'
+      - 'docs/complete/mods/*.json'
+      - 'docs/complete/RUNTIME_INSTALL.md'
   push:
     branches: [main]
     paths:
@@ -22,9 +27,13 @@ on:
       - 'CMakePresets.json'
       - 'cmake/**'
       - 'tools/**'
+      - 'docs/complete/mods/*.json'
+      - 'docs/complete/RUNTIME_INSTALL.md'
       - 'docs/RELEASE_NOTES_1.0.0_COMPLETE.md'
       - 'scripts/complete_release_stage_transport.py'
       - 'scripts/complete_release_package.sh'
+      - 'scripts/generate_complete_drive_runtime_manifest.py'
+      - 'scripts/complete_runtime_transport_selftest.py'
       - '.github/workflows/complete-testing-draft.yml'
   workflow_dispatch:
 
@@ -32,14 +41,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: pulseforge-complete-compiled-draft-${{ github.ref }}
+  group: pulseforge-complete-lightweight-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   COMPLETE_TAG: 'v1.0.0-complete'
   RELEASE_TITLE: 'PulseForge 1.0.0 Complete'
+  TRANSPORT_TITLE: 'PulseForge Complete CI Transport'
+  TRANSPORT_TAG: 'pulseforge-complete-ci-transport'
   PACKAGE_VERSION: '1.0.0-complete'
   RELEASE_PART_LIMIT: '1887436800'
+  GDOWN_VERSION: '6.2.0'
 
 jobs:
   validate:
@@ -52,11 +64,12 @@ jobs:
           fetch-depth: 2
           lfs: false
 
-      - name: Validate compiled Complete release contract
+      - name: Validate lightweight Complete release contract
         shell: bash
         run: |
           set -euo pipefail
           workflow='.github/workflows/complete-testing-draft.yml'
+          package='scripts/complete_release_package.sh'
           test -s docs/RELEASE_NOTES_1.0.0_COMPLETE.md
           test -s docs/COMPLETE_CONTENT_1.0.0.json
           jq -e '
@@ -64,82 +77,172 @@ jobs:
             and .edition == "1.0.0-complete"
             and .target_mod_count == 30
           ' docs/COMPLETE_CONTENT_1.0.0.json >/dev/null
-          grep -Fq 'install(DIRECTORY assets/ DESTINATION bin/assets)' CMakeLists.txt
-          grep -Fq 'install(DIRECTORY mods/ DESTINATION bin/mods)' CMakeLists.txt
-          ! grep -Fq 'TEST-ONLY-mod-' "$workflow"
-          ! grep -Fq 'package_changed_mods' "$workflow"
-          ! grep -Fq 'actions/upload-artifact' "$workflow"
-          ! grep -Fq 'actions/download-artifact' "$workflow"
+          test -s scripts/generate_complete_drive_runtime_manifest.py
+          test -s scripts/complete_runtime_transport_selftest.py
           test -s scripts/complete_release_stage_transport.py
-          test -s scripts/complete_release_package.sh
+          test -s "$package"
+          python3 -m py_compile scripts/generate_complete_drive_runtime_manifest.py
+          python3 scripts/generate_complete_drive_runtime_manifest.py --self-test
+          python3 scripts/complete_runtime_transport_selftest.py
           python3 -m py_compile scripts/complete_release_stage_transport.py
           python3 scripts/complete_release_stage_transport.py self-test
-          bash -n scripts/complete_release_package.sh
-          echo 'Complete release contract: full compiled rebuild with draft-release stage transport.'
+          bash -n "$package"
+          grep -Fq "include 'complete-runtime-manifest.json'" platform/android/app/build.gradle
+          grep -Fq 'generate_complete_drive_runtime_manifest.py' "$workflow"
+          grep -Fq 'assets/complete-runtime-manifest.json' "$package"
+          grep -Fq 'Android-arm64-test-signed.apk' "$package"
+          ! grep -Fq 'ln -s "$GITHUB_WORKSPACE/mods"' "$package"
+          ! grep -Fq 'adb push "$here/mods' "$package"
+          ! grep -Fq 'git lfs pull --include="assets/**,mods/**"' "$workflow"
+          ! grep -Fq 'actions/upload-artifact' "$workflow"
+          ! grep -Fq 'actions/download-artifact' "$workflow"
+          echo 'Complete release contract: five lightweight runtimes plus Drive-backed runtime manifest.'
 
-  prepare-draft:
+  prepare-release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     outputs:
-      release_id: ${{ steps.release.outputs.release_id }}
+      public_release_id: ${{ steps.release.outputs.public_release_id }}
+      transport_release_id: ${{ steps.release.outputs.transport_release_id }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Resolve the single cumulative Complete draft
+      - name: Resolve public Complete release and hidden CI transport draft
         id: release
         shell: bash
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
+          public_release_id="$(
+            gh api "repos/$repo/releases/tags/$COMPLETE_TAG" --jq '.id' 2>/dev/null || true
+          )"
+          if [[ -z "$public_release_id" ]]; then
+            echo "Public Complete release $COMPLETE_TAG does not exist; refusing to publish through an unverified fallback." >&2
+            exit 1
+          fi
+
           mapfile -t drafts < <(
             gh api "repos/$repo/releases?per_page=100" --paginate \
-              --jq ".[] | select(.draft == true and .name == \"$RELEASE_TITLE\") | [.created_at, .id] | @tsv" \
+              --jq ".[] | select(.draft == true and (.name == \"$TRANSPORT_TITLE\" or .name == \"$RELEASE_TITLE\") and .id != $public_release_id) | [.created_at, .id] | @tsv" \
               | sort
           )
           if (( ${#drafts[@]} == 0 )); then
             response="$(
               gh api --method POST "repos/$repo/releases" \
-                -f tag_name="$COMPLETE_TAG" \
+                -f tag_name="$TRANSPORT_TAG" \
                 -f target_commitish="$GITHUB_SHA" \
-                -f name="$RELEASE_TITLE" \
-                -f body="PulseForge 1.0.0 Complete compiled candidate for $GITHUB_SHA" \
+                -f name="$TRANSPORT_TITLE" \
+                -f body="Temporary hidden stage transport for PulseForge Complete CI." \
                 -F draft=true \
                 -F prerelease=false
             )"
-            release_id="$(jq -r '.id' <<<"$response")"
+            transport_release_id="$(jq -r '.id' <<<"$response")"
           else
-            IFS=$'\t' read -r _ release_id <<<"${drafts[0]}"
+            IFS=$'\t' read -r _ transport_release_id <<<"${drafts[0]}"
             if (( ${#drafts[@]} > 1 )); then
-              echo 'Multiple Complete drafts exist; refusing to guess which duplicate to destroy.' >&2
-              printf '%s\n' "${drafts[@]}" >&2
-              exit 1
+              for row in "${drafts[@]:1}"; do
+                IFS=$'\t' read -r _ duplicate_id <<<"$row"
+                gh api --method DELETE "repos/$repo/releases/$duplicate_id" >/dev/null
+              done
             fi
+            gh api --method PATCH "repos/$repo/releases/$transport_release_id" \
+              -f tag_name="$TRANSPORT_TAG" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="$TRANSPORT_TITLE" \
+              -f body="Temporary hidden stage transport for PulseForge Complete CI." \
+              -F draft=true \
+              -F prerelease=false >/dev/null
           fi
-          test -n "$release_id"
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-          echo "Cumulative Complete draft: $release_id"
 
-      - name: Remove abandoned candidate and transport stage assets
+          echo "public_release_id=$public_release_id" >> "$GITHUB_OUTPUT"
+          echo "transport_release_id=$transport_release_id" >> "$GITHUB_OUTPUT"
+          echo "Public Complete release: $public_release_id"
+          echo "Hidden transport draft: $transport_release_id"
+
+      - name: Clean stale transport stages and public candidates
         shell: bash
         env:
-          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+          PUBLIC_RELEASE_ID: ${{ steps.release.outputs.public_release_id }}
+          TRANSPORT_RELEASE_ID: ${{ steps.release.outputs.transport_release_id }}
         run: |
           set -euo pipefail
-          mapfile -t stale < <(
-            gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --paginate \
-              --jq '.[] | select((.name | startswith("CANDIDATE-")) or (.name | startswith("STAGE-"))) | .id'
+          mapfile -t transport_assets < <(
+            gh api "repos/$GITHUB_REPOSITORY/releases/$TRANSPORT_RELEASE_ID/assets?per_page=100" --paginate --jq '.[].id'
           )
-          for id in "${stale[@]}"; do
+          for id in "${transport_assets[@]}"; do
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id" >/dev/null
           done
-          echo "Removed ${#stale[@]} abandoned candidate/stage asset(s)."
+          mapfile -t stale_candidates < <(
+            gh api "repos/$GITHUB_REPOSITORY/releases/$PUBLIC_RELEASE_ID/assets?per_page=100" --paginate \
+              --jq '.[] | select(.name | startswith("CANDIDATE-")) | .id'
+          )
+          for id in "${stale_candidates[@]}"; do
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id" >/dev/null
+          done
+          echo "Cleaned ${#transport_assets[@]} transport asset(s) and ${#stale_candidates[@]} stale public candidate(s)."
+
+  runtime-manifest:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [validate, prepare-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRANSPORT_RELEASE_ID: ${{ needs.prepare-release.outputs.transport_release_id }}
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          lfs: false
+
+      - name: Generate lightweight 30-mod Drive runtime manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          venv="$RUNNER_TEMP/pulseforge-gdown"
+          python3 -m venv "$venv"
+          "$venv/bin/python" -m pip install --disable-pip-version-check --no-cache-dir --retries 5 "gdown==$GDOWN_VERSION"
+          stage="$RUNNER_TEMP/runtime-manifest-stage"
+          mkdir -p "$stage"
+          manifest="$stage/complete-runtime-manifest.json"
+          ok=0
+          for attempt in 1 2 3; do
+            if "$venv/bin/python" scripts/generate_complete_drive_runtime_manifest.py \
+              --python "$venv/bin/python" \
+              --source-commit "$GITHUB_SHA" \
+              --output "$manifest"; then
+              ok=1
+              break
+            fi
+            echo "Runtime manifest generation attempt $attempt failed." >&2
+            sleep $((attempt * 10))
+          done
+          (( ok == 1 ))
+          jq -e '.schema_version == 1 and .edition == "1.0.0-complete" and .mod_count == 30 and (.mods | length) == 30' "$manifest" >/dev/null
+          printf '%s\n' "$GITHUB_SHA" > "$stage/PULSEFORGE_SOURCE_SHA.txt"
+
+      - name: Upload runtime manifest through hidden transport draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/complete_release_stage_transport.py upload \
+            --repo "$GITHUB_REPOSITORY" \
+            --release-id "$TRANSPORT_RELEASE_ID" \
+            --sha "$GITHUB_SHA" \
+            --stage-key runtime-manifest \
+            --stage-dir "$RUNNER_TEMP/runtime-manifest-stage" \
+            --archive-dir "$RUNNER_TEMP"
 
   build-stage:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [validate, prepare-draft]
+    needs: [validate, prepare-release, runtime-manifest]
     name: build-stage / ${{ matrix.stage_key }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -168,7 +271,7 @@ jobs:
             runner: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_ID: ${{ needs.prepare-draft.outputs.release_id }}
+      TRANSPORT_RELEASE_ID: ${{ needs.prepare-release.outputs.transport_release_id }}
 
     steps:
       - name: Checkout exact engine source
@@ -194,13 +297,30 @@ jobs:
           git lfs install --local
           git lfs pull --include="tools/**,third_party/**" --exclude="mods/**,assets/**"
 
-      - name: Hydrate Android runtime assets without hydrating the mod corpus
+      - name: Hydrate Android runtime assets without the mod corpus
         if: matrix.kind == 'android'
         shell: bash
         run: |
           set -euo pipefail
           git lfs install --local
           git lfs pull --include="assets/**,third_party/**" --exclude="mods/**"
+
+      - name: Inject Complete runtime manifest into Android source assets
+        if: matrix.kind == 'android'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/complete_release_stage_transport.py download-all \
+            --repo "$GITHUB_REPOSITORY" \
+            --release-id "$TRANSPORT_RELEASE_ID" \
+            --sha "$GITHUB_SHA" \
+            --stage-keys runtime-manifest \
+            --archive-dir "$RUNNER_TEMP/runtime-manifest-archive" \
+            --output-root "$RUNNER_TEMP/runtime-manifest"
+          manifest="$RUNNER_TEMP/runtime-manifest/complete-engine-stage-runtime-manifest/complete-runtime-manifest.json"
+          test -s "$manifest"
+          jq -e '.mod_count == 30 and (.mods | length) == 30' "$manifest" >/dev/null
+          cp "$manifest" assets/complete-runtime-manifest.json
 
       - name: Configure, build and stage Windows Release
         if: matrix.kind == 'windows'
@@ -299,9 +419,19 @@ jobs:
             'ndk;28.2.13676358' 'cmake;3.31.6'
           chmod +x platform/android/gradlew
           cd platform/android
-          ./gradlew --no-daemon --stacktrace \
-            -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android" \
-            :app:assembleRelease
+          gradle_ok=0
+          for attempt in 1 2 3; do
+            if ./gradlew --no-daemon --stacktrace \
+              -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android" \
+              :app:assembleRelease; then
+              gradle_ok=1
+              break
+            fi
+            echo "Gradle attempt $attempt failed; retrying transient wrapper/network failures." >&2
+            rm -rf "$HOME/.gradle/wrapper/dists/gradle-9.6.0-bin" || true
+            sleep $((attempt * 10))
+          done
+          (( gradle_ok == 1 ))
           cd "$GITHUB_WORKSPACE"
           stage="$RUNNER_TEMP/android-stage"
           mkdir -p "$stage"
@@ -324,23 +454,25 @@ jobs:
           unzip -l "$apk" > "$stage/PulseForge.android-contents.txt"
           grep -q 'lib/arm64-v8a/libmain.so' "$stage/PulseForge.android-contents.txt"
           grep -q 'lib/arm64-v8a/libSDL3.so' "$stage/PulseForge.android-contents.txt"
+          grep -q 'assets/pulseforge/assets/complete-runtime-manifest.json' "$stage/PulseForge.android-contents.txt"
+          ! grep -Eq '(^|[ /])mods/' "$stage/PulseForge.android-contents.txt"
           printf '%s\n' "$GITHUB_SHA" > "$stage/PULSEFORGE_SOURCE_SHA.txt"
 
-      - name: Upload compiled Windows stage through the Complete draft release
+      - name: Upload compiled Windows stage through hidden transport draft
         if: matrix.kind == 'windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           python3 scripts/complete_release_stage_transport.py upload `
             --repo $env:GITHUB_REPOSITORY `
-            --release-id $env:RELEASE_ID `
+            --release-id $env:TRANSPORT_RELEASE_ID `
             --sha $env:GITHUB_SHA `
             --stage-key '${{ matrix.stage_key }}' `
             --stage-dir (Join-Path $env:RUNNER_TEMP 'windows-stage') `
             --archive-dir $env:RUNNER_TEMP
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Upload compiled Unix stage through the Complete draft release
+      - name: Upload compiled Unix stage through hidden transport draft
         if: matrix.kind != 'windows'
         shell: bash
         run: |
@@ -353,7 +485,7 @@ jobs:
           esac
           python3 scripts/complete_release_stage_transport.py upload \
             --repo "$GITHUB_REPOSITORY" \
-            --release-id "$RELEASE_ID" \
+            --release-id "$TRANSPORT_RELEASE_ID" \
             --sha "$GITHUB_SHA" \
             --stage-key '${{ matrix.stage_key }}' \
             --stage-dir "$stage" \
@@ -361,14 +493,15 @@ jobs:
 
   package-complete:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [prepare-draft, build-stage]
+    needs: [prepare-release, runtime-manifest, build-stage]
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 180
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_ID: ${{ needs.prepare-draft.outputs.release_id }}
+      RELEASE_ID: ${{ needs.prepare-release.outputs.public_release_id }}
+      TRANSPORT_RELEASE_ID: ${{ needs.prepare-release.outputs.transport_release_id }}
     steps:
       - name: Checkout exact Complete source without eager LFS hydration
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -377,47 +510,58 @@ jobs:
           fetch-depth: 1
           lfs: false
 
-      - name: Reclaim packaging disk and hydrate the full Complete tree
+      - name: Hydrate base engine assets only
         shell: bash
         run: |
           set -euo pipefail
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends git-lfs libarchive-tools
           git lfs install --local
-          git lfs pull --include="assets/**,mods/**" --exclude=""
+          git lfs pull --include="assets/**" --exclude="mods/**"
           python3 - <<'PY'
           from pathlib import Path
-          roots = [Path('assets'), Path('mods')]
+          root = Path('assets')
           pointer = b'version https://git-lfs.github.com/spec/v1\n'
-          for root in roots:
-              if not root.exists():
-                  raise SystemExit(f'missing Complete root: {root}')
-              for path in root.rglob('*'):
-                  if path.is_file() and path.read_bytes()[:80].startswith(pointer):
-                      raise SystemExit(f'unhydrated LFS pointer: {path}')
-          if not Path('mods/modsList.txt').is_file():
-              raise SystemExit('missing mods/modsList.txt')
-          print('All Complete assets/mods are hydrated.')
+          if not root.is_dir():
+              raise SystemExit('missing assets root')
+          for path in root.rglob('*'):
+              if path.is_file() and path.read_bytes()[:80].startswith(pointer):
+                  raise SystemExit(f'unhydrated asset LFS pointer: {path}')
+          print('Base engine assets hydrated; mod corpus intentionally excluded.')
           PY
-          df -h
 
-      - name: Recover all five compiled stages from the draft release
+      - name: Recover five compiled runtimes and generated manifest
         shell: bash
         run: |
           set -euo pipefail
           python3 scripts/complete_release_stage_transport.py download-all \
             --repo "$GITHUB_REPOSITORY" \
-            --release-id "$RELEASE_ID" \
+            --release-id "$TRANSPORT_RELEASE_ID" \
             --sha "$GITHUB_SHA" \
-            --stage-keys 'windows-x86_64,linux-x86_64,macos-arm64,macos-x86_64,android-arm64' \
+            --stage-keys 'windows-x86_64,linux-x86_64,macos-arm64,macos-x86_64,android-arm64,runtime-manifest' \
             --archive-dir "$RUNNER_TEMP/stage-archives" \
             --output-root "$RUNNER_TEMP/compiled"
+          manifest="$RUNNER_TEMP/compiled/complete-engine-stage-runtime-manifest/complete-runtime-manifest.json"
+          test -s "$manifest"
+          jq -e '.mod_count == 30 and (.mods | length) == 30' "$manifest" >/dev/null
+          cp "$manifest" assets/complete-runtime-manifest.json
 
-      - name: Package and upload the five cumulative Complete distributions
+      - name: Package and upload five lightweight Complete runtimes
         shell: bash
         run: bash scripts/complete_release_package.sh package
 
-      - name: Verify and promote the cumulative Complete draft
+      - name: Verify and promote the public Complete release
         shell: bash
         run: bash scripts/complete_release_package.sh finalize
+
+      - name: Clean hidden transport assets after successful promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(
+            gh api "repos/$GITHUB_REPOSITORY/releases/$TRANSPORT_RELEASE_ID/assets?per_page=100" --paginate --jq '.[].id'
+          )
+          for id in "${ids[@]}"; do
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$id" >/dev/null
+          done
+          echo "Removed ${#ids[@]} temporary transport asset(s)."

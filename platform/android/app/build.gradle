@@ -50,6 +50,9 @@ tasks.register('preparePulseForgeAssets', Sync) {
     into(new File(generatedPulseForgeAssets, 'pulseforge/assets'))
     from(pulseForgeSourceAssets) {
         include 'settings.json'
+        // Present only in Complete release builds. Ordinary OSS/dev APKs do not
+        // contain this file and therefore never trigger the Complete content gate.
+        include 'complete-runtime-manifest.json'
         include 'demo/**'
         include 'credits/**'
         include 'ui/**'
