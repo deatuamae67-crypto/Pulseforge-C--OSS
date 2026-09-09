@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +43,7 @@ def safe_relative_path(raw: object) -> PurePosixPath:
     return path
 
 
-def enumerate_folder(python: str, drive_id: str) -> list[dict[str, str]]:
+def _enumerate_folder_once(python: str, drive_id: str) -> list[dict[str, str]]:
     folder_url = f"https://drive.google.com/drive/folders/{drive_id}"
     command = [python, "-m", "gdown", folder_url, "--folder", "--json", "--quiet"]
     result = subprocess.run(
@@ -79,6 +80,43 @@ def enumerate_folder(python: str, drive_id: str) -> list[dict[str, str]]:
         files.append({"path": path, "url": url})
     files.sort(key=lambda item: item["path"].casefold())
     return files
+
+
+def enumerate_folder(
+    python: str,
+    drive_id: str,
+    *,
+    attempts: int = 4,
+) -> list[dict[str, str]]:
+    """Enumerate one Drive folder with bounded retries for transient gdown failures.
+
+    Retrying the individual folder avoids throwing away the metadata already
+    collected for earlier Complete descriptors when Drive/gdown has a temporary
+    request failure. Descriptor threshold failures remain non-retryable in
+    ``build_manifest`` because they represent a real inventory mismatch.
+    """
+    last_error: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return _enumerate_folder_once(python, drive_id)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError) as exc:
+            last_error = exc
+            if attempt >= attempts:
+                break
+            delay = min(30, attempt * 5)
+            detail = str(exc)
+            if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+                detail = exc.stderr.strip() or detail
+            print(
+                f"Drive enumeration retry {attempt}/{attempts - 1} for {drive_id} "
+                f"after: {detail}; sleeping {delay}s",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(delay)
+    raise RuntimeError(
+        f"failed to enumerate Google Drive folder {drive_id} after {attempts} attempts"
+    ) from last_error
 
 
 def load_descriptors(directory: Path) -> list[dict[str, Any]]:
