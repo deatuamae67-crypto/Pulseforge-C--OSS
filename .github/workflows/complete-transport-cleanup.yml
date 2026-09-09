@@ -1,0 +1,46 @@
+name: Remove Complete CI transport draft
+
+on:
+  workflow_run:
+    workflows:
+      - PulseForge 1.0.0 Complete lightweight runtimes
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pulseforge-complete-transport-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRANSPORT_TITLE: PulseForge Complete CI Transport
+      TRANSPORT_TAG: pulseforge-complete-ci-transport
+    steps:
+      - name: Delete hidden Complete transport draft releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          mapfile -t ids < <(
+            gh api "repos/$repo/releases?per_page=100" --paginate \
+              --jq ".[] | select(.draft == true and (.name == \"$TRANSPORT_TITLE\" or .tag_name == \"$TRANSPORT_TAG\")) | .id"
+          )
+          for id in "${ids[@]}"; do
+            echo "Deleting Complete CI transport draft release $id"
+            gh api --method DELETE "repos/$repo/releases/$id" >/dev/null
+          done
+
+          remaining="$(
+            gh api "repos/$repo/releases?per_page=100" --paginate \
+              --jq "[.[] | select(.draft == true and (.name == \"$TRANSPORT_TITLE\" or .tag_name == \"$TRANSPORT_TAG\"))] | length" \
+              | awk '{sum += $1} END {print sum + 0}'
+          )"
+          test "$remaining" -eq 0
+          echo "Removed ${#ids[@]} Complete CI transport draft release(s)."

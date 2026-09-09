@@ -10,7 +10,6 @@ set -euo pipefail
 : "${COMPLETE_TAG:?}"
 : "${RELEASE_TITLE:?}"
 : "${PACKAGE_VERSION:?}"
-: "${RELEASE_PART_LIMIT:?}"
 
 upload_candidate() {
   local file="$1"
@@ -84,6 +83,7 @@ package_windows() {
   local package="PulseForge-v${PACKAGE_VERSION}-Windows-x86_64"
   local root="$RUNNER_TEMP/package-windows"
   local out="$RUNNER_TEMP/release-windows"
+  local archive="$out/$package.zip"
   rm -rf "$root" "$out"
   mkdir -p "$root/$package/bin" "$out"
   cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-windows-x86_64/." "$root/$package/"
@@ -92,10 +92,8 @@ package_windows() {
   test -f "$root/$package/bin/pulseforge.exe"
   test -f "$root/$package/bin/assets/complete-runtime-manifest.json"
   test ! -e "$root/$package/bin/mods"
-  bsdtar -L --format zip -cf - -C "$root" "$package" \
-    | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.zip.part-"
-  mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.zip.part-*" -print | sort)
-  checksum_and_upload_files "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
+  bsdtar -L --format zip -cf "$archive" -C "$root" "$package"
+  checksum_and_upload_files "$out" "$package.SHA256SUMS.txt" "$archive"
   rm -rf "$root"
 }
 
@@ -104,6 +102,7 @@ package_unix_desktop() {
   local package="PulseForge-v${PACKAGE_VERSION}-${platform}"
   local root="$RUNNER_TEMP/package-${stage_key}"
   local out="$RUNNER_TEMP/release-${stage_key}"
+  local archive="$out/$package.tar.gz"
   rm -rf "$root" "$out"
   mkdir -p "$root/$package/bin" "$out"
   cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-${stage_key}/." "$root/$package/"
@@ -122,11 +121,8 @@ package_unix_desktop() {
   fi
   test -f "$root/$package/bin/assets/complete-runtime-manifest.json"
   test ! -e "$root/$package/bin/mods"
-  tar --dereference -C "$root" -cf - "$package" \
-    | gzip -9 \
-    | split -b "$RELEASE_PART_LIMIT" -d -a 3 - "$out/$package.tar.gz.part-"
-  mapfile -t parts < <(find "$out" -maxdepth 1 -type f -name "$package.tar.gz.part-*" -print | sort)
-  checksum_and_upload_files "$out" "$package.SHA256SUMS.txt" "${parts[@]}"
+  tar --dereference -C "$root" -czf "$archive" "$package"
+  checksum_and_upload_files "$out" "$package.SHA256SUMS.txt" "$archive"
   rm -rf "$root"
 }
 
@@ -149,7 +145,7 @@ package_android() {
   grep -q 'lib/arm64-v8a/libSDL3.so' "$out/${package}.contents.txt"
   ! grep -Eq '(^|[ /])mods/' "$out/${package}.contents.txt"
 
-  # Android Complete is now the installable runtime itself. The 30-mod corpus is
+  # Android Complete is the installable runtime itself. The 30-mod corpus is
   # downloaded on demand from Drive after the user accepts the startup prompt.
   checksum_and_upload_files "$out" "$package.SHA256SUMS.txt" "$apk"
   rm -f "$out/${package}.contents.txt"
@@ -162,23 +158,24 @@ verify_candidates() {
     --jq ".[] | select(.name | startswith(\"$prefix\")) | .name" \
     | sed "s/^$prefix//" | sort > "$names"
 
-  for platform in Windows-x86_64 Linux-x86_64 macOS-arm64 macOS-x86_64; do
+  grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Windows-x86_64.zip" "$names"
+  grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Windows-x86_64.SHA256SUMS.txt" "$names"
+  for platform in Linux-x86_64 macOS-arm64 macOS-x86_64; do
+    grep -Fxq "PulseForge-v${PACKAGE_VERSION}-${platform}.tar.gz" "$names"
     grep -Fxq "PulseForge-v${PACKAGE_VERSION}-${platform}.SHA256SUMS.txt" "$names"
-    grep -Eq "^PulseForge-v${PACKAGE_VERSION}-${platform}.*\\.part-[0-9]{3}$" "$names"
   done
   grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Android-arm64.SHA256SUMS.txt" "$names"
   grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Android-arm64-test-signed.apk" "$names"
-  ! grep -Eq "^PulseForge-v${PACKAGE_VERSION}-Android-arm64.*\\.part-[0-9]{3}$" "$names"
+  ! grep -Eq '\.part-[0-9]{3}$' "$names"
   ! grep -Fq 'TEST-ONLY' "$names"
   ! grep -Fq -- '-mod-' "$names"
-  echo 'Verified five lightweight Complete runtime candidate sets.'
+  test "$(wc -l < "$names")" -eq 10
+  echo 'Verified five lightweight Complete runtime candidate sets in normal 1.0.0 package formats.'
 }
 
 finalize_release() {
   verify_candidates
   local prefix="CANDIDATE-${GITHUB_SHA}--"
-  local was_draft
-  was_draft="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')"
 
   # Candidates coexist with the current stable assets until every runtime has
   # been uploaded and verified. Only then are the previous stable assets removed.
@@ -215,16 +212,15 @@ finalize_release() {
 
 **Compiled Complete runtime snapshot:** \`$GITHUB_SHA\`
 
-The five platform downloads are lightweight engine runtimes. They do **not**
-bundle the 30-mod corpus. Each runtime carries only the small
-\`complete-runtime-manifest.json\`; when content is missing or outdated,
-PulseForge asks the user whether to download the required mods directly from
-the canonical Google Drive folders.
+The five platform downloads are lightweight engine runtimes built from this
+exact tested `main` commit. They do **not** bundle the 30-mod corpus. Each
+runtime carries the small `complete-runtime-manifest.json`; when content is
+missing or outdated, PulseForge asks the user whether to download the required
+mods directly from the canonical Google Drive folders.
 
-Android is distributed as the installable test-signed APK itself rather than a
-large archive containing a duplicate \`mods/\` tree. Desktop archives may be
-split only to respect GitHub's per-asset limit; SHA256SUMS authenticates every
-published file.
+The public downloads use the same practical formats as the normal 1.0.0 engine
+release: a Windows `.zip`, Linux/macOS `.tar.gz` archives and the installable
+Android `.apk`, each accompanied by a SHA-256 checksum file.
 EOF
   )"
   gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
@@ -232,10 +228,10 @@ EOF
     -f target_commitish="$GITHUB_SHA" \
     -f name="$RELEASE_TITLE" \
     -f body="$body" \
-    -F draft="$was_draft" \
+    -F draft=false \
     -F prerelease=false >/dev/null
 
-  test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')" = "$was_draft"
+  test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.draft')" = false
   test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.target_commitish')" = "$GITHUB_SHA"
   test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq '.tag_name')" = "$COMPLETE_TAG"
   test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$COMPLETE_TAG" --jq '.object.sha')" = "$GITHUB_SHA"
@@ -246,13 +242,16 @@ EOF
   ! grep -Fq 'STAGE-' "$assets"
   ! grep -Fq 'TEST-ONLY' "$assets"
   ! grep -Fq -- '-mod-' "$assets"
-  for platform in Windows-x86_64 Linux-x86_64 macOS-arm64 macOS-x86_64; do
+  ! grep -Eq '\.part-[0-9]{3}$' "$assets"
+  grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Windows-x86_64.zip" "$assets"
+  grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Windows-x86_64.SHA256SUMS.txt" "$assets"
+  for platform in Linux-x86_64 macOS-arm64 macOS-x86_64; do
+    grep -Fxq "PulseForge-v${PACKAGE_VERSION}-${platform}.tar.gz" "$assets"
     grep -Fxq "PulseForge-v${PACKAGE_VERSION}-${platform}.SHA256SUMS.txt" "$assets"
-    grep -Eq "^PulseForge-v${PACKAGE_VERSION}-${platform}.*\\.part-[0-9]{3}$" "$assets"
   done
   grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Android-arm64.SHA256SUMS.txt" "$assets"
   grep -Fxq "PulseForge-v${PACKAGE_VERSION}-Android-arm64-test-signed.apk" "$assets"
-  ! grep -Eq "^PulseForge-v${PACKAGE_VERSION}-Android-arm64.*\\.part-[0-9]{3}$" "$assets"
+  test "$(wc -l < "$assets")" -eq 10
   printf 'PulseForge Complete release now represents lightweight runtime commit %s\n' "$GITHUB_SHA"
 }
 

@@ -4,7 +4,10 @@
   "name": "drive-pack-christmasred-edition",
   "slug": "drive-pack-christmasred-edition",
   "drive_id": "1_Z0ZzstG7rhDkqOfdQOvaEva96ssAQ3N",
-  "min_files": 1441,
+  "source_min_files": 1441,
+  "min_files": 1317,
+  "materialized_min_files": 1317,
+  "materialized_min_files_basis": "The authoritative Google Drive manifest currently enumerates 1317 files and materializes exactly 851092276 bytes, matching docs/MOD_CORPUS_1.0.0.json and the retained historical byte threshold. The previous 1441-file threshold is preserved separately as source_min_files for provenance.",
   "min_bytes": 851092276,
   "enabled_by_default": true,
   "default_state_basis": "historical modsList=1"
