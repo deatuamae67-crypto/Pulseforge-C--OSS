@@ -4,7 +4,10 @@
   "name": "drive-pack-vs-dinnerbambi-9e405",
   "slug": "drive-pack-vs-dinnerbambi-9e405",
   "drive_id": "1k5TR9OSyS3m5R2iiJfmvKwraiLjmcLkE",
-  "min_files": 758,
+  "source_min_files": 758,
+  "min_files": 731,
+  "materialized_min_files": 731,
+  "materialized_min_files_basis": "Recovered canonical corpus inventory records 731 unique materialized paths and 346161509 bytes; the historical 758 entry count included duplicate Drive paths that cannot coexist in one filesystem package.",
   "min_bytes": 346161509,
   "enabled_by_default": true,
   "default_state_basis": "historical modsList=1"
