@@ -1,9 +1,13 @@
 package org.pulseforge.engine;
 
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.util.Log;
@@ -16,10 +20,14 @@ import android.view.WindowManager;
 import org.libsdl.app.SDLActivity;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 
 /** SDL host that gives the native runtime stable, writable content roots. */
 public final class PulseForgeActivity extends SDLActivity {
     private static final String TAG = "PulseForge";
+    private static final long STALE_ARCHIVE_IMPORT_MS = 24L * 60L * 60L * 1000L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -43,6 +51,7 @@ public final class PulseForgeActivity extends SDLActivity {
 
         setProcessEnvironment("PULSEFORGE_ASSET_ROOT", assets.getAbsolutePath());
         setProcessEnvironment("PULSEFORGE_MOD_ROOT", mods.getAbsolutePath());
+        cleanupStaleArchiveImports();
 
         super.onCreate(savedInstanceState);
         if (mBrokenLibraries) {
@@ -64,6 +73,160 @@ public final class PulseForgeActivity extends SDLActivity {
             Os.setenv(name, value, true);
         } catch (ErrnoException exception) {
             Log.e(TAG, "Unable to set Android process environment variable " + name, exception);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        // SDL3 deliberately returns content:// URIs for Android file dialogs.
+        // PulseForge's cross-platform importers consume ordinary filesystem
+        // paths, so bridge selected files into app-owned storage before SDL's
+        // callback forwards the selection to native code. Folder/tree URIs are
+        // intentionally left untouched; this bridge is only for file selections.
+        if (resultCode == RESULT_OK && data != null) {
+            materializeSelectedContentFile(data);
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    private void materializeSelectedContentFile(Intent data) {
+        Uri uri = data.getData();
+        if (uri == null && data.getClipData() != null
+            && data.getClipData().getItemCount() == 1) {
+            uri = data.getClipData().getItemAt(0).getUri();
+        }
+        if (uri == null || !"content".equalsIgnoreCase(uri.getScheme())) {
+            return;
+        }
+
+        final String uriText = uri.toString();
+        if (uriText.contains("/tree/")) {
+            return;
+        }
+
+        final String displayName = queryDisplayName(uri);
+        final String safeName = sanitizeSelectionName(displayName);
+        final boolean archive = isModArchiveName(safeName);
+
+        File root;
+        if (archive) {
+            root = getExternalCacheDir();
+            if (root == null) {
+                root = getCacheDir();
+            }
+            root = new File(root, "pulseforge-file-dialog-archives");
+        } else {
+            root = getExternalFilesDir("imports");
+            if (root == null) {
+                root = new File(getFilesDir(), "pulseforge/imports");
+            }
+        }
+        if (!root.isDirectory() && !root.mkdirs() && !root.isDirectory()) {
+            Log.e(TAG, "Unable to create Android file-dialog bridge root: " + root);
+            return;
+        }
+
+        final File target = new File(
+            root,
+            Long.toUnsignedString(System.nanoTime()) + "-" + safeName
+        );
+        try (
+            InputStream input = getContentResolver().openInputStream(uri);
+            FileOutputStream output = new FileOutputStream(target)
+        ) {
+            if (input == null) {
+                Log.e(TAG, "ContentResolver returned no stream for selected URI: " + uri);
+                return;
+            }
+            final byte[] buffer = new byte[256 * 1024];
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                if (count != 0) {
+                    output.write(buffer, 0, count);
+                }
+            }
+            output.flush();
+        } catch (IOException | SecurityException exception) {
+            if (!target.delete() && target.exists()) {
+                Log.w(TAG, "Unable to remove failed Android dialog bridge file: " + target);
+            }
+            Log.e(TAG, "Unable to materialize selected Android content URI", exception);
+            return;
+        }
+
+        // SDLActivity forwards Intent.getData().toString() to native code. A
+        // scheme-less Uri created from the absolute path therefore becomes the
+        // normal filesystem path expected by std::filesystem and install_mod().
+        data.setData(Uri.parse(target.getAbsolutePath()));
+        Log.i(TAG, "Materialized Android file-dialog selection to " + target);
+    }
+
+    private String queryDisplayName(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(
+            uri,
+            new String[]{OpenableColumns.DISPLAY_NAME},
+            null,
+            null,
+            null
+        )) {
+            if (cursor != null && cursor.moveToFirst()) {
+                final int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (index >= 0) {
+                    final String value = cursor.getString(index);
+                    if (value != null && !value.isEmpty()) {
+                        return value;
+                    }
+                }
+            }
+        } catch (RuntimeException exception) {
+            Log.w(TAG, "Unable to query Android file-dialog display name", exception);
+        }
+        final String fallback = uri.getLastPathSegment();
+        return fallback == null || fallback.isEmpty() ? "selected-file" : fallback;
+    }
+
+    private static String sanitizeSelectionName(String value) {
+        if (value == null || value.isEmpty()) {
+            return "selected-file";
+        }
+        final StringBuilder result = new StringBuilder(Math.min(value.length(), 180));
+        for (int index = 0; index < value.length() && result.length() < 180; ++index) {
+            final char character = value.charAt(index);
+            final boolean allowed = (character >= 'a' && character <= 'z')
+                || (character >= 'A' && character <= 'Z')
+                || (character >= '0' && character <= '9')
+                || character == '.' || character == '-' || character == '_';
+            result.append(allowed ? character : '_');
+        }
+        while (result.length() > 0
+            && (result.charAt(0) == '.' || result.charAt(0) == ' ')) {
+            result.deleteCharAt(0);
+        }
+        return result.length() == 0 ? "selected-file" : result.toString();
+    }
+
+    private static boolean isModArchiveName(String name) {
+        final String lower = name.toLowerCase(java.util.Locale.ROOT);
+        return lower.endsWith(".zip") || lower.endsWith(".7z")
+            || lower.endsWith(".rar") || lower.endsWith(".tar");
+    }
+
+    private void cleanupStaleArchiveImports() {
+        File root = getExternalCacheDir();
+        if (root == null) {
+            root = getCacheDir();
+        }
+        final File directory = new File(root, "pulseforge-file-dialog-archives");
+        final File[] entries = directory.listFiles();
+        if (entries == null) {
+            return;
+        }
+        final long cutoff = System.currentTimeMillis() - STALE_ARCHIVE_IMPORT_MS;
+        for (File entry : entries) {
+            if (entry.isFile() && entry.lastModified() < cutoff
+                && !entry.delete() && entry.exists()) {
+                Log.w(TAG, "Unable to remove stale Android archive bridge file: " + entry);
+            }
         }
     }
 
