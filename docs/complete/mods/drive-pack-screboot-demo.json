@@ -4,8 +4,11 @@
   "name": "drive-pack-screboot-demo",
   "slug": "drive-pack-screboot-demo",
   "drive_id": "1s40Q-khRW33tvM9RsEdQ0gOgB6rTONkg",
-  "min_files": 1848,
+  "min_files": 1288,
   "min_bytes": 592464073,
   "enabled_by_default": true,
-  "default_state_basis": "historical modsList=1"
+  "default_state_basis": "historical modsList=1",
+  "source_min_files": 1848,
+  "materialized_min_files": 1288,
+  "materialized_min_files_basis": "Canonical MOD_CORPUS_1.0.0 inventory for this Drive folder records 1288 materialized files and 592464073 unpacked bytes."
 }

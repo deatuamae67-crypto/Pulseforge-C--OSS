@@ -25,7 +25,7 @@ jobs:
   runtime-manifest:
     name: Generate Complete startup manifest
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - name: Checkout exact release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -43,19 +43,10 @@ jobs:
           "$venv/bin/python" -m pip install --disable-pip-version-check --no-cache-dir --retries 5 "gdown==$GDOWN_VERSION"
           mkdir -p "$RUNNER_TEMP/complete-runtime-manifest"
           manifest="$RUNNER_TEMP/complete-runtime-manifest/complete-runtime-manifest.json"
-          ok=0
-          for attempt in 1 2 3; do
-            if "$venv/bin/python" scripts/generate_complete_drive_runtime_manifest.py \
-              --python "$venv/bin/python" \
-              --source-commit "$GITHUB_SHA" \
-              --output "$manifest"; then
-              ok=1
-              break
-            fi
-            echo "Runtime manifest generation attempt $attempt failed; retrying." >&2
-            sleep $((attempt * 15))
-          done
-          (( ok == 1 ))
+          "$venv/bin/python" scripts/generate_complete_drive_runtime_manifest.py \
+            --python "$venv/bin/python" \
+            --source-commit "$GITHUB_SHA" \
+            --output "$manifest"
           jq -e '.schema_version == 1 and .edition == "1.0.0-complete" and .mod_count == 30 and (.mods | length) == 30' "$manifest" >/dev/null
           printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/complete-runtime-manifest/PULSEFORGE_SOURCE_SHA.txt"
 
