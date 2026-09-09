@@ -43,6 +43,63 @@ def safe_relative_path(raw: object) -> PurePosixPath:
     return path
 
 
+def normalize_gdown_payload(payload: object, drive_id: str) -> list[dict[str, str]]:
+    """Validate gdown metadata and collapse exact duplicate destination paths.
+
+    Google Drive permits legacy trees that enumerate two file objects at the
+    same relative path. A filesystem package cannot materialize both objects at
+    that destination, so exact duplicates are collapsed to one deterministic
+    source URL. Case-only collisions remain fatal because they are unsafe across
+    Windows/macOS filesystems and would make the release platform-dependent.
+    """
+    if not isinstance(payload, list) or not payload:
+        raise RuntimeError(f"gdown returned an empty/non-list manifest for {drive_id}")
+
+    files_by_path: dict[str, dict[str, str]] = {}
+    folded_paths: dict[str, str] = {}
+    duplicate_entries = 0
+    for entry in payload:
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"invalid gdown manifest entry: {entry!r}")
+        url = entry.get("url")
+        if not isinstance(url, str) or not url.startswith(DRIVE_URL_PREFIXES):
+            raise RuntimeError(f"invalid/non-Drive gdown manifest URL: {url!r}")
+        path = safe_relative_path(entry.get("path")).as_posix()
+        folded_path = path.casefold()
+
+        existing_case = folded_paths.get(folded_path)
+        if existing_case is not None and existing_case != path:
+            raise RuntimeError(
+                f"case-colliding gdown manifest paths: {existing_case!r} and {path!r}"
+            )
+
+        candidate = {"path": path, "url": url}
+        existing = files_by_path.get(path)
+        if existing is not None:
+            duplicate_entries += 1
+            # gdown can expose distinct Drive object URLs for the same final
+            # filesystem path. Pick a stable winner so content_revision does
+            # not depend on the enumeration order returned by Drive.
+            if candidate["url"] < existing["url"]:
+                files_by_path[path] = candidate
+            continue
+
+        folded_paths[folded_path] = path
+        files_by_path[path] = candidate
+
+    if duplicate_entries:
+        print(
+            f"Drive folder {drive_id}: collapsed {duplicate_entries} exact duplicate "
+            "gdown path entr" + ("y" if duplicate_entries == 1 else "ies"),
+            file=sys.stderr,
+            flush=True,
+        )
+
+    files = list(files_by_path.values())
+    files.sort(key=lambda item: (item["path"].casefold(), item["path"], item["url"]))
+    return files
+
+
 def _enumerate_folder_once(python: str, drive_id: str) -> list[dict[str, str]]:
     folder_url = f"https://drive.google.com/drive/folders/{drive_id}"
     command = [python, "-m", "gdown", folder_url, "--folder", "--json", "--quiet"]
@@ -57,29 +114,7 @@ def _enumerate_folder_once(python: str, drive_id: str) -> list[dict[str, str]]:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"gdown JSON manifest was invalid: {exc}") from exc
-    if not isinstance(payload, list) or not payload:
-        raise RuntimeError(f"gdown returned an empty/non-list manifest for {drive_id}")
-
-    files: list[dict[str, str]] = []
-    exact: set[str] = set()
-    folded: set[str] = set()
-    for entry in payload:
-        if not isinstance(entry, dict):
-            raise RuntimeError(f"invalid gdown manifest entry: {entry!r}")
-        url = entry.get("url")
-        if not isinstance(url, str) or not url.startswith(DRIVE_URL_PREFIXES):
-            raise RuntimeError(f"invalid/non-Drive gdown manifest URL: {url!r}")
-        path = safe_relative_path(entry.get("path")).as_posix()
-        folded_path = path.casefold()
-        if path in exact:
-            raise RuntimeError(f"duplicate gdown manifest path: {path}")
-        if folded_path in folded:
-            raise RuntimeError(f"case-colliding gdown manifest path: {path}")
-        exact.add(path)
-        folded.add(folded_path)
-        files.append({"path": path, "url": url})
-    files.sort(key=lambda item: item["path"].casefold())
-    return files
+    return normalize_gdown_payload(payload, drive_id)
 
 
 def enumerate_folder(
@@ -205,6 +240,29 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError(f"unsafe path accepted: {bad!r}")
+
+    duplicate_payload = [
+        {"path": "mod/characters/a.json", "url": "https://drive.google.com/uc?id=z"},
+        {"path": "mod/characters/a.json", "url": "https://drive.google.com/uc?id=a"},
+        {"path": "mod/data/song.json", "url": "https://drive.google.com/uc?id=song"},
+    ]
+    normalized = normalize_gdown_payload(duplicate_payload, "self-test")
+    assert normalized == [
+        {"path": "mod/characters/a.json", "url": "https://drive.google.com/uc?id=a"},
+        {"path": "mod/data/song.json", "url": "https://drive.google.com/uc?id=song"},
+    ]
+    try:
+        normalize_gdown_payload(
+            [
+                {"path": "Mod/file.json", "url": "https://drive.google.com/uc?id=1"},
+                {"path": "mod/file.json", "url": "https://drive.google.com/uc?id=2"},
+            ],
+            "self-test-case-collision",
+        )
+    except RuntimeError as exc:
+        assert "case-colliding" in str(exc)
+    else:
+        raise AssertionError("case-only collision accepted")
 
     first = {"slug": "a", "files": [{"path": "x", "url": "https://drive.google.com/uc?id=x"}]}
     second = json.loads(json.dumps(first))
