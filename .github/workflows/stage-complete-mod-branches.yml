@@ -263,7 +263,9 @@ jobs:
           python3 scripts/recover_complete_mod_dependencies.py . --target "$TARGET" --output "$RUNNER_TEMP/complete-mod-recovery-$ITEM_SLUG.json"
 
       - name: Audit functional dependency closure before Git LFS conversion
+        id: payload_audit
         if: success() && steps.source_download.outcome == 'success'
+        continue-on-error: true
         shell: bash
         env:
           TARGET: ${{ steps.mod.outputs.target }}
@@ -271,6 +273,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/audit_complete_mod_payload.py . --mod-root "$TARGET" --descriptor "$DESCRIPTOR" --output "$RUNNER_TEMP/complete-mod-audit-$ITEM_SLUG.json"
+
+      - name: Report candidate deferred after dependency audit failure
+        if: steps.payload_audit.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning title=Complete candidate deferred::$ITEM_SLUG did not satisfy the fail-closed runtime dependency audit. Diagnostics were preserved; this isolated candidate will not be published until its source dependencies are complete or explicitly documented as archival."
 
       - name: Upload dependency audit, recovery provenance and Drive diagnostics
         if: always()
@@ -284,15 +292,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Require authoritative candidate availability
+      - name: Defer unavailable authoritative candidate
         if: steps.source_download.outcome == 'failure'
         shell: bash
         run: |
-          echo "$ITEM_SLUG: Drive pass incomplete; partial progress was cached for rerun on a fresh runner" >&2
-          exit 1
+          echo "::warning title=Complete candidate deferred::$ITEM_SLUG Drive pass was incomplete; partial progress was cached for a later fresh runner. No content branch will be published from an incomplete transfer."
 
       - name: Commit and publish this mod branch
-        if: success() && steps.source_download.outcome == 'success'
+        if: success() && steps.source_download.outcome == 'success' && steps.payload_audit.outcome == 'success'
         shell: bash
         env:
           TARGET: ${{ steps.mod.outputs.target }}
