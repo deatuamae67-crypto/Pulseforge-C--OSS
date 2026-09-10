@@ -11,6 +11,8 @@ if (externalBuildRoot != null && !externalBuildRoot.trim().isEmpty()) {
 
 def generatedPulseForgeAssets = layout.buildDirectory.dir('generated/pulseforge-assets').get().asFile
 def pulseForgeSourceAssets = file('../../../assets')
+def pulseForgeAndroidAbi = providers.gradleProperty('PULSEFORGE_ANDROID_ABI')
+    .orElse('arm64-v8a').get()
 
 def discordSdkAarProperty = providers.gradleProperty('PULSEFORGE_DISCORD_SDK_AAR').orNull
 def pulseForgeSettingsFile = file('../../../assets/settings.json')
@@ -97,7 +99,7 @@ android {
                     '-DPULSEFORGE_BUNDLE_FFMPEG=OFF',
                     "-DPULSEFORGE_DISCORD_APPLICATION_ID=${discordApplicationId}",
                     "-DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=${discordSdkEnabled ? 'ON' : 'OFF'}"
-                abiFilters 'arm64-v8a'
+                abiFilters pulseForgeAndroidAbi
                 targets 'pulseforge'
             }
         }
