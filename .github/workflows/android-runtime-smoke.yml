@@ -154,20 +154,45 @@ jobs:
             -gpu swiftshader_indirect \
             >"$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
-          if ! timeout 300 adb wait-for-device; then
-            echo 'Android emulator did not expose an ADB device within 300 seconds.' >&2
+
+          adb_ready=0
+          adb_deadline=$((SECONDS + 300))
+          while (( SECONDS < adb_deadline )); do
             if ! kill -0 "$emulator_pid" 2>/dev/null; then
-              echo 'The emulator process exited before ADB became available.' >&2
+              echo 'The Android emulator process exited before ADB became available.' >&2
+              tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
+              exit 1
             fi
+            if [[ "$(timeout 5 adb get-state 2>/dev/null || true)" == 'device' ]]; then
+              adb_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if (( adb_ready == 0 )); then
+            echo 'Android emulator did not expose a usable ADB device within 300 seconds.' >&2
+            timeout 10 adb devices -l >&2 || true
             tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
             exit 1
           fi
-          if ! timeout 600 bash -c '
-            until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do
-              sleep 5
-            done
-          '; then
+
+          boot_complete=0
+          boot_deadline=$((SECONDS + 600))
+          while (( SECONDS < boot_deadline )); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo 'The Android emulator process exited after ADB became available but before boot completed.' >&2
+              tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
+              exit 1
+            fi
+            if [[ "$(timeout 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" == '1' ]]; then
+              boot_complete=1
+              break
+            fi
+            sleep 5
+          done
+          if (( boot_complete == 0 )); then
             echo 'Android emulator exposed ADB but did not finish booting within 600 seconds.' >&2
+            timeout 10 adb devices -l >&2 || true
             tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
             exit 1
           fi
@@ -209,7 +234,19 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          echo '--- emulator ---'
-          tail -n 300 "$RUNNER_TEMP/emulator.log" 2>/dev/null || true
+          set +e
+          echo '--- KVM / acceleration ---'
+          ls -l /dev/kvm 2>&1 || true
+          timeout 10 "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check 2>&1 || true
+          echo '--- emulator processes ---'
+          ps -ef | grep -E '[e]mulator|[q]emu' || true
+          echo '--- adb devices ---'
+          timeout 10 adb devices -l 2>&1 || true
+          echo '--- emulator log ---'
+          tail -n 400 "$RUNNER_TEMP/emulator.log" 2>/dev/null || true
           echo '--- logcat ---'
-          adb logcat -d -v threadtime 2>/dev/null | tail -n 600 || true
+          if [[ "$(timeout 5 adb get-state 2>/dev/null || true)" == 'device' ]]; then
+            timeout 20 adb logcat -d -v threadtime 2>/dev/null | tail -n 600 || true
+          else
+            echo 'No usable ADB device; logcat unavailable.'
+          fi
