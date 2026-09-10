@@ -47,12 +47,23 @@ jobs:
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager \
             'platform-tools' \
-            'emulator' \
             'platforms;android-36' \
             'build-tools;36.0.0' \
             'ndk;28.2.13676358' \
             'cmake;3.31.6' \
             'system-images;android-36;google_apis;x86_64'
+
+          # GitHub's runner image can contain an older emulator package even when
+          # sdkmanager installs a newer API 36 system image. Pin a known stable
+          # emulator so the engine and system image cannot drift out of sync.
+          emulator_zip="$RUNNER_TEMP/emulator-linux_x64-15917651.zip"
+          curl --fail --location --retry 3 --retry-all-errors \
+            'https://dl.google.com/android/repository/emulator-linux_x64-15917651.zip' \
+            --output "$emulator_zip"
+          echo '95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266  '"$emulator_zip" | sha256sum --check
+          rm -rf "$ANDROID_SDK_ROOT/emulator"
+          unzip -q "$emulator_zip" -d "$ANDROID_SDK_ROOT"
+          "$ANDROID_SDK_ROOT/emulator/emulator" -version
           sudo chmod 666 /dev/kvm 2>/dev/null || true
 
       - name: Hydrate engine assets without mods
@@ -151,7 +162,7 @@ jobs:
           nohup "$ANDROID_SDK_ROOT/emulator/emulator" \
             -avd pulseforge-api36 \
             -no-window -noaudio -no-boot-anim -no-snapshot -wipe-data \
-            -gpu swiftshader_indirect \
+            -gpu software \
             >"$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
 
