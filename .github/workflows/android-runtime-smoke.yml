@@ -153,12 +153,24 @@ jobs:
             -no-window -noaudio -no-boot-anim -no-snapshot -wipe-data \
             -gpu swiftshader_indirect \
             >"$RUNNER_TEMP/emulator.log" 2>&1 &
-          adb wait-for-device
-          timeout 600 bash -c '
+          emulator_pid=$!
+          if ! timeout 300 adb wait-for-device; then
+            echo 'Android emulator did not expose an ADB device within 300 seconds.' >&2
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo 'The emulator process exited before ADB became available.' >&2
+            fi
+            tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
+            exit 1
+          fi
+          if ! timeout 600 bash -c '
             until [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" == "1" ]]; do
               sleep 5
             done
-          '
+          '; then
+            echo 'Android emulator exposed ADB but did not finish booting within 600 seconds.' >&2
+            tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
+            exit 1
+          fi
           adb shell input keyevent 82 || true
 
       - name: Install and launch PulseForge
