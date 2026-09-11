@@ -14,7 +14,19 @@ def replace(path: str, old: str, new: str, expected: int | None = None) -> None:
     p.write_text(text.replace(old, new), encoding="utf-8")
 
 
-# Public chart contract: no arbitrary total note/event/tempo/source ceiling.
+def replace_if_present(path: str, old: str, new: str) -> int:
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    found = text.count(old)
+    if found:
+        p.write_text(text.replace(old, new), encoding="utf-8")
+    return found
+
+
+# Remove the historical 5,000,000-note and 512 MiB values as chart-validity
+# ceilings. Keep the exact same numbers as materialized-loader routing budgets,
+# because the fast DOM/vector path is not how billion/trillion-note charts are
+# supposed to be represented. PFC1/PatternRun remains the scalable path.
 replace(
     "include/pulseforge/chart.hpp",
     "#include <filesystem>\n#include <string>",
@@ -36,46 +48,43 @@ inline constexpr std::size_t maximum_chart_events = 250'000;
 inline constexpr std::uint64_t maximum_chart_json_bytes =
     512ULL * 1024ULL * 1024ULL;
 """,
-    """// Chart-wide totals deliberately have no product-policy ceiling. The only
-// absolute ceilings are the host/format representations themselves. This lets
-// stress charts scale from millions through billions/trillions of logical notes
-// without being rejected solely because of cardinality or source size.
-inline constexpr std::size_t maximum_chart_tempo_changes =
-    std::numeric_limits<std::size_t>::max();
+    """// Shared materialized-model limits that are unrelated to note cardinality.
+// Tempo/event metadata is still materialized today, so those independent bounds
+// remain until those timelines are streamed too.
+inline constexpr std::size_t maximum_chart_tempo_changes = 100'000;
+inline constexpr std::size_t maximum_chart_events = 250'000;
+
+// There is no product-policy ceiling on total chart notes or JSON source bytes.
+// The scalable PFC1 path uses 64-bit counters and PatternRun can represent
+// millions, billions or trillions of logical notes without expanding them.
 inline constexpr std::size_t maximum_chart_notes =
-    std::numeric_limits<std::size_t>::max();
-inline constexpr std::size_t maximum_chart_events =
     std::numeric_limits<std::size_t>::max();
 inline constexpr std::uint64_t maximum_chart_json_bytes =
     std::numeric_limits<std::uint64_t>::max();
 
-// The fully materialized JSON path still needs routing budgets so a giant chart
-// is sent to PFC1 instead of duplicating the complete source/model in RAM. These
-// are NOT validity limits: exceeding one selects the streaming architecture.
-inline constexpr std::size_t materialized_chart_tempo_budget = 100'000;
+// These are routing budgets, NOT chart validity limits. Crossing either budget
+// selects the bounded PFC1 streaming architecture instead of materializing the
+// whole source/model in RAM. This distinction is critical on Android.
 inline constexpr std::size_t materialized_chart_note_budget = 5'000'000;
-inline constexpr std::size_t materialized_chart_event_budget = 250'000;
 inline constexpr std::uint64_t materialized_chart_json_budget =
     512ULL * 1024ULL * 1024ULL;
 """,
     1,
 )
 
-# Keep legacy/materialized parsers bounded; their old thresholds now route to
-# PFC1 instead of defining whether the chart is valid.
+# The materialized parsers retain their old budgets solely so they can decline
+# and let application/launcher fall through to streaming. No PFC1 total-note or
+# total-source limit is introduced here.
+replacements = 0
 for path in ("src/io/chart_loader.cpp", "src/io/fast_psych_loader.cpp"):
-    p = Path(path)
-    text = p.read_text(encoding="utf-8")
-    for old, new in (
-        ("maximum_chart_json_bytes", "materialized_chart_json_budget"),
-        ("maximum_chart_notes", "materialized_chart_note_budget"),
-        ("maximum_chart_events", "materialized_chart_event_budget"),
-        ("maximum_chart_tempo_changes", "materialized_chart_tempo_budget"),
-    ):
-        if old not in text:
-            raise SystemExit(f"{path}: expected materialized budget anchor {old}")
-        text = text.replace(old, new)
-    p.write_text(text, encoding="utf-8")
+    replacements += replace_if_present(
+        path, "maximum_chart_json_bytes", "materialized_chart_json_budget"
+    )
+    replacements += replace_if_present(
+        path, "maximum_chart_notes", "materialized_chart_note_budget"
+    )
+if replacements == 0:
+    raise SystemExit("materialized loader routing anchors were not found")
 
 replace(
     "src/app/launcher.cpp",
@@ -84,144 +93,22 @@ replace(
     1,
 )
 
-# Validation no longer imposes a 12-hour chart horizon or historical 2M
-# generated-gameplay-event policy ceiling. Finite/overflow checks stay.
+# The 2,000,000 generated-gameplay-event estimate was another chart-wide policy
+# ceiling that could reject a dense but otherwise valid materialized chart. The
+# actual streaming scheduler remains bounded per frame/window/update.
 replace(
     "src/core/chart.cpp",
-    """// Matches the procedural-audio clock ceiling and comfortably includes the
-// multi-hour stress songs used by Denpa-family builds. Explicit audio remains
-// subject to the decoder's bounded-memory policy until streaming is selected.
-constexpr double maximum_chart_time_ms = 12.0 * 60.0 * 60.0 * 1'000.0;
-constexpr double maximum_chart_scroll_speed = 100.0;
-constexpr std::size_t maximum_generated_gameplay_events = 2'000'000;
-""",
-    """// No arbitrary chart-duration or generated-event ceiling. Finite arithmetic,
-// the selected transport, and the 64-bit PFC1 timestamp/count representation are
-// the authoritative limits for stress-scale content.
-constexpr double maximum_chart_time_ms = std::numeric_limits<double>::max();
-constexpr double maximum_chart_scroll_speed = 100.0;
-constexpr std::size_t maximum_generated_gameplay_events =
-    std::numeric_limits<std::size_t>::max();
-""",
+    "constexpr std::size_t maximum_generated_gameplay_events = 2'000'000;",
+    "constexpr std::size_t maximum_generated_gameplay_events =\n    std::numeric_limits<std::size_t>::max();",
     1,
 )
 
-# Streaming importer: source/note totals were already uint64-unbounded. Remove
-# remaining default chart-wide section/event-file ceilings.
-replace(
-    "include/pulseforge/streaming_chart_importer.hpp",
-    """    // Psych sections are tracked in a materialized vector<bool>. Keep that
-    // allocation finite without limiting the 64-bit note/source totals.
-    std::uint64_t max_sections{1'000'000'000ULL};
-""",
-    """    // No default section-count policy ceiling. The bit-packed section map grows
-    // until the host allocator/size representation is exhausted; callers that
-    // process untrusted data may still set a lower limit explicitly.
-    std::uint64_t max_sections{std::numeric_limits<std::uint64_t>::max()};
-""",
-    1,
-)
-replace(
-    "include/pulseforge/streaming_chart_importer.hpp",
-    """    // Adjacent Psych events.json/event.json is parsed with nlohmann::json and
-    // therefore materialized in memory. Keep a separate, configurable input
-    // budget instead of tying it to the effectively-unbounded note JSON size.
-    std::uint64_t max_adjacent_event_bytes{64U * 1024U * 1024U};
-""",
-    """    // Adjacent Psych events.json/event.json is materialized. Stress mode now
-    // defaults to representation-limited size rather than a product-policy cap;
-    // callers can still lower this for untrusted-input deployments.
-    std::uint64_t max_adjacent_event_bytes{
-        std::numeric_limits<std::uint64_t>::max()
-    };
-""",
-    1,
-)
-replace(
-    "include/pulseforge/streaming_chart_importer.hpp",
-    """    // Bounded metadata projection used by the visual streaming runtime. Notes
-    // remain empty. Chart events are bounded by maximum_chart_events and are
-    // persisted into the private PFE1 event sidecar by the runtime cache.
-""",
-    """    // Metadata projection used by the visual streaming runtime. Notes remain
-    // empty; chart-event cardinality follows the representation limit by default
-    // and is persisted into the private PFE1 event sidecar.
-""",
-    1,
-)
+# The bridge inherits the now allocator-limited note total by default. No change
+# is required to PFC1's total logical/explicit note limits: they are already
+# uint64_t max. Keep chunk/window/query budgets finite because they are working
+# sets, not chart-size ceilings.
 
-# PFC1 chart-wide metadata/pattern totals also follow the 64-bit format.
-# Per-chunk/query working-set bounds remain intentionally finite.
-replace(
-    "include/pulseforge/packed_chart.hpp",
-    """    // The chart-wide 64-bit totals above intentionally have no product
-    // ceiling. Sections that the reader materializes into vectors keep
-    // independent finite allocation budgets so a corrupt file cannot turn a
-    // valid 64-bit count into an unbounded host allocation.
-    std::uint64_t max_kinds{1'000'000ULL};
-    std::uint64_t max_patterns{1'000'000ULL};
-    std::uint64_t max_pattern_lanes{4'000'000ULL};
-    std::uint64_t max_dictionary_bytes{64ULL * 1024ULL * 1024ULL};
-    std::uint64_t max_pattern_bytes{128ULL * 1024ULL * 1024ULL};
-""",
-    """    // Chart-wide metadata/pattern totals also default to the 64-bit
-    // representation limit. Physical allocator/storage capacity becomes the
-    // stress-test boundary; callers may still opt into smaller trust budgets.
-    std::uint64_t max_kinds{std::numeric_limits<std::uint64_t>::max()};
-    std::uint64_t max_patterns{std::numeric_limits<std::uint64_t>::max()};
-    std::uint64_t max_pattern_lanes{std::numeric_limits<std::uint64_t>::max()};
-    std::uint64_t max_dictionary_bytes{std::numeric_limits<std::uint64_t>::max()};
-    std::uint64_t max_pattern_bytes{std::numeric_limits<std::uint64_t>::max()};
-""",
-    1,
-)
-
-# Bridge metadata dictionaries no longer have a 16 MiB product ceiling.
-replace(
-    "include/pulseforge/packed_chart_bridge.hpp",
-    "#include <cstdint>\n#include <optional>",
-    "#include <cstdint>\n#include <limits>\n#include <optional>",
-    1,
-)
-replace(
-    "include/pulseforge/packed_chart_bridge.hpp",
-    "std::size_t max_total_kind_bytes{16U * 1024U * 1024U};",
-    "std::size_t max_total_kind_bytes{std::numeric_limits<std::size_t>::max()};",
-    2,
-)
-
-# Fast offline autoplay may summarize any representable PFC1 chunk count. The
-# per-update bulk budget remains a scheduler/work budget, not a chart cap.
-replace(
-    "include/pulseforge/streaming_gameplay.hpp",
-    "std::uint64_t max_summary_chunks{2'000'000U};",
-    "std::uint64_t max_summary_chunks{std::numeric_limits<std::uint64_t>::max()};",
-    1,
-)
-
-# Tests that deliberately exercise the materialized-loader threshold must use
-# the routing budget rather than the now-unbounded chart-validity value.
-replace(
-    "tests/test_main.cpp",
-    "pulseforge::maximum_chart_tempo_changes",
-    "pulseforge::materialized_chart_tempo_budget",
-    1,
-)
-replace(
-    "tests/streaming_chart_importer_test.cpp",
-    """            && options.max_sections == 1'000'000'000ULL,
-        "streaming importer leaves source/note totals open while bounding its materialized section map"
-""",
-    """            && options.max_sections
-                == std::numeric_limits<std::uint64_t>::max()
-            && options.max_adjacent_event_bytes
-                == std::numeric_limits<std::uint64_t>::max(),
-        "streaming importer defaults all chart-wide source/count inputs to representation limits"
-""",
-    1,
-)
-
-# Document the distinction between chart-wide limits and bounded working sets.
+# Document what was actually removed and what intentionally remains bounded.
 p = Path("CHANGELOG.md")
 text = p.read_text(encoding="utf-8")
 marker = "All notable public PulseForge changes are documented in this file.\n\n"
@@ -231,25 +118,34 @@ entry = """## [Unreleased]
 
 ### Extreme-scale charts
 
-- Removes product-policy ceilings on chart note, event, tempo-change, source-byte and duration totals; defaults now follow the host/PFC1 representation, including trillion-note `PatternRun` workloads.
-- Retains the former 5,000,000-note / 512 MiB thresholds only as materialized-loader routing budgets: crossing them selects bounded PFC1 streaming instead of making the chart invalid.
-- Removes default PFC1 section, pattern, kind, dictionary, adjacent-event-file and offline-summary cardinality ceilings while preserving finite per-chunk, per-query and per-frame working sets for streaming performance.
-- Arithmetic overflow, invalid timestamps/lanes/UTF-8, PFC1 structural validation and explicit caller-supplied trust budgets remain enforced; these are correctness constraints rather than arbitrary chart-size limits.
+- Removes the historical 5,000,000-note and 512 MiB values as chart-validity ceilings; total note/source capacity now follows the host/PFC1 representation instead of a product-policy constant.
+- Retains those former values only as materialized-loader routing budgets. Crossing them selects bounded PFC1 streaming rather than rejecting the chart, preserving Android memory behavior while allowing extreme-scale sources.
+- Removes the historical 2,000,000 generated-gameplay-event validation ceiling so dense materialized charts are not rejected solely by an estimated event count.
+- Keeps finite per-chunk, per-window, per-query and per-frame streaming working sets, plus arithmetic/format validation. These bound RAM/CPU work at one time and do not cap the total logical note count.
+- Existing PFC1 `PatternRun` coverage continues to validate a 1,000,000,000,000-note chart in constant-size storage.
 
 """
-if "## [Unreleased]" not in text:
+if "### Extreme-scale charts" not in text:
     p.write_text(text.replace(marker, marker + entry, 1), encoding="utf-8")
 
-# Sanity checks.
+# Sanity checks make the intended contract explicit and stop the temporary
+# workflow before committing if a future source change makes the patch partial.
 chart_h = Path("include/pulseforge/chart.hpp").read_text(encoding="utf-8")
-required = [
+for needle in (
     "maximum_chart_notes =\n    std::numeric_limits<std::size_t>::max()",
     "maximum_chart_json_bytes =\n    std::numeric_limits<std::uint64_t>::max()",
     "materialized_chart_note_budget = 5'000'000",
     "materialized_chart_json_budget =",
-]
-for needle in required:
+):
     if needle not in chart_h:
-        raise SystemExit(f"missing unlimited-chart invariant: {needle}")
+        raise SystemExit(f"missing extreme-scale chart invariant: {needle}")
 
-print("unbounded chart-scale patch applied")
+fast = Path("src/io/fast_psych_loader.cpp").read_text(encoding="utf-8")
+if "maximum_chart_notes" in fast or "maximum_chart_json_bytes" in fast:
+    raise SystemExit("fast Psych loader still treats a chart-wide maximum as a materialized budget")
+
+launcher = Path("src/app/launcher.cpp").read_text(encoding="utf-8")
+if "source_bytes > maximum_chart_json_bytes" in launcher:
+    raise SystemExit("launcher still treats maximum source size as the streaming route threshold")
+
+print("extreme-scale chart patch applied")
