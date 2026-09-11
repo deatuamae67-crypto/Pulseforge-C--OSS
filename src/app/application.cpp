@@ -985,6 +985,74 @@ void debug_text(
     SDL_RenderDebugText(renderer, x, y, terminated.c_str());
 }
 
+void debug_text_wrapped(
+    SDL_Renderer* renderer,
+    const float x,
+    const float y,
+    const std::string_view text,
+    const std::size_t maximum_columns,
+    const std::size_t maximum_lines,
+    const float line_height
+) {
+    if (maximum_columns == 0U || maximum_lines == 0U) return;
+    std::string line;
+    line.reserve(maximum_columns);
+    std::size_t line_index{};
+    std::size_t cursor{};
+    while (cursor < text.size() && line_index < maximum_lines) {
+        while (cursor < text.size()
+            && (text[cursor] == ' ' || text[cursor] == '\t'
+                || text[cursor] == '\r' || text[cursor] == '\n')) {
+            if (text[cursor] == '\n' && !line.empty()) break;
+            ++cursor;
+        }
+        if (cursor >= text.size()) break;
+
+        const auto word_begin = cursor;
+        while (cursor < text.size()
+            && text[cursor] != ' ' && text[cursor] != '\t'
+            && text[cursor] != '\r' && text[cursor] != '\n') {
+            ++cursor;
+        }
+        std::string_view word = text.substr(word_begin, cursor - word_begin);
+        const bool forced_break = cursor < text.size() && text[cursor] == '\n';
+
+        while (!word.empty()) {
+            const std::size_t separator = line.empty() ? 0U : 1U;
+            const std::size_t room = maximum_columns > line.size() + separator
+                ? maximum_columns - line.size() - separator
+                : 0U;
+            if (room == 0U) {
+                debug_text(renderer, x, y + line_height * static_cast<float>(line_index), line);
+                line.clear();
+                if (++line_index >= maximum_lines) return;
+                continue;
+            }
+            const auto take = std::min(room, word.size());
+            if (!line.empty()) line.push_back(' ');
+            line.append(word.substr(0U, take));
+            word.remove_prefix(take);
+            if (!word.empty()) {
+                debug_text(renderer, x, y + line_height * static_cast<float>(line_index), line);
+                line.clear();
+                if (++line_index >= maximum_lines) return;
+            }
+        }
+
+        if (forced_break) {
+            ++cursor;
+            if (!line.empty()) {
+                debug_text(renderer, x, y + line_height * static_cast<float>(line_index), line);
+                line.clear();
+                if (++line_index >= maximum_lines) return;
+            }
+        }
+    }
+    if (!line.empty() && line_index < maximum_lines) {
+        debug_text(renderer, x, y + line_height * static_cast<float>(line_index), line);
+    }
+}
+
 [[nodiscard]] double timestamp_to_song_time(
     const std::uint64_t timestamp_ns,
     const std::uint64_t now_ns,
@@ -1293,6 +1361,9 @@ private:
         // PULSEFORGE_P1_1_17_STRUM_SCALE_STATE_V1
         double scale_x{1.0};
         double scale_y{1.0};
+        // Psych StrumNote.direction is the travel vector in degrees; 90 is
+        // the stock vertical direction. It is independent from sprite angle.
+        double direction{90.0};
         double angle{};
         double alpha{1.0};
         bool visible{true};
@@ -1622,7 +1693,9 @@ private:
         SDL_SetRenderScale(renderer_, 2.0F, 2.0F);
         debug_text(renderer_, 102.0F, 110.0F, title);
         SDL_SetRenderScale(renderer_, 1.35F, 1.35F);
-        debug_text(renderer_, 151.0F, 205.0F, detail);
+        debug_text_wrapped(
+            renderer_, 151.0F, 205.0F, detail, 88U, 8U, 13.0F
+        );
         debug_text(renderer_, 151.0F, 355.0F, hint);
         SDL_SetRenderScale(renderer_, scale_x, scale_y);
         if (progress.has_value()) {
@@ -2627,35 +2700,52 @@ private:
             );
         }
 
-        // PULSEFORGE_P1_5_0E_SINGLE_PASS_LARGE_CHART_ROUTE_V1
-        // The hard materialized limit remains unchanged, but large JSON sources
-        // are much faster when we choose PFC1 before doing a complete first
-        // parse that would only be thrown away. 32 MiB is a performance route,
-        // not a compatibility cap; smaller sources still use the materialized
-        // path and cached PFC1 sources remain bounded.
+        // PULSEFORGE_1_0_0_STREAMING_FIRST_WITH_COMPAT_FALLBACK_V1
+        // Source size is a performance hint, never a compatibility gate. Keep
+        // the zero-materialization fast path for genuinely huge Psych charts,
+        // but if the PFC1 importer does not understand this JSON dialect, retry
+        // the format-aware materialized loader instead of treating 32 MiB as a
+        // hard limit. This preserves monster-chart memory behavior while also
+        // accepting large V-Slice/Denpa/other supported JSON dialects.
         constexpr std::uintmax_t preferred_streaming_json_bytes =
             32U * 1024U * 1024U;
+        bool preferred_streaming_attempted = false;
+        std::string preferred_streaming_error;
         if (options_.enable_large_chart_streaming && !options_.chart_path.empty()) {
             std::error_code size_error;
             const auto source_bytes = std::filesystem::file_size(
-                options_.chart_path,
-                size_error
+                options_.chart_path, size_error
             );
-            if (!size_error
-                && source_bytes > preferred_streaming_json_bytes) {
+            if (!size_error && source_bytes > preferred_streaming_json_bytes) {
+                preferred_streaming_attempted = true;
                 std::cerr
                     << "[PulseForge][streaming] source is " << source_bytes
-                    << " bytes; selecting single-pass PFC1 runtime before "
-                       "materialization (performance threshold "
+                    << " bytes; trying bounded PFC1 first (performance hint "
                     << preferred_streaming_json_bytes << ")\n";
-                return load_streaming_content(
-                    "large JSON routed directly to bounded PFC1 before duplicate parsing"
-                );
+                if (load_streaming_content(
+                        "large JSON streaming-first performance route"
+                    )) {
+                    return true;
+                }
+                preferred_streaming_error = last_error_;
+                set_loading_phase(ContentLoadPhase::parsing_chart);
+                std::cerr
+                    << "[PulseForge][streaming] PFC1 did not accept this large "
+                       "source; retrying the format-aware materialized loader\n";
             }
         }
 
         auto loaded_chart = ChartLoader::load(options_.chart_path, options_.chart_options);
         if (!loaded_chart) {
+            if (preferred_streaming_attempted) {
+                last_error_ = "Chart error: " + loaded_chart.error;
+                if (!preferred_streaming_error.empty()) {
+                    last_error_ += " | Earlier streaming attempt: "
+                        + preferred_streaming_error;
+                }
+                std::cerr << last_error_ << '\n';
+                return false;
+            }
             if (options_.enable_large_chart_streaming) {
                 std::cerr
                     << "[PulseForge][streaming] materialized load returned: "
@@ -4872,8 +4962,38 @@ if (const auto selected_skin = resolve_note_skin_selection(
         }
     }
 
+#if defined(PULSEFORGE_HAS_LUA)
+    void update_script_camera_zoom_decay(const double elapsed_seconds) {
+        if (!script_cam_zooming_ || !std::isfinite(elapsed_seconds)
+            || elapsed_seconds <= 0.0 || script_cam_zooming_decay_ <= 0.0) {
+            return;
+        }
+        // Psych Engine's camera zoom pulse decays exponentially toward
+        // defaultCamZoom for camGame and 1.0 for camHUD. Apply this before
+        // script tweens so an explicit doTweenZoom remains authoritative for
+        // the rest of the frame.
+        const double retain = std::exp(
+            -elapsed_seconds * 3.125 * script_cam_zooming_decay_
+        );
+        const double next_game = std::lerp(
+            script_default_cam_zoom_, script_cam_game_zoom_, retain
+        );
+        const double next_hud = std::lerp(1.0, script_cam_hud_zoom_, retain);
+        if (std::abs(next_game - script_cam_game_zoom_) < 1e-9
+            && std::abs(next_hud - script_cam_hud_zoom_) < 1e-9) {
+            return;
+        }
+        script_cam_game_zoom_ = std::clamp(next_game, 0.05, 8.0);
+        script_cam_hud_zoom_ = std::clamp(next_hud, 0.05, 8.0);
+        update_scene_camera();
+        update_scene_hud_camera();
+        streaming_visual_cache_.reset();
+    }
+#endif
+
     void update_effects(const float elapsed) {
 #if defined(PULSEFORGE_HAS_LUA)
+        update_script_camera_zoom_decay(static_cast<double>(elapsed));
         update_script_tweens(static_cast<double>(elapsed));
         update_script_timers(static_cast<double>(elapsed));
         // Tween/timer completion callbacks may queue triggerEvent/debugPrint.
@@ -5292,6 +5412,9 @@ if (const auto selected_skin = resolve_note_skin_selection(
         script_cam_game_x_ = 0.0;
         script_cam_game_y_ = 0.0;
         script_cam_game_zoom_ = 1.0;
+        script_default_cam_zoom_ = 1.0;
+        script_cam_zooming_ = true;
+        script_cam_zooming_decay_ = 1.0;
         script_cam_game_angle_ = 0.0;
         script_cam_game_alpha_ = 1.0;
         script_cam_hud_x_ = 0.0;
@@ -7240,6 +7363,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                     );
 
                 bool sustain_run_active{};
+                double sustain_run_x{};
                 double sustain_run_y{};
                 double sustain_run_end{};
                 std::uint8_t sustain_run_alpha{};
@@ -7250,7 +7374,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                     }
                     ++visual_draw_units_;
                     const SDL_FRect rectangle{
-                        x + lane_width * 0.39F,
+                        static_cast<float>(sustain_run_x) + lane_width * 0.39F,
                         static_cast<float>(sustain_run_y),
                         lane_width * 0.22F,
                         std::max(
@@ -7309,11 +7433,17 @@ if (const auto selected_skin = resolve_note_skin_selection(
                         draw_span = *clipped;
                     }
 #if defined(PULSEFORGE_HAS_LUA)
+                    const double directional_x = static_cast<double>(x)
+                        + script_note_x_offset(
+                            owner, lane, draw_span.y + draw_span.height * 0.5
+                        );
                     draw_span.y = script_note_y(owner, lane, draw_span.y);
                     draw_span.height = std::max(
                         0.5,
                         draw_span.height * script_owner_camera_zoom(owner)
                     );
+#else
+                    const double directional_x = static_cast<double>(x);
 #endif
                     if (draw_span.y + draw_span.height < 0.0
                         || draw_span.y > static_cast<double>(logical_height)) {
@@ -7335,12 +7465,12 @@ if (const auto selected_skin = resolve_note_skin_selection(
                         const double row_end =
                             draw_span.y + draw_span.height;
                         const bool contiguous = sustain_run_active
-                            && std::abs(
-                                sustain_run_end - draw_span.y
-                            ) <= 0.01;
+                            && std::abs(sustain_run_end - draw_span.y) <= 0.01
+                            && std::abs(sustain_run_x - directional_x) <= 0.01;
                         if (!contiguous) {
                             flush_sustain_run();
                             sustain_run_active = true;
+                            sustain_run_x = directional_x;
                             sustain_run_y = draw_span.y;
                             sustain_run_end = row_end;
                             sustain_run_alpha = sustain_alpha;
@@ -7388,7 +7518,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                                   22.0F
                               );
                         const SDL_FRect head_rectangle{
-                            x + 8.0F,
+                            static_cast<float>(directional_x) + 8.0F,
                             static_cast<float>(
                                 draw_span.y
                                 + draw_span.height * 0.5
@@ -7435,7 +7565,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                         }
                         dense_quad_batch_.add(
                             {
-                                x + 8.0F,
+                                static_cast<float>(directional_x) + 8.0F,
                                 static_cast<float>(draw_span.y),
                                 lane_width - 16.0F,
                                 receptor_clip.has_value()
@@ -7702,7 +7832,9 @@ if (const auto selected_skin = resolve_note_skin_selection(
         }
         const float x = script_lane_x(
             note.owner, lane, base_x, logical_lane_width
-        );
+        ) + static_cast<float>(script_note_x_offset(
+            note.owner, lane, visual.span.head_y
+        ));
         const float lane_width = script_lane_width(note.owner, logical_lane_width);
         const float y = static_cast<float>(
             script_note_y(note.owner, lane, visual.span.head_y)
@@ -7904,7 +8036,10 @@ if (const auto selected_skin = resolve_note_skin_selection(
         if (!script_lane_visible(owner, lane)) {
             return;
         }
-        const float x = script_lane_x(owner, lane, base_x, logical_lane_width);
+        const float x = script_lane_x(owner, lane, base_x, logical_lane_width)
+            + static_cast<float>(script_note_x_offset(
+                owner, lane, visual.span.head_y
+            ));
         const float lane_width = script_lane_width(owner, logical_lane_width);
         const float y = static_cast<float>(
             script_note_y(owner, lane, visual.span.head_y)
@@ -9783,13 +9918,47 @@ if (const auto selected_skin = resolve_note_skin_selection(
         return script_lane_width(NoteOwner::player, lane_width);
     }
 
+    [[nodiscard]] double script_lane_direction(
+        const NoteOwner owner,
+        const std::uint16_t lane
+    ) const noexcept {
+        const auto global = script_fixed_strum_index(owner, lane);
+        return global < script_strums_.size()
+            ? script_strums_[global].direction
+            : 90.0;
+    }
+
+    [[nodiscard]] double script_note_travel_distance(
+        const NoteOwner owner,
+        const double logical_y
+    ) const noexcept {
+        return script_camera_transform_y(owner, logical_y)
+            - script_camera_transform_y(owner, receptor_y_for_owner(owner));
+    }
+
+    [[nodiscard]] double script_note_x_offset(
+        const NoteOwner owner,
+        const std::uint16_t lane,
+        const double logical_y
+    ) const noexcept {
+        constexpr double degrees_to_radians =
+            0.01745329251994329576923690768489;
+        const double radians = script_lane_direction(owner, lane)
+            * degrees_to_radians;
+        return std::cos(radians) * script_note_travel_distance(owner, logical_y);
+    }
+
     [[nodiscard]] double script_note_y(
         const NoteOwner owner,
         const std::uint16_t lane,
         const double logical_y
     ) const noexcept {
-        return script_camera_transform_y(owner, logical_y)
-            + script_lane_y_offset(owner, lane);
+        constexpr double degrees_to_radians =
+            0.01745329251994329576923690768489;
+        const double radians = script_lane_direction(owner, lane)
+            * degrees_to_radians;
+        return script_lane_receptor_y(owner, lane)
+            + std::sin(radians) * script_note_travel_distance(owner, logical_y);
     }
 
     [[nodiscard]] bool script_get_group_property(
@@ -9809,6 +9978,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
             }
             else if (property == "scale.x" || property == "scaleX") value = state.scale_x;
             else if (property == "scale.y" || property == "scaleY") value = state.scale_y;
+            else if (property == "direction") value = state.direction;
             else if (property == "angle") value = state.angle;
             else if (property == "alpha") value = state.alpha;
             else if (property == "visible") value = state.visible;
@@ -10003,9 +10173,9 @@ if (const auto selected_skin = resolve_note_skin_selection(
             double number{};
             bool boolean{};
             if (property == "x" || property == "y" || property == "angle"
-                || property == "alpha" || property == "scale.x"
-                || property == "scale.y" || property == "scaleX"
-                || property == "scaleY") {
+                || property == "direction" || property == "alpha"
+                || property == "scale.x" || property == "scale.y"
+                || property == "scaleX" || property == "scaleY") {
                 if (!script_number_value(value, number)) {
                     error = "strum property expects a finite number";
                     return false;
@@ -10016,6 +10186,8 @@ if (const auto selected_skin = resolve_note_skin_selection(
                     state.scale_x = std::clamp(number, 0.01, 100.0);
                 } else if (property == "scale.y" || property == "scaleY") {
                     state.scale_y = std::clamp(number, 0.01, 100.0);
+                } else if (property == "direction") {
+                    state.direction = std::clamp(number, -360'000.0, 360'000.0);
                 } else if (property == "angle") {
                     state.angle = std::clamp(number, -360'000.0, 360'000.0);
                 } else {
@@ -10335,7 +10507,10 @@ if (const auto selected_skin = resolve_note_skin_selection(
         else if (name == "camFollow.y" || name == "camFollowPos.y") {
             value = script_cam_game_y_ + static_cast<double>(logical_height) * 0.5;
         }
-        else if (name == "camGame.zoom" || name == "defaultCamZoom") value = script_cam_game_zoom_;
+        else if (name == "camGame.zoom") value = script_cam_game_zoom_;
+        else if (name == "defaultCamZoom") value = script_default_cam_zoom_;
+        else if (name == "camZooming") value = script_cam_zooming_;
+        else if (name == "camZoomingDecay") value = script_cam_zooming_decay_;
         else if (name == "camGame.angle") value = script_cam_game_angle_;
         else if (name == "camGame.alpha") value = script_cam_game_alpha_;
         else if (name == "camHUD.x") value = script_cam_hud_x_;
@@ -10463,6 +10638,24 @@ if (const auto selected_skin = resolve_note_skin_selection(
             return true;
         }
 
+        if (name == "camZooming") {
+            if (!script_boolean_value(value, boolean)) {
+                error = "camZooming expects a boolean";
+                return false;
+            }
+            script_cam_zooming_ = boolean;
+            error.clear();
+            return true;
+        }
+        if (name == "camZoomingDecay") {
+            if (!script_number_value(value, number)) {
+                error = "camZoomingDecay expects a finite number";
+                return false;
+            }
+            script_cam_zooming_decay_ = std::clamp(number, 0.0, 16.0);
+            error.clear();
+            return true;
+        }
         if (name == "camGame.x" || name == "camGame.y"
             || name == "camGame.zoom" || name == "defaultCamZoom"
             || name == "camGame.angle" || name == "camGame.alpha") {
@@ -10472,7 +10665,8 @@ if (const auto selected_skin = resolve_note_skin_selection(
             }
             if (name == "camGame.x") script_cam_game_x_ = std::clamp(number, -100'000.0, 100'000.0);
             else if (name == "camGame.y") script_cam_game_y_ = std::clamp(number, -100'000.0, 100'000.0);
-            else if (name == "camGame.zoom" || name == "defaultCamZoom") script_cam_game_zoom_ = std::clamp(number, 0.05, 8.0);
+            else if (name == "camGame.zoom") script_cam_game_zoom_ = std::clamp(number, 0.05, 8.0);
+            else if (name == "defaultCamZoom") script_default_cam_zoom_ = std::clamp(number, 0.05, 8.0);
             else if (name == "camGame.angle") script_cam_game_angle_ = std::clamp(number, -360'000.0, 360'000.0);
             else script_cam_game_alpha_ = std::clamp(number, 0.0, 1.0);
             update_scene_camera();
@@ -11346,14 +11540,14 @@ if (name == "setBlendMode") {
             else error.clear();
             return ok;
         }
-        if (name == "scaleObject") {
+        if (name == "scaleObject" || name == "scaleLuaSprite") {
             std::string_view tag;
             double x{}, y{};
             if (!string_arg(0U, tag) || !number_arg(1U, x) || !number_arg(2U, y)
                 || scene_ == nullptr
                 || !scene_->script_set_number(tag, "scale.x", x)
                 || !scene_->script_set_number(tag, "scale.y", y)) {
-                error = "scaleObject could not resolve its sprite/scale";
+                error = "scaleObject/scaleLuaSprite could not resolve its sprite/scale";
                 return false;
             }
             error.clear();
@@ -13667,6 +13861,9 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
     double script_cam_game_x_{};
     double script_cam_game_y_{};
     double script_cam_game_zoom_{1.0};
+    double script_default_cam_zoom_{1.0};
+    bool script_cam_zooming_{true};
+    double script_cam_zooming_decay_{1.0};
     double script_cam_game_angle_{};
     double script_cam_game_alpha_{1.0};
     double script_cam_hud_x_{};
