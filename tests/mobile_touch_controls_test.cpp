@@ -105,6 +105,25 @@ void require_lane_key(
     require(routed_lane.has_value() && *routed_lane == lane, "touch lane identity");
 }
 
+void require_raw_key(
+    const SDL_Event& event,
+    const bool down,
+    const SDL_Scancode scancode,
+    const std::string_view message
+) {
+    require(
+        event.type == static_cast<Uint32>(
+            down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP
+        ),
+        message
+    );
+    require(event.key.scancode == scancode, message);
+    require(
+        !pulseforge::detail::mobile_touch_lane_from_event(event.key).has_value(),
+        "raw Psych utility key is not consumed as a gameplay lane"
+    );
+}
+
 }  // namespace
 
 int main() {
@@ -175,6 +194,31 @@ int main() {
                 && coordinate_probe.tfinger.y > 100.0F,
             "touch coordinates become logical render coordinates"
         );
+        // Psych Lua in-chart menus query real keyboard scancodes rather than
+        // PulseForge lane identities. The compact top-center utility cluster
+        // must therefore expose LEFT/RIGHT/X/SPACE on Android.
+        current_phase = "Psych Lua utility keys";
+        const auto raw_key_touch = [&](
+            const SDL_FingerID finger,
+            const float logical_x,
+            const SDL_Scancode scancode
+        ) {
+            const float normalized_x = logical_x / 1280.0F;
+            constexpr float normalized_y = 31.0F / 720.0F;
+            inject_touch(finger_event(
+                SDL_EVENT_FINGER_DOWN, window_id, finger, normalized_x, normalized_y
+            ));
+            require_raw_key(routed_event(), true, scancode, "utility key down");
+            inject_touch(finger_event(
+                SDL_EVENT_FINGER_UP, window_id, finger, normalized_x, normalized_y
+            ));
+            require_raw_key(routed_event(), false, scancode, "utility key up");
+        };
+        raw_key_touch(60U, 538.0F, SDL_SCANCODE_LEFT);
+        raw_key_touch(61U, 606.0F, SDL_SCANCODE_RIGHT);
+        raw_key_touch(62U, 674.0F, SDL_SCANCODE_X);
+        raw_key_touch(63U, 742.0F, SDL_SCANCODE_SPACE);
+
         // Two independent fingers form a chord across the entire 18K range.
         current_phase = "18K chord";
         inject_touch(finger_event(SDL_EVENT_FINGER_DOWN, window_id, 10U, lane_x(0U)));

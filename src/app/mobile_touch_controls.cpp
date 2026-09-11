@@ -36,6 +36,14 @@ enum class TouchAction : std::uint8_t {
     lane_15,
     lane_16,
     lane_17,
+    // Raw gameplay utility keys are intentionally separate from lane actions.
+    // Psych Lua menus (for example EZ Edition's character selector) query
+    // keyboardJustPressed(LEFT/RIGHT/X/SPACE), so these must arrive as ordinary
+    // SDL scancodes rather than PulseForge's private lane scancodes.
+    gameplay_left,
+    gameplay_right,
+    gameplay_x,
+    gameplay_space,
     ui_left,
     ui_down,
     ui_up,
@@ -466,6 +474,18 @@ private:
                 SDL_KMOD_NONE,
             };
         }
+        key_map_[action_index(TouchAction::gameplay_left)] = {
+            SDL_SCANCODE_LEFT, SDL_KMOD_NONE
+        };
+        key_map_[action_index(TouchAction::gameplay_right)] = {
+            SDL_SCANCODE_RIGHT, SDL_KMOD_NONE
+        };
+        key_map_[action_index(TouchAction::gameplay_x)] = {
+            SDL_SCANCODE_X, SDL_KMOD_NONE
+        };
+        key_map_[action_index(TouchAction::gameplay_space)] = {
+            SDL_SCANCODE_SPACE, SDL_KMOD_NONE
+        };
         key_map_[action_index(TouchAction::ui_left)] = action_key(
             bindings_, "ui_left", SDL_SCANCODE_LEFT
         );
@@ -598,6 +618,33 @@ private:
                 {238, 188, 61, 255},
                 "PAUSE",
             });
+
+            // PULSEFORGE_1_0_0_ANDROID_PSYCH_SELECTOR_KEYS_V1
+            // Keep a small raw-key cluster above the note field. These buttons
+            // are deliberately real keyboard scancodes, not lane presses, so
+            // Lua keyboardJustPressed() can drive in-chart selectors on Android.
+            const float utility_height = std::clamp(38.0F * settings_.scale, 32.0F, 54.0F);
+            const float utility_width = std::clamp(62.0F * settings_.scale, 50.0F, 86.0F);
+            const float utility_gap = std::clamp(6.0F * settings_.scale, 4.0F, 10.0F);
+            const float utility_total = utility_width * 4.0F + utility_gap * 3.0F;
+            float utility_x = safe.x + (safe.w - utility_total) * 0.5F;
+            const float utility_y = safe.y + margin;
+            const std::array utility_keys{
+                std::pair{TouchAction::gameplay_left, std::string_view{"LEFT"}},
+                std::pair{TouchAction::gameplay_right, std::string_view{"RIGHT"}},
+                std::pair{TouchAction::gameplay_x, std::string_view{"X"}},
+                std::pair{TouchAction::gameplay_space, std::string_view{"SPACE"}},
+            };
+            for (const auto& [action, label] : utility_keys) {
+                result.push_back({
+                    action,
+                    {utility_x, utility_y, utility_width, utility_height},
+                    {94, 117, 235, 255},
+                    label,
+                });
+                utility_x += utility_width + utility_gap;
+            }
+
             if (!settings_.gameplay_enabled) {
                 return result;
             }
@@ -742,7 +789,11 @@ private:
                 if (button.action == TouchAction::pause
                     || button.action == TouchAction::volume_down
                     || button.action == TouchAction::volume_mute
-                    || button.action == TouchAction::volume_up) {
+                    || button.action == TouchAction::volume_up
+                    || button.action == TouchAction::gameplay_left
+                    || button.action == TouchAction::gameplay_right
+                    || button.action == TouchAction::gameplay_x
+                    || button.action == TouchAction::gameplay_space) {
                     const float expansion = std::min(button.rectangle.w, button.rectangle.h)
                         * 0.08F * (sensitivity - 1.0F);
                     const SDL_FRect expanded{
