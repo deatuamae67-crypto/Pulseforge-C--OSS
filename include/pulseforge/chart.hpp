@@ -3,23 +3,32 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace pulseforge {
 
-// Shared loader/model limits. Parsers enforce these while consuming input so
-// malformed or adversarial files cannot build an oversized intermediate model
-// before Chart validation gets a chance to run.
+// Shared materialized-model limits that are unrelated to note cardinality.
+// Tempo/event metadata is still materialized today, so those independent bounds
+// remain until those timelines are streamed too.
 inline constexpr std::size_t maximum_chart_tempo_changes = 100'000;
-// These values bound only the fully materialized Chart representation. They are
-// NOT engine-wide chart-size limits: application/launcher route charts beyond
-// this fast-path budget to the bounded PFC1 streaming architecture instead.
-// PatternRun is the constant-storage representation for huge repetitive runs.
-inline constexpr std::size_t maximum_chart_notes = 5'000'000;
 inline constexpr std::size_t maximum_chart_events = 250'000;
+
+// There is no product-policy ceiling on total chart notes or JSON source bytes.
+// The scalable PFC1 path uses 64-bit counters and PatternRun can represent
+// millions, billions or trillions of logical notes without expanding them.
+inline constexpr std::size_t maximum_chart_notes =
+    std::numeric_limits<std::size_t>::max();
 inline constexpr std::uint64_t maximum_chart_json_bytes =
+    std::numeric_limits<std::uint64_t>::max();
+
+// These are routing budgets, NOT chart validity limits. Crossing either budget
+// selects the bounded PFC1 streaming architecture instead of materializing the
+// whole source/model in RAM. This distinction is critical on Android.
+inline constexpr std::size_t materialized_chart_note_budget = 5'000'000;
+inline constexpr std::uint64_t materialized_chart_json_budget =
     512ULL * 1024ULL * 1024ULL;
 inline constexpr std::size_t maximum_chart_note_kind_bytes = 128;
 inline constexpr std::size_t maximum_chart_note_payload_bytes = 4'096;

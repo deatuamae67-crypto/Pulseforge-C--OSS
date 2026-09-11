@@ -2563,7 +2563,7 @@ ChartLoadResult ChartLoader::load(
             path,
             size_error
         );
-        if (!size_error && reported_size > maximum_chart_json_bytes) {
+        if (!size_error && reported_size > materialized_chart_json_budget) {
             return {
                 std::nullopt,
                 "chart JSON exceeds the 512 MiB safety limit: "
@@ -2608,7 +2608,7 @@ ChartLoadResult ChartLoader::load(
 
         auto read = read_limited_file(
             path,
-            maximum_chart_json_bytes,
+            materialized_chart_json_budget,
             "cannot open chart: ",
             "cannot read chart: ",
             "chart JSON exceeds the 512 MiB safety limit"
@@ -2630,7 +2630,7 @@ ChartLoadResult ChartLoader::parse(
     const std::filesystem::path& source_path,
     const ChartLoadOptions& options
 ) {
-    if (json_text.size() > maximum_chart_json_bytes) {
+    if (json_text.size() > materialized_chart_json_budget) {
         return {std::nullopt, "chart JSON exceeds the 512 MiB safety limit"};
     }
     try {
@@ -2719,7 +2719,7 @@ ChartLoadResult ChartLoader::parse(
 }
 
 ChartFormat ChartLoader::detect_format(const std::string_view json_text) {
-    if (json_text.size() > maximum_chart_json_bytes) {
+    if (json_text.size() > materialized_chart_json_budget) {
         return ChartFormat::native;
     }
     try {

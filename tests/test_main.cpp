@@ -1881,7 +1881,7 @@ void test_input_offset_only_affects_player_input() {
     );
 }
 
-void test_generated_workload_limit() {
+void test_generated_workload_scale() {
     Chart chart;
     chart.tempos = {{0.0, 1'000.0, 4, 4}};
     for (std::uint16_t lane = 0; lane < 4; ++lane) {
@@ -1896,14 +1896,14 @@ void test_generated_workload_limit() {
     chart.normalize();
     const auto issues = pulseforge::validate_chart(chart);
     require(
-        std::any_of(
+        std::none_of(
             issues.begin(),
             issues.end(),
             [](const pulseforge::ValidationIssue& issue) {
                 return issue.severity == pulseforge::ValidationSeverity::error;
             }
         ),
-        "pathological generated event workload is rejected"
+        "generated gameplay workload is not rejected by a chart-wide policy ceiling"
     );
 }
 
@@ -3274,7 +3274,7 @@ int main() {
         {"BOTPLAY replay and score saturation", test_botplay_replay_and_score_saturation},
         {"release order and completion", test_release_order_and_completion},
         {"input offset clock isolation", test_input_offset_only_affects_player_input},
-        {"generated workload limit", test_generated_workload_limit},
+        {"generated workload scale", test_generated_workload_scale},
         {"immediate exclusive failure", test_failure_is_immediate_and_exclusive},
         {"replay loader ranges", test_replay_loader_ranges},
         {"settings limits and sanitization", test_settings_limits_and_sanitization},

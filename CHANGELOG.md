@@ -2,6 +2,16 @@
 
 All notable public PulseForge changes are documented in this file.
 
+## [Unreleased]
+
+### Extreme-scale charts
+
+- Removes the historical 5,000,000-note and 512 MiB values as chart-validity ceilings; total note/source capacity now follows the host/PFC1 representation instead of a product-policy constant.
+- Retains those former values only as materialized-loader routing budgets. Crossing them selects bounded PFC1 streaming rather than rejecting the chart, preserving Android memory behavior while allowing extreme-scale sources.
+- Removes the historical 2,000,000 generated-gameplay-event validation ceiling so dense materialized charts are not rejected solely by an estimated event count.
+- Keeps finite per-chunk, per-window, per-query and per-frame streaming working sets, plus arithmetic/format validation. These bound RAM/CPU work at one time and do not cap the total logical note count.
+- Existing PFC1 `PatternRun` coverage continues to validate a 1,000,000,000,000-note chart in constant-size storage.
+
 ## [1.0.0] - 2026-09-05
 
 ### Definitive release
