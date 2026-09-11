@@ -53,6 +53,13 @@ jobs:
             'cmake;3.31.6' \
             'system-images;android-36;google_apis;x86_64'
 
+          # The current standalone emulator/QEMU build links to PulseAudio even
+          # when CI runs it with -noaudio. ubuntu-24.04 runners do not always
+          # have the client library installed, so install the runtime dependency
+          # explicitly before probing or booting the emulator.
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libpulse0
+
           # GitHub's runner image can contain an older emulator package even when
           # sdkmanager installs a newer API 36 system image. Pin a known stable
           # emulator so the engine and system image cannot drift out of sync.
@@ -63,8 +70,21 @@ jobs:
           echo '95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266  '"$emulator_zip" | sha256sum --check
           rm -rf "$ANDROID_SDK_ROOT/emulator"
           unzip -q "$emulator_zip" -d "$ANDROID_SDK_ROOT"
-          "$ANDROID_SDK_ROOT/emulator/emulator" -version
+
+          # Grant the hosted runner access before invoking any emulator binary;
+          # otherwise diagnostics can incorrectly report KVM as unavailable.
           sudo chmod 666 /dev/kvm 2>/dev/null || true
+
+          qemu="$ANDROID_SDK_ROOT/emulator/qemu/linux-x86_64/qemu-system-x86_64"
+          missing_libs="$(ldd "$qemu" 2>/dev/null | awk '/not found/ {print $1}' | sort -u || true)"
+          if [[ -n "$missing_libs" ]]; then
+            echo 'Android emulator still has unresolved shared-library dependencies:' >&2
+            printf '%s\n' "$missing_libs" >&2
+            exit 1
+          fi
+
+          "$ANDROID_SDK_ROOT/emulator/emulator" -version
+          "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check
 
       - name: Hydrate engine assets without mods
         shell: bash
