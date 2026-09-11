@@ -326,7 +326,12 @@ public:
                     0,
                     8
                 ));
-                static_cast<void>(model_.select_visible_row(row));
+                if (model_.select_visible_row(row)) {
+                    // Touching a note-type row completes the selection on Android.
+                    accept_custom_ = false;
+                    close(window);
+                    return Result::accepted;
+                }
             }
             return Result::none;
         }

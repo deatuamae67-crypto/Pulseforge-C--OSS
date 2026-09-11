@@ -3931,6 +3931,19 @@ void draw_autochart_progress(
         StreamingChartCacheOptions cache_options;
         cache_options.difficulty = entry.difficulty;
         cache_options.difficulty_explicit = true;
+        // Use per-app writable storage for the private streaming cache on Android.
+        if (char* preference = SDL_GetPrefPath("PulseForge", "PulseForge");
+            preference != nullptr) {
+            cache_options.cache_root = std::filesystem::path(preference)
+                / "cache" / "large-charts";
+            SDL_free(preference);
+        } else {
+            std::error_code temporary_error;
+            const auto temporary_root = std::filesystem::temp_directory_path(temporary_error);
+            if (!temporary_error) {
+                cache_options.cache_root = temporary_root / "pulseforge" / "large-charts";
+            }
+        }
         auto cached = prepare_streaming_chart_cache(
             entry.chart_path,
             cache_options

@@ -11,6 +11,9 @@ All notable public PulseForge changes are documented in this file.
 - Removes the historical 2,000,000 generated-gameplay-event validation ceiling so dense materialized charts are not rejected solely by an estimated event count.
 - Keeps finite per-chunk, per-window, per-query and per-frame streaming working sets, plus arithmetic/format validation. These bound RAM/CPU work at one time and do not cap the total logical note count.
 - Existing PFC1 `PatternRun` coverage continues to validate a 1,000,000,000,000-note chart in constant-size storage.
+- Removes the remaining Psych fast-loader raw-entry/5,000,000-note rejection so those values cannot reappear as chart-validity ceilings.
+- Uses SDL per-app writable storage for the Android large-chart streaming cache, with a temporary-directory fallback.
+- Restores the ten approved built-in menu/background tracks and makes streaming-editor note-type rows selectable with one touch/click while preserving free-form custom IDs.
 
 ## [1.0.0] - 2026-09-05
 
