@@ -23,21 +23,11 @@ jobs:
           from pathlib import Path
           path = Path('src/io/fast_psych_loader.cpp')
           text = path.read_text(encoding='utf-8')
-          old = '''        state.chart = make_chart(
-              metadata,
-              denpa_schema,
-              difficulty,
-              metadata.raw_section_entries
-          );'''
-          new = '''        state.chart = make_chart(
-              metadata,
-              denpa_schema,
-              difficulty,
-              std::size_t{}
-          );'''
-          if text.count(old) != 1:
-              raise SystemExit('expected stale raw_section_entries call exactly once')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          needle = 'metadata.raw_section_entries'
+          if text.count(needle) != 1:
+              raise SystemExit(f'expected one stale raw_section_entries reference, got {text.count(needle)}')
+          text = text.replace(needle, 'std::size_t{}', 1)
+          path.write_text(text, encoding='utf-8')
           Path('.github/workflows/tmp-fix-pr156-compile.yml').unlink()
           PY
           ! grep -Fq 'metadata.raw_section_entries' src/io/fast_psych_loader.cpp
