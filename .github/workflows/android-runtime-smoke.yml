@@ -75,14 +75,11 @@ jobs:
           # otherwise diagnostics can incorrectly report KVM as unavailable.
           sudo chmod 666 /dev/kvm 2>/dev/null || true
 
-          qemu="$ANDROID_SDK_ROOT/emulator/qemu/linux-x86_64/qemu-system-x86_64"
-          missing_libs="$(ldd "$qemu" 2>/dev/null | awk '/not found/ {print $1}' | sort -u || true)"
-          if [[ -n "$missing_libs" ]]; then
-            echo 'Android emulator still has unresolved shared-library dependencies:' >&2
-            printf '%s\n' "$missing_libs" >&2
-            exit 1
-          fi
-
+          # Do not run ldd directly on qemu-system-x86_64 here. The Android
+          # emulator launcher supplies its own private Qt/Abseil/emulator library
+          # paths; direct ldd therefore reports bundled libraries as "not found"
+          # even though the launcher resolves them correctly. Probe the supported
+          # launcher itself instead.
           "$ANDROID_SDK_ROOT/emulator/emulator" -version
           "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check
 
