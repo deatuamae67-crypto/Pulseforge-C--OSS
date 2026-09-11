@@ -1320,7 +1320,7 @@ FastPsychLoadResult load_fast_psych_chart(
             metadata,
             denpa_schema,
             difficulty,
-            metadata.raw_section_entries
+            std::size_t{}
         );
         state.current_bpm = initial_bpm;
         state.chart.tempos.push_back({0.0, initial_bpm, 4, 4});
