@@ -433,15 +433,27 @@ jobs:
 
           mapfile -t assets < "$RUNNER_TEMP/public-assets.paths"
           if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
-            tag_sha="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')"
-            if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
-              echo "Release $tag already points to $tag_sha, refusing to move it to $GITHUB_SHA." >&2
-              exit 1
+            if gh api "repos/$repo/git/ref/tags/$tag" >/dev/null 2>&1; then
+              tag_sha="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')"
+              if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+                echo "Moving rolling runtime tag $tag from $tag_sha to $GITHUB_SHA."
+                gh api --method PATCH "repos/$repo/git/refs/tags/$tag" \
+                  -f sha="$GITHUB_SHA" -F force=true >/dev/null
+              fi
+            else
+              gh api --method POST "repos/$repo/git/refs" \
+                -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
             fi
+
             gh release upload "$tag" "${assets[@]}" --repo "$repo" --clobber
             release_id="$(gh api "repos/$repo/releases/tags/$tag" --jq '.id')"
             gh api --method PATCH "repos/$repo/releases/$release_id" \
-              -f name="$RELEASE_TITLE" -f body="$(cat "$notes")" -F prerelease=false >/dev/null
+              -f tag_name="$tag" \
+              -f target_commitish="$GITHUB_SHA" \
+              -f name="$RELEASE_TITLE" \
+              -f body="$(cat "$notes")" \
+              -F draft=false \
+              -F prerelease=false >/dev/null
           else
             gh release create "$tag" "${assets[@]}" \
               --repo "$repo" \
@@ -451,7 +463,10 @@ jobs:
           fi
 
           release_id="$(gh api "repos/$repo/releases/tags/$tag" --jq '.id')"
+          test "$(gh api "repos/$repo/releases/$release_id" --jq '.draft')" = false
           test "$(gh api "repos/$repo/releases/$release_id" --jq '.prerelease')" = false
+          test "$(gh api "repos/$repo/releases/$release_id" --jq '.target_commitish')" = "$GITHUB_SHA"
+          test "$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')" = "$GITHUB_SHA"
           gh api "repos/$repo/releases/$release_id/assets?per_page=100" --paginate --jq '.[].name' | sort > "$RUNNER_TEMP/published-assets.txt"
           diff -u "$RUNNER_TEMP/expected-assets.txt" "$RUNNER_TEMP/published-assets.txt"
           echo "Published $tag with five direct engine runtimes and no mod payloads."
