@@ -18,7 +18,7 @@ jobs:
           fetch-depth: 0
           lfs: false
 
-      - name: Restore the ten built-in menu tracks
+      - name: Restore menu music and patch runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -26,115 +26,72 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch origin complete/embedded-builtin-content
           git cherry-pick 550ded45eb9cc66ae27a40229b499d7b2b8c8023
-
-      - name: Remove residual chart ceilings and fix Android/editor paths
-        shell: bash
-        run: |
-          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import re
-
-          def sub_once(path: str, pattern: str, replacement: str, *, flags=0) -> None:
-              p = Path(path)
-              text = p.read_text(encoding='utf-8')
-              updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected one replacement, got {count}: {pattern[:90]!r}')
-              p.write_text(updated, encoding='utf-8')
 
           fast = Path('src/io/fast_psych_loader.cpp')
           text = fast.read_text(encoding='utf-8')
           text, n1 = re.subn(r'\n\s*bool raw_entries_exceeded\{\};', '', text, count=1)
           text, n2 = re.subn(r'\n\s*std::size_t raw_section_entries\{\};', '', text, count=1)
-          if (n1 != 1 or n2 != 1:
-              raise SystemExit(f'fast loader metadata fields changed unexpectedly: {n1=}, {n2=}')
-          text, n3 = re.subn(
-              r'\n\s*constexpr auto aggregate_limit =\s*\n\s*materialized_chart_note_budget \+ maximum_chart_events;\s*\n\s*if \(metadata\.raw_section_entries >= aggregate_limit\) \{\s*\n\s*metadata\.raw_entries_exceeded = true;\s*\n\s*\} else \{\s*\n\s*\+\+metadata\.raw_section_entries;\s*\n\s*\}',
-              '\n                // Total source entries are not a chart-validity ceiling.\n                // The launcher routes large sources through bounded PFC1 streaming.',
-              text,
-              count=1,
-          )
-          if n3 != 1:
-              raise SystemExit(f'fast loader aggregate ceiling block changed unexpectedly: {n3=}')
-          text, n4 = re.subn(
-              r'\n\s*if \(metadata\.raw_entries_exceeded\) \{\s*\n\s*throw std::runtime_error\(\s*\n\s*"chart contains more note/event entries than the configured "\s*\n\s*"safety limits allow"\s*\n\s*\);\s*\n\s*\}',
-              '',
-              text,
-              count=1,
-          )
-          if n4 != 1:
-              raise SystemExit(f'fast loader residual safety-limit rejection changed unexpectedly: {n4=}')
-          text, n5 = re.subn(
-              r'void ensure_note_capacity\(const Chart& chart\) \{\s*\n\s*if \(chart\.notes\.size\(\) >= materialized_chart_note_budget\) \{\s*\n\s*throw std::runtime_error\(\s*\n\s*"chart has more than 5000000 notes"\s*\n\s*\);\s*\n\s*\}\s*\n\}',
-              'void ensure_note_capacity(const Chart&) {\n    // Intentionally no chart-wide note-count ceiling. Large charts are routed\n    // to bounded streaming before materialization whenever possible.\n}',
-              text,
-              count=1,
-          )
-          if n5 != 1:
-              raise SystemExit(f'fast loader 5M note ceiling changed unexpectedly: {n5=}')
+          text, n3 = re.subn(r'\n\s*constexpr auto aggregate_limit =\s*\n\s*materialized_chart_note_budget \+ maximum_chart_events;\s*\n\s*if \(metadata\.raw_section_entries >= aggregate_limit\) \{\s*\n\s*metadata\.raw_entries_exceeded = true;\s*\n\s*\} else \{\s*\n\s*\+\+metadata\.raw_section_entries;\s*\n\s*\}', '\n                // Total source entries are not a chart-validity ceiling.\n                // The launcher routes large sources through bounded PFC1 streaming.', text, count=1)
+          text, n4 = re.subn(r'\n\s*if \(metadata\.raw_entries_exceeded\) \{\s*\n\s*throw std::runtime_error\(\s*\n\s*"chart contains more note/event entries than the configured "\s*\n\s*"safety limits allow"\s*\n\s*\);\s*\n\s*\}', '', text, count=1)
+          text, n5 = re.subn(r'void ensure_note_capacity\(const Chart& chart\) \{\s*\n\s*if \(chart\.notes\.size\(\) >= materialized_chart_note_budget\) \{\s*\n\s*throw std::runtime_error\(\s*\n\s*"chart has more than 5000000 notes"\s*\n\s*\);\s*\n\s*\}\s*\n\}', 'void ensure_note_capacity(const Chart&) {\n    // No chart-wide note-count ceiling; large sources route through streaming.\n}', text, count=1)
+          if (n1, n2, n3, n4, n5) != (1, 1, 1, 1, 1):
+              raise SystemExit(f'fast-loader patch mismatch: {(n1, n2, n3, n4, n5)}')
           fast.write_text(text, encoding='utf-8')
 
-          sub_once(
-              'src/app/launcher.cpp',
-              r'(StreamingChartCacheOptions cache_options;\n\s*cache_options\.difficulty = entry\.difficulty;\n\s*cache_options\.difficulty_explicit = true;)',
-              r'''\1
-        // Android's process working directory is not guaranteed to be writable.
-        // Put the private PFC1 cache in SDL's per-app writable data directory.
-        if (char* preference = SDL_GetPrefPath("PulseForge", "PulseForge");
-            preference != nullptr) {
-            cache_options.cache_root = std::filesystem::path(preference)
-                / "cache" / "large-charts";
-            SDL_free(preference);
-        } else {
-            std::error_code temporary_error;
-            const auto temporary_root = std::filesystem::temp_directory_path(
-                temporary_error
-            );
-            if (!temporary_error) {
-                cache_options.cache_root = temporary_root
-                    / "pulseforge" / "large-charts";
-            }
-        }''',
-          )
+          launcher = Path('src/app/launcher.cpp')
+          text = launcher.read_text(encoding='utf-8')
+          pattern = r'(StreamingChartCacheOptions cache_options;\n\s*cache_options\.difficulty = entry\.difficulty;\n\s*cache_options\.difficulty_explicit = true;)'
+          insertion = ('\\1\n        // Use per-app writable storage for the private streaming cache on Android.\n'
+                       '        if (char* preference = SDL_GetPrefPath("PulseForge", "PulseForge");\n'
+                       '            preference != nullptr) {\n'
+                       '            cache_options.cache_root = std::filesystem::path(preference)\n'
+                       '                / "cache" / "large-charts";\n'
+                       '            SDL_free(preference);\n'
+                       '        } else {\n'
+                       '            std::error_code temporary_error;\n'
+                       '            const auto temporary_root = std::filesystem::temp_directory_path(temporary_error);\n'
+                       '            if (!temporary_error) {\n'
+                       '                cache_options.cache_root = temporary_root / "pulseforge" / "large-charts";\n'
+                       '            }\n'
+                       '        }')
+          text, count = re.subn(pattern, insertion, text, count=1)
+          if count != 1:
+              raise SystemExit('launcher streaming cache block not found')
+          launcher.write_text(text, encoding='utf-8')
 
-          sub_once(
-              'src/app/streaming_editor_ui.cpp',
-              r'static_cast<void>\(model_\.select_visible_row\(row\)\);',
-              '''if (model_.select_visible_row(row)) {
-                    // A touch/click on a note-type row is a complete selection;
-                    // Android users must not need a hardware Enter key.
-                    accept_custom_ = false;
-                    close(window);
-                    return Result::accepted;
-                }''',
-          )
+          ui = Path('src/app/streaming_editor_ui.cpp')
+          text = ui.read_text(encoding='utf-8')
+          old = '                static_cast<void>(model_.select_visible_row(row));'
+          new = ('                if (model_.select_visible_row(row)) {\n'
+                 '                    // Touching a note-type row completes the selection on Android.\n'
+                 '                    accept_custom_ = false;\n'
+                 '                    close(window);\n'
+                 '                    return Result::accepted;\n'
+                 '                }')
+          if text.count(old) != 1:
+              raise SystemExit('streaming picker row-selection block not found exactly once')
+          ui.write_text(text.replace(old, new, 1), encoding='utf-8')
 
           changelog = Path('CHANGELOG.md')
           text = changelog.read_text(encoding='utf-8')
           anchor = '- Existing PFC1 `PatternRun` coverage continues to validate a 1,000,000,000,000-note chart in constant-size storage.\n'
-          addition = anchor + (
-              '- Removes the remaining Psych fast-loader raw-entry/5,000,000-note rejection so those values cannot reappear as chart-validity ceilings.\n'
-              '- Uses SDL per-app writable storage for the Android large-chart streaming cache, with a temporary-directory fallback.\n'
-              '- Restores the ten approved built-in menu/background tracks and makes streaming-editor note-type rows selectable with a single touch/click while preserving free-form custom IDs.\n'
-          )
-          if anchor not in text:
-              raise SystemExit('CHANGELOG extreme-scale anchor not found')
+          addition = (anchor
+              + '- Removes the remaining Psych fast-loader raw-entry/5,000,000-note rejection so those values cannot reappear as chart-validity ceilings.\n'
+              + '- Uses SDL per-app writable storage for the Android large-chart streaming cache, with a temporary-directory fallback.\n'
+              + '- Restores the ten approved built-in menu/background tracks and makes streaming-editor note-type rows selectable with one touch/click while preserving free-form custom IDs.\n')
+          if text.count(anchor) != 1:
+              raise SystemExit('CHANGELOG anchor mismatch')
           changelog.write_text(text.replace(anchor, addition, 1), encoding='utf-8')
 
-          # This workflow is transport only and must not survive in the PR diff.
           Path('.github/workflows/tmp-fix-extreme-charts-menu-notetypes.yml').unlink()
           PY
-
-      - name: Validate patch invariants and commit
-        shell: bash
-        run: |
-          set -euo pipefail
           ! grep -Fq 'chart contains more note/event entries than the configured' src/io/fast_psych_loader.cpp
           ! grep -Fq 'chart has more than 5000000 notes' src/io/fast_psych_loader.cpp
           ! grep -Fq 'raw_entries_exceeded' src/io/fast_psych_loader.cpp
           grep -Fq 'SDL_GetPrefPath("PulseForge", "PulseForge")' src/app/launcher.cpp
-          grep -Fq 'return Result::accepted;' src/app/streaming_editor_ui.cpp
           test "$(find assets/menu -maxdepth 1 -type f -iname '*.mp3' | wc -l | tr -d ' ')" -eq 10
           test ! -e .github/workflows/tmp-fix-extreme-charts-menu-notetypes.yml
           git add -A
