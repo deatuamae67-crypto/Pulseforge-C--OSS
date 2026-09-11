@@ -1,0 +1,40 @@
+name: Apply runtime compatibility patch
+
+on:
+  push:
+    branches:
+      - fix/runtime-compat-largecharts-android-lua-20260911
+    paths:
+      - .github/workflows/runtime-fix-apply.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/runtime-compat-largecharts-android-lua-20260911
+          fetch-depth: 0
+      - name: Reconstruct and apply patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .pulseforge-patch/runtime-fix.b64.{1,2,3,4} | base64 --decode > /tmp/runtime-fix.patch
+          git apply --check /tmp/runtime-fix.patch
+          git apply /tmp/runtime-fix.patch
+          git diff --check
+      - name: Commit patch and remove transport files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .pulseforge-patch
+          rm -f .github/workflows/runtime-fix-apply.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(runtime): restore large-chart, Psych Lua and Android selector compatibility"
+          git push origin HEAD:fix/runtime-compat-largecharts-android-lua-20260911
