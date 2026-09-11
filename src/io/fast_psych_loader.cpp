@@ -61,9 +61,7 @@ struct PsychMetadata {
     bool saw_header_object{};
     bool saw_options_object{};
     bool header_needs_voices{};
-    bool raw_entries_exceeded{};
     bool saw_raw_lane{};
-    std::size_t raw_section_entries{};
     std::uint64_t max_raw_lane{};
 
     std::optional<std::string> song_title;
@@ -510,13 +508,8 @@ void preflight_psych_sections(
                 continue;
             }
             for (value raw_note : notes) {
-                constexpr auto aggregate_limit =
-                    materialized_chart_note_budget + maximum_chart_events;
-                if (metadata.raw_section_entries >= aggregate_limit) {
-                    metadata.raw_entries_exceeded = true;
-                } else {
-                    ++metadata.raw_section_entries;
-                }
+                // Total source entries are not a chart-validity ceiling.
+                // The launcher routes large sources through bounded PFC1 streaming.
                 array fields;
                 if (!get_array(raw_note, fields)) {
                     validate_json_value(raw_note);
@@ -729,21 +722,11 @@ void parse_song_metadata(
     if (metadata.requires_dom_fallback) {
         return false;
     }
-    if (metadata.raw_entries_exceeded) {
-        throw std::runtime_error(
-            "chart contains more note/event entries than the configured "
-            "safety limits allow"
-        );
-    }
     return metadata.saw_notes_array;
 }
 
-void ensure_note_capacity(const Chart& chart) {
-    if (chart.notes.size() >= materialized_chart_note_budget) {
-        throw std::runtime_error(
-            "chart has more than 5000000 notes"
-        );
-    }
+void ensure_note_capacity(const Chart&) {
+    // No chart-wide note-count ceiling; large sources route through streaming.
 }
 
 void consume_event_capacity(ParseState& state) {
@@ -1337,7 +1320,7 @@ FastPsychLoadResult load_fast_psych_chart(
             metadata,
             denpa_schema,
             difficulty,
-            metadata.raw_section_entries
+            std::size_t{}
         );
         state.current_bpm = initial_bpm;
         state.chart.tempos.push_back({0.0, initial_bpm, 4, 4});
