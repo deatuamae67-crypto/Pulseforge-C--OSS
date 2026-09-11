@@ -47,6 +47,7 @@ jobs:
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager \
             'platform-tools' \
+            'emulator' \
             'platforms;android-36' \
             'build-tools;36.0.0' \
             'ndk;28.2.13676358' \
@@ -60,6 +61,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends libpulse0
 
+          # Register the emulator through sdkmanager first so avdmanager sees an
+          # installed emulator package. We still pin the launcher/QEMU payload to
+          # a known stable build, but preserve sdkmanager's package.xml metadata.
+          emulator_package_xml="$RUNNER_TEMP/emulator-package.xml"
+          test -f "$ANDROID_SDK_ROOT/emulator/package.xml"
+          cp "$ANDROID_SDK_ROOT/emulator/package.xml" "$emulator_package_xml"
+
           # GitHub's runner image can contain an older emulator package even when
           # sdkmanager installs a newer API 36 system image. Pin a known stable
           # emulator so the engine and system image cannot drift out of sync.
@@ -70,6 +78,9 @@ jobs:
           echo '95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266  '"$emulator_zip" | sha256sum --check
           rm -rf "$ANDROID_SDK_ROOT/emulator"
           unzip -q "$emulator_zip" -d "$ANDROID_SDK_ROOT"
+          cp "$emulator_package_xml" "$ANDROID_SDK_ROOT/emulator/package.xml"
+          test -x "$ANDROID_SDK_ROOT/emulator/emulator"
+          test -f "$ANDROID_SDK_ROOT/emulator/package.xml"
 
           # Grant the hosted runner access before invoking any emulator binary;
           # otherwise diagnostics can incorrectly report KVM as unavailable.
