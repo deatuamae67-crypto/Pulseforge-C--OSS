@@ -1199,11 +1199,10 @@ EditorIoResult ChartEditor::load_project(
             return validation_failure(read_result.path, validation_error);
         }
         const auto& payload_json = root.at("notePayloads");
-        if (!payload_json.is_array()
-            || payload_json.size() > maximum_chart_notes + 1U) {
+        if (!payload_json.is_array()) {
             return validation_failure(
                 read_result.path,
-                "editor project payload dictionary is not a bounded array"
+                "editor project payload dictionary is not an array"
             );
         }
         const auto payloads = payload_json.get<std::vector<std::string>>();
