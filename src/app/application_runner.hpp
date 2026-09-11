@@ -7,6 +7,41 @@
 struct SDL_Renderer;
 struct SDL_Window;
 
+// application.cpp historically kept the camera refresh operations as local
+// lambdas inside script_set_visual_property(). The shared camera-zoom decay
+// path added for Psych compatibility also needs the exact same refresh, but it
+// lives outside that local scope. Keep the call sites identical while mapping
+// them to the canonical RuntimeScene setters. Function-like macros only expand
+// at call sites (update_scene_camera()), so the local lambda declarations remain
+// valid and existing property-set behavior is unchanged.
+#if defined(PULSEFORGE_HAS_LUA)
+#define update_scene_camera()                                                   \
+    do {                                                                        \
+        if (scene_ != nullptr) {                                                \
+            scene_->script_set_game_camera(                                    \
+                script_cam_game_x_,                                            \
+                script_cam_game_y_,                                            \
+                script_cam_game_zoom_,                                         \
+                script_cam_game_angle_,                                        \
+                script_cam_game_alpha_                                         \
+            );                                                                  \
+        }                                                                       \
+    } while (false)
+
+#define update_scene_hud_camera()                                               \
+    do {                                                                        \
+        if (scene_ != nullptr) {                                                \
+            scene_->script_set_hud_camera(                                     \
+                script_cam_hud_x_,                                             \
+                script_cam_hud_y_,                                             \
+                script_cam_hud_zoom_,                                          \
+                script_cam_hud_angle_,                                         \
+                script_cam_hud_alpha_                                          \
+            );                                                                  \
+        }                                                                       \
+    } while (false)
+#endif
+
 namespace pulseforge::detail {
 
 class DiscordPresenceSession;
