@@ -182,11 +182,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # avdmanager and emulator can otherwise resolve different per-user AVD
+          # roots on hosted runners. Force both tools onto the same explicit AVD
+          # directory and persist it for the diagnostics step.
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/pulseforge-avd"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/pulseforge-android-user"
+          mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
+          {
+            echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME"
+            echo "ANDROID_USER_HOME=$ANDROID_USER_HOME"
+          } >> "$GITHUB_ENV"
+
+          rm -rf \
+            "$ANDROID_AVD_HOME/pulseforge-api36.avd" \
+            "$ANDROID_AVD_HOME/pulseforge-api36.ini"
+
           echo no | avdmanager create avd \
             --force \
             --name pulseforge-api36 \
             --package 'system-images;android-36;google_apis;x86_64' \
-            --device pixel_6
+            --device pixel_6 \
+            --path "$ANDROID_AVD_HOME/pulseforge-api36.avd"
+
+          echo '--- avdmanager list avd ---'
+          avdmanager list avd
+          echo '--- emulator -list-avds ---'
+          "$ANDROID_SDK_ROOT/emulator/emulator" -list-avds
+          test -d "$ANDROID_AVD_HOME/pulseforge-api36.avd"
+          test -f "$ANDROID_AVD_HOME/pulseforge-api36.ini"
+          "$ANDROID_SDK_ROOT/emulator/emulator" -list-avds | grep -Fxq 'pulseforge-api36'
+
           nohup "$ANDROID_SDK_ROOT/emulator/emulator" \
             -avd pulseforge-api36 \
             -no-window -noaudio -no-boot-anim -no-snapshot -wipe-data \
@@ -277,6 +303,9 @@ jobs:
           echo '--- KVM / acceleration ---'
           ls -l /dev/kvm 2>&1 || true
           timeout 10 "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check 2>&1 || true
+          echo '--- configured AVDs ---'
+          timeout 10 "$ANDROID_SDK_ROOT/emulator/emulator" -list-avds 2>&1 || true
+          find "${ANDROID_AVD_HOME:-$HOME/.android/avd}" -maxdepth 2 -type f -o -type d 2>/dev/null | head -n 120 || true
           echo '--- emulator processes ---'
           ps -ef | grep -E '[e]mulator|[q]emu' || true
           echo '--- adb devices ---'
