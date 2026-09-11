@@ -511,7 +511,7 @@ void preflight_psych_sections(
             }
             for (value raw_note : notes) {
                 constexpr auto aggregate_limit =
-                    maximum_chart_notes + maximum_chart_events;
+                    materialized_chart_note_budget + maximum_chart_events;
                 if (metadata.raw_section_entries >= aggregate_limit) {
                     metadata.raw_entries_exceeded = true;
                 } else {
@@ -739,7 +739,7 @@ void parse_song_metadata(
 }
 
 void ensure_note_capacity(const Chart& chart) {
-    if (chart.notes.size() >= maximum_chart_notes) {
+    if (chart.notes.size() >= materialized_chart_note_budget) {
         throw std::runtime_error(
             "chart has more than 5000000 notes"
         );
@@ -1223,7 +1223,7 @@ void parse_content(
         : metadata.song_speed.value_or(1.0);
 
     const auto reserve_estimate = std::min(
-        maximum_chart_notes,
+        materialized_chart_note_budget,
         raw_section_entries
     );
     chart.notes.reserve(reserve_estimate);
@@ -1235,7 +1235,7 @@ void parse_content(
 ) {
     std::error_code size_error;
     const auto reported_size = std::filesystem::file_size(path, size_error);
-    if (!size_error && reported_size > maximum_chart_json_bytes) {
+    if (!size_error && reported_size > materialized_chart_json_budget) {
         throw std::runtime_error(
             "chart JSON exceeds the 512 MiB safety limit"
         );
@@ -1259,7 +1259,7 @@ void parse_content(
         const auto bytes_read = input.gcount();
         if (bytes_read > 0) {
             const auto chunk_size = static_cast<std::size_t>(bytes_read);
-            if (chunk_size > maximum_chart_json_bytes - builder.length()) {
+            if (chunk_size > materialized_chart_json_budget - builder.length()) {
                 throw std::runtime_error(
                     "chart JSON exceeds the 512 MiB safety limit"
                 );

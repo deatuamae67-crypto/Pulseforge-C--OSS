@@ -3918,7 +3918,7 @@ void draw_autochart_progress(
             size_error
         );
         const bool requires_streaming = (!size_error
-                && source_bytes > maximum_chart_json_bytes)
+                && source_bytes > materialized_chart_json_budget)
             || loaded.error.find("5000000") != std::string::npos
             || loaded.error.find("too many notes") != std::string::npos
             || loaded.error.find("note limit") != std::string::npos

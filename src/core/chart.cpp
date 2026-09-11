@@ -14,7 +14,8 @@ constexpr double minimum_chart_time_ms = -60'000.0;
 // subject to the decoder's bounded-memory policy until streaming is selected.
 constexpr double maximum_chart_time_ms = 12.0 * 60.0 * 60.0 * 1'000.0;
 constexpr double maximum_chart_scroll_speed = 100.0;
-constexpr std::size_t maximum_generated_gameplay_events = 2'000'000;
+constexpr std::size_t maximum_generated_gameplay_events =
+    std::numeric_limits<std::size_t>::max();
 constexpr std::size_t maximum_metadata_text_bytes = 1'024;
 constexpr std::size_t maximum_audio_path_characters = 32'768;
 constexpr std::size_t maximum_vocal_stems = 8;
