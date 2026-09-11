@@ -47,7 +47,6 @@ public final class BootstrapActivity extends Activity {
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        enforceBootstrapPresentation();
 
         status = new TextView(this);
         status.setBackgroundColor(Color.rgb(3, 7, 10));
@@ -57,6 +56,11 @@ public final class BootstrapActivity extends Activity {
         status.setPadding(40, 40, 40, 40);
         status.setText("PulseForge\nA preparar os recursos Android...");
         setContentView(status);
+
+        // Android 16's PhoneWindow does not install its DecorView until content
+        // is attached. Calling Window#getInsetsController before setContentView
+        // can therefore dereference a null DecorView inside the framework.
+        enforceBootstrapPresentation();
 
         new Thread(this::prepareAndLaunch, "PulseForge-asset-bootstrap").start();
     }

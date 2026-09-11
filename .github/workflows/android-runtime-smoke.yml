@@ -1,0 +1,320 @@
+name: PulseForge Android runtime launch smoke
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/android-runtime-smoke.yml'
+      - 'platform/android/**'
+      - 'src/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'assets/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pulseforge-android-runtime-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  launch-android-16:
+    name: Launch Complete APK on Android 16 emulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          lfs: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      - name: Install Android 16 emulator and build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager \
+            'platform-tools' \
+            'emulator' \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'ndk;28.2.13676358' \
+            'cmake;3.31.6' \
+            'system-images;android-36;google_apis;x86_64'
+
+          # The current standalone emulator/QEMU build links to PulseAudio even
+          # when CI runs it with -noaudio. ubuntu-24.04 runners do not always
+          # have the client library installed, so install the runtime dependency
+          # explicitly before probing or booting the emulator.
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libpulse0
+
+          # Register the emulator through sdkmanager first so avdmanager sees an
+          # installed emulator package. We still pin the launcher/QEMU payload to
+          # a known stable build, but preserve sdkmanager's package.xml metadata.
+          emulator_package_xml="$RUNNER_TEMP/emulator-package.xml"
+          test -f "$ANDROID_SDK_ROOT/emulator/package.xml"
+          cp "$ANDROID_SDK_ROOT/emulator/package.xml" "$emulator_package_xml"
+
+          # GitHub's runner image can contain an older emulator package even when
+          # sdkmanager installs a newer API 36 system image. Pin a known stable
+          # emulator so the engine and system image cannot drift out of sync.
+          emulator_zip="$RUNNER_TEMP/emulator-linux_x64-15917651.zip"
+          curl --fail --location --retry 3 --retry-all-errors \
+            'https://dl.google.com/android/repository/emulator-linux_x64-15917651.zip' \
+            --output "$emulator_zip"
+          echo '95771e0ae431897b2a4bd2d97fa095f29a8b0624a7b216baf529f9306161c266  '"$emulator_zip" | sha256sum --check
+          rm -rf "$ANDROID_SDK_ROOT/emulator"
+          unzip -q "$emulator_zip" -d "$ANDROID_SDK_ROOT"
+          cp "$emulator_package_xml" "$ANDROID_SDK_ROOT/emulator/package.xml"
+          test -x "$ANDROID_SDK_ROOT/emulator/emulator"
+          test -f "$ANDROID_SDK_ROOT/emulator/package.xml"
+
+          # Grant the hosted runner access before invoking any emulator binary;
+          # otherwise diagnostics can incorrectly report KVM as unavailable.
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+
+          # Do not run ldd directly on qemu-system-x86_64 here. The Android
+          # emulator launcher supplies its own private Qt/Abseil/emulator library
+          # paths; direct ldd therefore reports bundled libraries as "not found"
+          # even though the launcher resolves them correctly. Probe the supported
+          # launcher itself instead.
+          "$ANDROID_SDK_ROOT/emulator/emulator" -version
+          "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check
+
+      - name: Hydrate engine assets without mods
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs install --local
+          git lfs pull --include='assets/**,third_party/**' --exclude='mods/**'
+
+      - name: Generate production-sized synthetic Complete startup manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          mods = []
+          total = 19617
+          base = total // 30
+          remainder = total % 30
+          for mod_index in range(30):
+              count = base + (1 if mod_index < remainder else 0)
+              files = [
+                  {
+                      'path': f'payload/{mod_index:02d}/{file_index:05d}.bin',
+                      'url': f'https://drive.google.com/uc?id=pulseforge-smoke-{mod_index:02d}-{file_index:05d}',
+                  }
+                  for file_index in range(count)
+              ]
+              basis = {
+                  'slug': f'smoke-mod-{mod_index:02d}',
+                  'name': f'Smoke Mod {mod_index:02d}',
+                  'drive_id': f'smoke-drive-{mod_index:02d}',
+                  'enabled_by_default': True,
+                  'expected_min_files': count,
+                  'expected_min_bytes': 0,
+                  'files': files,
+              }
+              canonical = json.dumps(basis, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+              basis['revision'] = hashlib.sha256(canonical.encode()).hexdigest()
+              mods.append(basis)
+          content_revision = hashlib.sha256(
+              json.dumps(mods, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+          ).hexdigest()
+          manifest = {
+              'schema_version': 1,
+              'edition': '1.0.0-complete',
+              'source_commit': 'android-runtime-smoke',
+              'content_revision': content_revision,
+              'mod_count': len(mods),
+              'transport': 'google-drive-gdown-resolved-https',
+              'mods': mods,
+          }
+          target = Path('assets/complete-runtime-manifest.json')
+          target.write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
+          print(f'{target}: {target.stat().st_size} bytes, {total} files')
+          PY
+
+      - name: Build x86_64 release APK and test-sign it
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x platform/android/gradlew
+          ./platform/android/gradlew --no-daemon --stacktrace \
+            -PPULSEFORGE_ANDROID_ABI=x86_64 \
+            -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android-smoke" \
+            -p platform/android \
+            :app:assembleRelease
+          unsigned="$RUNNER_TEMP/pulseforge-android-smoke/gradle/outputs/apk/release/app-release-unsigned.apk"
+          aligned="$RUNNER_TEMP/pulseforge-smoke-aligned.apk"
+          signed="$RUNNER_TEMP/pulseforge-smoke.apk"
+          keystore="$RUNNER_TEMP/pulseforge-smoke.jks"
+          test -f "$unsigned"
+          keytool -genkeypair -noprompt -keystore "$keystore" \
+            -storepass android -keypass android -alias pulseforge-smoke \
+            -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname 'CN=PulseForge Android Runtime Smoke,OU=CI,O=PulseForge,C=PT'
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/zipalign" -P 16 -f 4 "$unsigned" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
+            --ks "$keystore" --ks-key-alias pulseforge-smoke \
+            --ks-pass pass:android --key-pass pass:android \
+            --out "$signed" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose "$signed"
+
+      - name: Boot Android 16 emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # avdmanager and emulator can otherwise resolve different per-user AVD
+          # roots on hosted runners. Force both tools onto the same explicit AVD
+          # directory and persist it for the diagnostics step.
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/pulseforge-avd"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/pulseforge-android-user"
+          mkdir -p "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
+          {
+            echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME"
+            echo "ANDROID_USER_HOME=$ANDROID_USER_HOME"
+          } >> "$GITHUB_ENV"
+
+          rm -rf \
+            "$ANDROID_AVD_HOME/pulseforge-api36.avd" \
+            "$ANDROID_AVD_HOME/pulseforge-api36.ini"
+
+          echo no | avdmanager create avd \
+            --force \
+            --name pulseforge-api36 \
+            --package 'system-images;android-36;google_apis;x86_64' \
+            --device pixel_6 \
+            --path "$ANDROID_AVD_HOME/pulseforge-api36.avd"
+
+          echo '--- avdmanager list avd ---'
+          avdmanager list avd
+          echo '--- emulator -list-avds ---'
+          "$ANDROID_SDK_ROOT/emulator/emulator" -list-avds
+          test -d "$ANDROID_AVD_HOME/pulseforge-api36.avd"
+          test -f "$ANDROID_AVD_HOME/pulseforge-api36.ini"
+          "$ANDROID_SDK_ROOT/emulator/emulator" -list-avds | grep -Fxq 'pulseforge-api36'
+
+          nohup "$ANDROID_SDK_ROOT/emulator/emulator" \
+            -avd pulseforge-api36 \
+            -no-window -noaudio -no-boot-anim -no-snapshot -wipe-data \
+            -gpu software \
+            >"$RUNNER_TEMP/emulator.log" 2>&1 &
+          emulator_pid=$!
+
+          adb_ready=0
+          adb_deadline=$((SECONDS + 300))
+          while (( SECONDS < adb_deadline )); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo 'The Android emulator process exited before ADB became available.' >&2
+              tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
+              exit 1
+            fi
+            if [[ "$(timeout 5 adb get-state 2>/dev/null || true)" == 'device' ]]; then
+              adb_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if (( adb_ready == 0 )); then
+            echo 'Android emulator did not expose a usable ADB device within 300 seconds.' >&2
+            timeout 10 adb devices -l >&2 || true
+            tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
+            exit 1
+          fi
+
+          boot_complete=0
+          boot_deadline=$((SECONDS + 600))
+          while (( SECONDS < boot_deadline )); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              echo 'The Android emulator process exited after ADB became available but before boot completed.' >&2
+              tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
+              exit 1
+            fi
+            if [[ "$(timeout 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" == '1' ]]; then
+              boot_complete=1
+              break
+            fi
+            sleep 5
+          done
+          if (( boot_complete == 0 )); then
+            echo 'Android emulator exposed ADB but did not finish booting within 600 seconds.' >&2
+            timeout 10 adb devices -l >&2 || true
+            tail -n 300 "$RUNNER_TEMP/emulator.log" >&2 || true
+            exit 1
+          fi
+          adb shell input keyevent 82 || true
+
+      - name: Install and launch PulseForge
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$RUNNER_TEMP/pulseforge-smoke.apk"
+          adb install -r "$apk"
+          adb logcat -c
+          adb shell am force-stop org.pulseforge.engine
+          adb shell am start -W -n org.pulseforge.engine/.BootstrapActivity | tee "$RUNNER_TEMP/am-start.txt"
+          sleep 20
+
+          pid="$(adb shell pidof org.pulseforge.engine 2>/dev/null | tr -d '\r' || true)"
+          if [[ -z "$pid" ]]; then
+            echo 'PulseForge process died during startup.' >&2
+            adb logcat -d -v threadtime > "$RUNNER_TEMP/logcat.txt" || true
+            grep -E 'FATAL EXCEPTION|Fatal signal|DEBUG|AndroidRuntime|PulseForge|SDL' "$RUNNER_TEMP/logcat.txt" | tail -n 400 >&2 || true
+            exit 1
+          fi
+
+          adb shell uiautomator dump /sdcard/pulseforge-window.xml >/dev/null 2>&1 || true
+          adb pull /sdcard/pulseforge-window.xml "$RUNNER_TEMP/pulseforge-window.xml" >/dev/null 2>&1 || true
+          adb logcat -d -v threadtime > "$RUNNER_TEMP/logcat.txt" || true
+          if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+' "$RUNNER_TEMP/logcat.txt"; then
+            grep -E 'FATAL EXCEPTION|Fatal signal|DEBUG|AndroidRuntime|PulseForge|SDL' "$RUNNER_TEMP/logcat.txt" | tail -n 400 >&2 || true
+            exit 1
+          fi
+
+          echo "PulseForge remained alive after startup (pid=$pid)."
+          if [[ -f "$RUNNER_TEMP/pulseforge-window.xml" ]]; then
+            grep -Eo 'text="[^"]*"' "$RUNNER_TEMP/pulseforge-window.xml" | head -n 80 || true
+          fi
+
+      - name: Print diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          echo '--- KVM / acceleration ---'
+          ls -l /dev/kvm 2>&1 || true
+          timeout 10 "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check 2>&1 || true
+          echo '--- configured AVDs ---'
+          timeout 10 "$ANDROID_SDK_ROOT/emulator/emulator" -list-avds 2>&1 || true
+          find "${ANDROID_AVD_HOME:-$HOME/.android/avd}" -maxdepth 2 -type f -o -type d 2>/dev/null | head -n 120 || true
+          echo '--- emulator processes ---'
+          ps -ef | grep -E '[e]mulator|[q]emu' || true
+          echo '--- adb devices ---'
+          timeout 10 adb devices -l 2>&1 || true
+          echo '--- emulator log ---'
+          tail -n 400 "$RUNNER_TEMP/emulator.log" 2>/dev/null || true
+          echo '--- logcat ---'
+          if [[ "$(timeout 5 adb get-state 2>/dev/null || true)" == 'device' ]]; then
+            timeout 20 adb logcat -d -v threadtime 2>/dev/null | tail -n 600 || true
+          else
+            echo 'No usable ADB device; logcat unavailable.'
+          fi
