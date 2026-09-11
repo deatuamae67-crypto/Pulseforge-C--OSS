@@ -1,0 +1,34 @@
+name: Temporary source snapshot
+
+on:
+  push:
+    branches:
+      - tmp/source-snapshot-20260911
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Upload exact source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulseforge-source-snapshot
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            src/app/application.cpp
+            src/app/mobile_touch_controls.cpp
+            src/app/mobile_touch_controls.hpp
+            src/app/runtime_scene.cpp
+            src/app/runtime_scene.hpp
+            src/io/streaming_chart_importer.cpp
+            src/script/lua_runtime.cpp
+            include/pulseforge/streaming_chart_importer.hpp
+            tests/mobile_touch_controls_test.cpp
+            tests/streaming_chart_importer_test.cpp
+            tests/lua_test.cpp
+            CMakeLists.txt
