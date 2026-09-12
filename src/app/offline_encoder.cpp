@@ -1,4 +1,5 @@
 #include "offline_encoder.hpp"
+#include "android_runtime_bridge.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -285,7 +286,30 @@ bool OfflineEncoder::start(OfflineRenderPlan plan, std::string* error) {
     remove_if_present(plan_.temporary_output_path);
     remove_if_present(plan_.diagnostic_log_path);
 
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    // PULSEFORGE_ANDROID_FFMPEGKIT_ENCODER_V1
+    if (!android_ffmpeg_available()) {
+        assign_error(error, "Android FFmpegKit backend is unavailable in this APK");
+        return false;
+    }
+    auto android_session = start_android_ffmpeg(plan_.arguments, error);
+    if (android_session.session_id < 0 || android_session.input_pipe.empty()) {
+        remove_private_files();
+        return false;
+    }
+    android_session_id_ = android_session.session_id;
+    android_pipe_path_ = std::move(android_session.input_pipe);
+    android_input_.open(android_pipe_path_, std::ios::binary | std::ios::out);
+    if (!android_input_) {
+        cancel_android_ffmpeg(android_session_id_);
+        close_android_ffmpeg_pipe(android_pipe_path_);
+        android_session_id_ = -1;
+        android_pipe_path_.clear();
+        remove_private_files();
+        assign_error(error, "cannot open Android FFmpegKit raw-video pipe");
+        return false;
+    }
+#elif defined(_WIN32)
     std::wstring command_line;
     if (!build_windows_command_line(plan_.arguments, command_line, error)) {
         remove_private_files();
@@ -572,7 +596,9 @@ bool OfflineEncoder::start(OfflineRenderPlan plan, std::string* error) {
 }
 
 bool OfflineEncoder::write_frame(SDL_Renderer* renderer, std::string* error) {
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    const bool process_ready = android_session_id_ >= 0 && android_input_.is_open();
+#elif defined(_WIN32)
     const bool process_ready = process_handle_ != nullptr
         && input_handle_ != nullptr;
 #else
@@ -853,7 +879,17 @@ bool OfflineEncoder::write_bytes(
 ) {
     auto* cursor = bytes;
     std::size_t remaining = byte_count;
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    android_input_.write(
+        reinterpret_cast<const char*>(bytes),
+        static_cast<std::streamsize>(byte_count)
+    );
+    if (!android_input_) {
+        error = "Android FFmpegKit raw-video pipe closed";
+        return false;
+    }
+    return true;
+#elif defined(_WIN32)
     while (remaining != 0U) {
         const auto chunk = static_cast<DWORD>(std::min<std::size_t>(
             remaining,
@@ -951,7 +987,11 @@ void OfflineEncoder::stop_writer(const bool discard_pending) noexcept {
 }
 
 void OfflineEncoder::interrupt_process_write() noexcept {
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    if (android_session_id_ >= 0) {
+        cancel_android_ffmpeg(android_session_id_);
+    }
+#elif defined(_WIN32)
     if (process_handle_ != nullptr) {
         const auto process = static_cast<HANDLE>(process_handle_);
         if (WaitForSingleObject(process, 0U) == WAIT_TIMEOUT) {
@@ -974,7 +1014,12 @@ void OfflineEncoder::interrupt_process_write() noexcept {
 }
 
 void OfflineEncoder::close_stdin() noexcept {
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    if (android_input_.is_open()) {
+        android_input_.flush();
+        android_input_.close();
+    }
+#elif defined(_WIN32)
     if (input_handle_ != nullptr) {
         static_cast<void>(CloseHandle(static_cast<HANDLE>(input_handle_)));
         input_handle_ = nullptr;
@@ -1000,7 +1045,17 @@ void OfflineEncoder::close_stdin() noexcept {
 
 void OfflineEncoder::stop_process() noexcept {
     close_stdin();
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    if (android_session_id_ >= 0) {
+        cancel_android_ffmpeg(android_session_id_);
+        static_cast<void>(wait_android_ffmpeg(android_session_id_, &android_diagnostics_));
+        android_session_id_ = -1;
+    }
+    if (!android_pipe_path_.empty()) {
+        close_android_ffmpeg_pipe(android_pipe_path_);
+        android_pipe_path_.clear();
+    }
+#elif defined(_WIN32)
     if (process_handle_ == nullptr) {
         return;
     }
@@ -1031,6 +1086,12 @@ void OfflineEncoder::stop_process() noexcept {
 }
 
 std::string OfflineEncoder::diagnostic_excerpt() const {
+#if defined(__ANDROID__)
+    if (!android_diagnostics_.empty()) {
+        if (android_diagnostics_.size() <= maximum_diagnostic_bytes) return android_diagnostics_;
+        return android_diagnostics_.substr(android_diagnostics_.size() - maximum_diagnostic_bytes);
+    }
+#endif
     std::ifstream input(plan_.diagnostic_log_path, std::ios::binary | std::ios::ate);
     if (!input) {
         return {};
@@ -1128,7 +1189,9 @@ bool OfflineEncoder::commit_output(std::string* error) {
 }
 
 bool OfflineEncoder::finish(std::string* error) {
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    const bool process_ready = android_session_id_ >= 0;
+#elif defined(_WIN32)
     const bool process_ready = process_handle_ != nullptr;
 #else
     const bool process_ready = process_ != nullptr;
@@ -1178,7 +1241,23 @@ bool OfflineEncoder::finish(std::string* error) {
 
     close_stdin();
     int exit_code = -1;
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    const int android_exit_code = wait_android_ffmpeg(
+        android_session_id_,
+        &android_diagnostics_
+    );
+    const bool exited = android_exit_code != -32010
+        && android_exit_code != -32011
+        && android_exit_code != -32012
+        && android_exit_code != -32013
+        && android_exit_code != -32014;
+    exit_code = android_exit_code;
+    android_session_id_ = -1;
+    if (!android_pipe_path_.empty()) {
+        close_android_ffmpeg_pipe(android_pipe_path_);
+        android_pipe_path_.clear();
+    }
+#elif defined(_WIN32)
     const auto process = static_cast<HANDLE>(process_handle_);
     const DWORD wait_result = WaitForSingleObject(process, INFINITE);
     DWORD native_exit_code = 0U;
@@ -1214,7 +1293,9 @@ bool OfflineEncoder::finish(std::string* error) {
                 + std::string(exited ? " with exit code " : ": ")
                 + (exited
                     ? std::to_string(exit_code)
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+                    : std::string{"FFmpegKit session failed before returning a code"}
+#elif defined(_WIN32)
                     : wait_failure
 #else
                     : std::string(SDL_GetError())
@@ -1229,6 +1310,18 @@ bool OfflineEncoder::finish(std::string* error) {
         finished_ = true;
         return false;
     }
+#if defined(__ANDROID__)
+    const auto published = publish_file_to_downloads(
+        plan_.final_output_path,
+        plan_.final_output_path.filename().string(),
+        "video/mp4"
+    );
+    if (published.empty()) {
+        finished_ = true;
+        assign_error(error, "render completed but Android could not publish it to Downloads/PulseForge");
+        return false;
+    }
+#endif
     remove_if_present(plan_.diagnostic_log_path);
     finished_ = true;
     return true;
@@ -1272,7 +1365,9 @@ double OfflineEncoder::progress_fraction() const noexcept {
 }
 
 bool OfflineEncoder::active() const noexcept {
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    const bool process_ready = android_session_id_ >= 0;
+#elif defined(_WIN32)
     const bool process_ready = process_handle_ != nullptr;
 #else
     const bool process_ready = process_ != nullptr;

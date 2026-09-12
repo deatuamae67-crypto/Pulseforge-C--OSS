@@ -986,6 +986,11 @@ SettingsLoadResult load_settings(const std::filesystem::path& path) {
             "scriptInstructionBudget",
             settings.performance.script_instruction_budget
         );
+        settings.performance.lua_enabled = value_or(
+            performance,
+            "luaEnabled",
+            settings.performance.lua_enabled
+        );
         settings.performance.hot_reload_scripts = value_or(
             performance,
             "hotReloadScripts",
@@ -1685,6 +1690,7 @@ bool save_settings(
                 {"scriptMemoryMb", settings.performance.script_memory_mb},
                 {"scriptInstructionBudget",
                  settings.performance.script_instruction_budget},
+                {"luaEnabled", settings.performance.lua_enabled},
                 {"hotReloadScripts", settings.performance.hot_reload_scripts},
                 {"autoPauseOnFocusLoss",
                  settings.performance.auto_pause_on_focus_loss},

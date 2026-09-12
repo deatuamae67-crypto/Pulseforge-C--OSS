@@ -1,4 +1,5 @@
 #include "application_runner.hpp"
+#include "android_runtime_bridge.hpp"
 #include "discord_presence.hpp"
 #include "offline_encoder.hpp"
 #include "ps2_theme.hpp"
@@ -1477,6 +1478,7 @@ private:
 
     struct NoteProfileFrame final {
         std::uint64_t gameplay_update_ns{};
+        std::uint64_t lua_ns{};
         std::uint64_t note_pipeline_ns{};
         std::uint64_t cache_rebuild_ns{};
         std::uint64_t pvd_visit_ns{};
@@ -1494,10 +1496,15 @@ private:
         note_profile_fallback_.reset_peak();
         note_profile_present_.reset_peak();
         note_profile_gameplay_update_.reset_peak();
+        note_profile_lua_.reset_peak();
+    }
+
+    [[nodiscard]] bool profiling_active() const noexcept {
+        return diagnostics_ || performance_capture_.active;
     }
 
     void sample_note_profile_frame() noexcept {
-        if (!diagnostics_) {
+        if (!profiling_active()) {
             return;
         }
         const auto now = SDL_GetTicksNS();
@@ -1524,6 +1531,7 @@ private:
         note_profile_gameplay_update_.sample(
             note_profile_frame_.gameplay_update_ns
         );
+        note_profile_lua_.sample(note_profile_frame_.lua_ns);
         note_profile_note_.sample(note_cpu_ns);
         note_profile_cache_.sample(note_profile_frame_.cache_rebuild_ns);
         note_profile_pvd_.sample(note_profile_frame_.pvd_visit_ns);
@@ -1548,6 +1556,164 @@ private:
         note_profile_last_failed_submissions_ =
             runtime_stats.failed_submissions;
         note_profile_last_fallback_draws_ = runtime_stats.fallback_draws;
+        sample_performance_capture(now);
+    }
+
+
+    struct PerformanceCaptureRow final {
+        double elapsed_ms{};
+        double fps{};
+        double frame_ms{};
+        double gameplay_us{};
+        double lua_us{};
+        double note_us{};
+        double cache_us{};
+        double pvd_us{};
+        double pfc_us{};
+        double batch_build_us{};
+        double batch_submit_us{};
+        double fallback_us{};
+        double present_us{};
+        double adaptive_scroll{};
+        std::uint64_t onscreen_notes{};
+        std::uint64_t chart_total{};
+        std::uint64_t window_notes{};
+        std::uint64_t window_bytes{};
+        std::uint64_t draw_units{};
+        std::uint64_t geometry_calls{};
+        bool catchup{};
+        bool saturated{};
+    };
+
+    struct PerformanceCaptureState final {
+        bool active{};
+        std::uint64_t started_ns{};
+        std::vector<PerformanceCaptureRow> rows;
+        std::string android_start_stats;
+    };
+
+    void start_performance_capture() {
+        performance_capture_.active = true;
+        performance_capture_.started_ns = SDL_GetTicksNS();
+        performance_capture_.rows.clear();
+        performance_capture_.rows.reserve(5'000U);
+        performance_capture_.android_start_stats =
+            detail::android_runtime_diagnostics();
+        diagnostics_ = true;
+        reset_note_profile_peaks();
+        std::cerr << "[PulseForge] 10-second performance capture started\n";
+    }
+
+    void sample_performance_capture(const std::uint64_t now) {
+        if (!performance_capture_.active) return;
+        PerformanceCaptureRow row;
+        row.elapsed_ms = static_cast<double>(
+            now - performance_capture_.started_ns
+        ) / 1'000'000.0;
+        row.fps = smoothed_fps_;
+        row.frame_ms = smoothed_frame_ms_;
+        row.gameplay_us = note_profile_gameplay_update_.last_us;
+        row.lua_us = note_profile_lua_.last_us;
+        row.note_us = note_profile_note_.last_us;
+        row.cache_us = note_profile_cache_.last_us;
+        row.pvd_us = note_profile_pvd_.last_us;
+        row.pfc_us = note_profile_pfc_.last_us;
+        row.batch_build_us = note_profile_batch_build_.last_us;
+        row.batch_submit_us = note_profile_batch_submit_.last_us;
+        row.fallback_us = note_profile_fallback_.last_us;
+        row.present_us = note_profile_present_.last_us;
+        row.adaptive_scroll = adaptive_scroll_.multiplier();
+        row.onscreen_notes = rendered_notes_;
+        row.draw_units = visual_draw_units_;
+        row.geometry_calls = visual_geometry_calls_;
+        if (streaming_mode()) {
+            const auto memory = streaming_session_->memory_stats();
+            row.chart_total = streaming_session_->summary().chart_total;
+            row.window_notes = memory.window_notes;
+            row.window_bytes = memory.approximate_dynamic_bytes;
+            row.catchup = streaming_session_->catchup_pending();
+            row.saturated = streaming_session_->window_saturated();
+        } else if (session_ != nullptr) {
+            row.chart_total = session_->summary().chart_total;
+        }
+        if (performance_capture_.rows.size() < 5'000U) {
+            performance_capture_.rows.push_back(row);
+        }
+        if (now - performance_capture_.started_ns >= 10'000'000'000ULL) {
+            finish_performance_capture();
+        }
+    }
+
+    void finish_performance_capture() {
+        if (!performance_capture_.active) return;
+        performance_capture_.active = false;
+        std::filesystem::path directory;
+        if (char* pref = SDL_GetPrefPath("PulseForge", "PulseForge"); pref != nullptr) {
+            directory = std::filesystem::path(pref) / "diagnostics";
+            SDL_free(pref);
+        } else {
+            directory = std::filesystem::temp_directory_path() / "pulseforge-diagnostics";
+        }
+        std::error_code filesystem_error;
+        std::filesystem::create_directories(directory, filesystem_error);
+        const auto filename = std::string{"pulseforge-performance-"}
+            + std::to_string(SDL_GetTicksNS()) + ".txt";
+        const auto report_path = directory / filename;
+        std::ofstream output(report_path, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            std::cerr << "[PulseForge] performance report could not be created\n";
+            return;
+        }
+        double fps_sum = 0.0;
+        double frame_sum = 0.0;
+        double min_fps = std::numeric_limits<double>::infinity();
+        double max_frame = 0.0;
+        for (const auto& row : performance_capture_.rows) {
+            fps_sum += row.fps;
+            frame_sum += row.frame_ms;
+            min_fps = std::min(min_fps, row.fps);
+            max_frame = std::max(max_frame, row.frame_ms);
+        }
+        const double count = static_cast<double>(performance_capture_.rows.size());
+        output << "PulseForge on-device performance capture\n";
+        output << "build=" << PULSEFORGE_PATCH_BUILD << '\n';
+        output << "chart=" << path_utf8(options_.chart_path) << '\n';
+        output << "duration_target_ms=10000\n";
+        output << "samples=" << performance_capture_.rows.size() << '\n';
+        output << "average_fps=" << (count > 0.0 ? fps_sum / count : 0.0) << '\n';
+        output << "minimum_smoothed_fps=" << (std::isfinite(min_fps) ? min_fps : 0.0) << '\n';
+        output << "average_frame_ms=" << (count > 0.0 ? frame_sum / count : 0.0) << '\n';
+        output << "maximum_smoothed_frame_ms=" << max_frame << '\n';
+        output << "lua_setting=" << (options_.settings.performance.lua_enabled ? "on" : "off") << '\n';
+        output << "\n[android_runtime_start]\n" << performance_capture_.android_start_stats;
+        output << "\n[android_runtime_end]\n" << detail::android_runtime_diagnostics();
+        output << "\n[frames_csv]\n";
+        output << "elapsed_ms,fps,frame_ms,gameplay_us,lua_us,note_us,cache_us,pvd_us,pfc_us,batch_build_us,batch_submit_us,fallback_us,present_us,adaptive_scroll,onscreen_notes,chart_total,window_notes,window_bytes,draw_units,geometry_calls,catchup,saturated\n";
+        for (const auto& row : performance_capture_.rows) {
+            output << row.elapsed_ms << ',' << row.fps << ',' << row.frame_ms << ','
+                << row.gameplay_us << ',' << row.lua_us << ',' << row.note_us << ','
+                << row.cache_us << ',' << row.pvd_us << ',' << row.pfc_us << ','
+                << row.batch_build_us << ',' << row.batch_submit_us << ','
+                << row.fallback_us << ',' << row.present_us << ','
+                << row.adaptive_scroll << ',' << row.onscreen_notes << ','
+                << row.chart_total << ',' << row.window_notes << ','
+                << row.window_bytes << ',' << row.draw_units << ','
+                << row.geometry_calls << ',' << (row.catchup ? 1 : 0) << ','
+                << (row.saturated ? 1 : 0) << '\n';
+        }
+        output.close();
+        const auto published = detail::publish_file_to_downloads(
+            report_path,
+            filename,
+            "text/plain"
+        );
+        if (published.empty()) {
+            std::cerr << "[PulseForge] capture complete, but Android export to Downloads/PulseForge failed: "
+                      << path_utf8(report_path) << '\n';
+        } else {
+            std::cerr << "[PulseForge] capture exported to Downloads/PulseForge: "
+                      << published << '\n';
+        }
     }
 
     void set_loading_phase(
@@ -1931,6 +2097,14 @@ private:
     [[nodiscard]] int run_offline_render() {
         OfflineRenderPlanRequest request;
         request.config = options_.offline_render;
+#if defined(__ANDROID__)
+        if (!request.config.output_directory.is_absolute()) {
+            if (char* pref = SDL_GetPrefPath("PulseForge", "PulseForge"); pref != nullptr) {
+                request.config.output_directory = std::filesystem::path(pref) / "renders";
+                SDL_free(pref);
+            }
+        }
+#endif
         request.chart_title = chart_->title;
         request.difficulty = chart_->difficulty;
         request.audio = chart_->audio;
@@ -2245,11 +2419,11 @@ private:
 
     void gameplay_update(const double song_time_ms) {
         if (streaming_mode()) {
-            const auto gameplay_started_ns = diagnostics_
+            const auto gameplay_started_ns = profiling_active()
                 ? SDL_GetTicksNS()
                 : std::uint64_t{0U};
             static_cast<void>(streaming_session_->update(song_time_ms));
-            if (diagnostics_) {
+            if (profiling_active()) {
                 note_profile_frame_.gameplay_update_ns =
                     SDL_GetTicksNS() - gameplay_started_ns;
             }
@@ -3461,6 +3635,9 @@ if (const auto selected_skin = resolve_note_skin_selection(
         consume_gameplay_events();
 
 #if defined(PULSEFORGE_HAS_LUA)
+        const auto lua_started_ns = profiling_active()
+            ? SDL_GetTicksNS()
+            : std::uint64_t{0U};
         if (scripts_ != nullptr && !paused_) {
             service_script_sound_completions();
             if (streaming_mode()) {
@@ -3479,6 +3656,9 @@ if (const auto selected_skin = resolve_note_skin_selection(
             if (service_script_runtime_requests()) {
                 song_time = audio_.compensated_position_ms();
             }
+        }
+        if (profiling_active() && lua_started_ns != 0U) {
+            note_profile_frame_.lua_ns += SDL_GetTicksNS() - lua_started_ns;
         }
 #endif
 
@@ -3921,6 +4101,9 @@ if (const auto selected_skin = resolve_note_skin_selection(
                 return;
             case SDL_SCANCODE_F3:
                 diagnostics_ = !diagnostics_;
+                return;
+            case SDL_SCANCODE_F4:
+                start_performance_capture();
                 return;
             case SDL_SCANCODE_F5:
 #if defined(PULSEFORGE_HAS_LUA)
@@ -6009,7 +6192,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
             }
             return;
         }
-        if (diagnostics_) {
+        if (profiling_active()) {
             const auto present_started_ns = SDL_GetTicksNS();
             detail::present_with_mobile_touch(renderer_);
             note_profile_present_.sample(
@@ -6155,13 +6338,13 @@ if (const auto selected_skin = resolve_note_skin_selection(
     }
 
     void render_lanes_and_notes(const double song_time) {
-        const auto gameplay_update_ns =
-            note_profile_frame_.gameplay_update_ns;
+        const auto gameplay_update_ns = note_profile_frame_.gameplay_update_ns;
+        const auto lua_ns = note_profile_frame_.lua_ns;
         note_profile_frame_ = {};
-        note_profile_frame_.gameplay_update_ns =
-            gameplay_update_ns;
+        note_profile_frame_.gameplay_update_ns = gameplay_update_ns;
+        note_profile_frame_.lua_ns = lua_ns;
         if (scene_ != nullptr) {
-            scene_->begin_note_skin_profile_frame(diagnostics_);
+            scene_->begin_note_skin_profile_frame(profiling_active());
         }
         visual_draw_units_ = 0U;
         visual_geometry_calls_ = 0U;
@@ -6177,7 +6360,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
         }
         render_lane_set(NoteOwner::player);
 
-        const auto note_pipeline_started_ns = diagnostics_
+        const auto note_pipeline_started_ns = profiling_active()
             ? SDL_GetTicksNS()
             : std::uint64_t{0U};
         const double visual_time = song_time
@@ -6195,7 +6378,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
         const double speed = base_speed * adaptive_scroll_.multiplier();
         if (streaming_mode()) {
             render_streaming_notes(visual_time, speed);
-            if (diagnostics_) {
+            if (profiling_active()) {
                 note_profile_frame_.note_pipeline_ns =
                     SDL_GetTicksNS() - note_pipeline_started_ns;
             }
@@ -6272,7 +6455,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
         if (rendered_notes_ > exact_threshold) {
             coverage.finalize();
             draw_dense_note_coverage(coverage);
-            if (diagnostics_) {
+            if (profiling_active()) {
                 note_profile_frame_.note_pipeline_ns =
                     SDL_GetTicksNS() - note_pipeline_started_ns;
             }
@@ -6345,7 +6528,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                 draw_note(index, optimized_visual);
             }
         }
-        if (diagnostics_) {
+        if (profiling_active()) {
             note_profile_frame_.note_pipeline_ns =
                 SDL_GetTicksNS() - note_pipeline_started_ns;
         }
@@ -6982,7 +7165,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                         )
                     )
                 );
-                const auto pvd_started_ns = diagnostics_
+                const auto pvd_started_ns = profiling_active()
                     ? SDL_GetTicksNS()
                     : std::uint64_t{0U};
                 const auto visited = streaming_visual_density_reader_->visit(
@@ -6992,7 +7175,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                     &density_context,
                     add_visual_density_bucket
                 );
-                if (diagnostics_) {
+                if (profiling_active()) {
                     note_profile_frame_.pvd_visit_ns +=
                         SDL_GetTicksNS() - pvd_started_ns;
                 }
@@ -7046,7 +7229,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                     gameplay_settings().hide_opponent_notes
                         || gameplay_settings().middle_scroll,
                 };
-                const auto pfc_started_ns = diagnostics_
+                const auto pfc_started_ns = profiling_active()
                     ? SDL_GetTicksNS()
                     : std::uint64_t{0U};
                 const auto visited = streaming_reader_->visit_explicit_notes_in_range(
@@ -7055,7 +7238,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                     &context,
                     add_packed_visual_note
                 );
-                if (diagnostics_) {
+                if (profiling_active()) {
                     note_profile_frame_.pfc_visit_ns +=
                         SDL_GetTicksNS() - pfc_started_ns;
                 }
@@ -7116,14 +7299,14 @@ if (const auto selected_skin = resolve_note_skin_selection(
                     || gameplay_settings().middle_scroll)
                 == streaming_visual_cache_hide_opponent_;
         if (!cache_valid) {
-            const auto cache_started_ns = diagnostics_
+            const auto cache_started_ns = profiling_active()
                 ? SDL_GetTicksNS()
                 : std::uint64_t{0U};
             const bool rebuilt = rebuild_streaming_visual_cache(
                 visual_time,
                 speed
             );
-            if (diagnostics_) {
+            if (profiling_active()) {
                 note_profile_frame_.cache_rebuild_ns +=
                     SDL_GetTicksNS() - cache_started_ns;
                 ++note_profile_frame_.cache_rebuilds;
@@ -14061,6 +14244,7 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
     ProfileMetric note_profile_fallback_{};
     ProfileMetric note_profile_present_{};
     ProfileMetric note_profile_gameplay_update_{};
+    ProfileMetric note_profile_lua_{};
     std::uint64_t note_profile_peak_window_started_ns_{};
     std::uint64_t note_profile_last_quads_{};
     std::uint64_t note_profile_last_fallback_draws_{};
@@ -14070,6 +14254,7 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
     std::uint32_t note_profile_rebuilds_last_second_{};
     double smoothed_fps_{};
     double smoothed_frame_ms_{};
+    PerformanceCaptureState performance_capture_;
     AdaptiveScrollController adaptive_scroll_;
     float screen_flash_{};
     float beat_pulse_{};

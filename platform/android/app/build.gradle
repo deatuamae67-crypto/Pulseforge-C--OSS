@@ -77,7 +77,8 @@ android {
 
     defaultConfig {
         applicationId = 'org.pulseforge.engine'
-        minSdk = discordSdkEnabled ? 24 : 21
+        // FFmpegKit 8.1 is arm64/API-24+, matching the production Android runtime.
+        minSdk = 24
         targetSdk = 35
         versionCode = 100000
         versionName = '1.0.0'
@@ -152,6 +153,7 @@ tasks.named('preBuild').configure {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation 'dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.7'
     if (discordSdkEnabled) {
         implementation files(discordSdkAar)
         implementation 'androidx.browser:browser:1.10.0'

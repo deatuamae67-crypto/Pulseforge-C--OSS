@@ -1,5 +1,6 @@
 package org.pulseforge.engine;
 
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
@@ -7,6 +8,9 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Debug;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.system.ErrnoException;
 import android.system.Os;
@@ -19,15 +23,27 @@ import android.view.WindowManager;
 
 import org.libsdl.app.SDLActivity;
 
+import com.arthenica.ffmpegkit.FFmpegKit;
+import com.arthenica.ffmpegkit.FFmpegKitConfig;
+import com.arthenica.ffmpegkit.FFmpegSession;
+import com.arthenica.ffmpegkit.ReturnCode;
+
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** SDL host that gives the native runtime stable, writable content roots. */
 public final class PulseForgeActivity extends SDLActivity {
     private static final String TAG = "PulseForge";
     private static final long STALE_ARCHIVE_IMPORT_MS = 24L * 60L * 60L * 1000L;
+    private final ConcurrentHashMap<Long, FFmpegSession> pulseForgeFfmpegSessions =
+        new ConcurrentHashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -329,4 +345,171 @@ public final class PulseForgeActivity extends SDLActivity {
     public boolean eraseDiscordRefreshToken(String applicationId) {
         return DiscordCredentialStore.erase(this, applicationId);
     }
+
+    public String getPulseForgeRuntimeStats() {
+        try {
+            final Runtime runtime = Runtime.getRuntime();
+            final StringBuilder out = new StringBuilder();
+            out.append("android.manufacturer=").append(Build.MANUFACTURER).append('\n');
+            out.append("android.model=").append(Build.MODEL).append('\n');
+            out.append("android.device=").append(Build.DEVICE).append('\n');
+            out.append("android.sdk=").append(Build.VERSION.SDK_INT).append('\n');
+            out.append("java.heap.total_bytes=").append(runtime.totalMemory()).append('\n');
+            out.append("java.heap.free_bytes=").append(runtime.freeMemory()).append('\n');
+            out.append("java.heap.max_bytes=").append(runtime.maxMemory()).append('\n');
+            out.append("native.heap.allocated_bytes=").append(Debug.getNativeHeapAllocatedSize()).append('\n');
+            out.append("native.heap.free_bytes=").append(Debug.getNativeHeapFreeSize()).append('\n');
+            out.append("native.heap.size_bytes=").append(Debug.getNativeHeapSize()).append('\n');
+            out.append("process.pss_kib=").append(Debug.getPss()).append('\n');
+            if (Build.VERSION.SDK_INT >= 23) {
+                final Map<String, String> runtimeStats = new TreeMap<>(Debug.getRuntimeStats());
+                for (final Map.Entry<String, String> entry : runtimeStats.entrySet()) {
+                    if (entry.getKey().startsWith("art.gc.")
+                            || entry.getKey().startsWith("art.gc-")) {
+                        out.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
+                    }
+                }
+            }
+            return out.toString();
+        } catch (final Throwable throwable) {
+            return "android.runtime_stats_error=" + throwable + "\n";
+        }
+    }
+
+    public String publishPulseForgeDownload(
+            final String sourcePath,
+            final String displayName,
+            final String mimeType) {
+        if (sourcePath == null || displayName == null || displayName.isEmpty()) {
+            return null;
+        }
+        final File source = new File(sourcePath);
+        if (!source.isFile()) {
+            return null;
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                final ContentValues values = new ContentValues();
+                values.put(MediaStore.Downloads.DISPLAY_NAME, displayName);
+                values.put(MediaStore.Downloads.MIME_TYPE,
+                    mimeType == null || mimeType.isEmpty() ? "application/octet-stream" : mimeType);
+                values.put(MediaStore.Downloads.RELATIVE_PATH,
+                    Environment.DIRECTORY_DOWNLOADS + "/PulseForge");
+                values.put(MediaStore.Downloads.IS_PENDING, 1);
+                final Uri uri = getContentResolver().insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) return null;
+                boolean complete = false;
+                try (InputStream input = new FileInputStream(source);
+                     OutputStream output = getContentResolver().openOutputStream(uri, "w")) {
+                    if (output == null) return null;
+                    final byte[] buffer = new byte[64 * 1024];
+                    int count;
+                    while ((count = input.read(buffer)) >= 0) {
+                        if (count != 0) output.write(buffer, 0, count);
+                    }
+                    output.flush();
+                    complete = true;
+                } finally {
+                    if (!complete) getContentResolver().delete(uri, null, null);
+                }
+                values.clear();
+                values.put(MediaStore.Downloads.IS_PENDING, 0);
+                getContentResolver().update(uri, values, null, null);
+                return uri.toString();
+            }
+
+            final File downloads = new File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "PulseForge");
+            if (!downloads.exists() && !downloads.mkdirs()) return null;
+            final File target = new File(downloads, displayName);
+            try (InputStream input = new FileInputStream(source);
+                 OutputStream output = new FileOutputStream(target, false)) {
+                final byte[] buffer = new byte[64 * 1024];
+                int count;
+                while ((count = input.read(buffer)) >= 0) {
+                    if (count != 0) output.write(buffer, 0, count);
+                }
+                output.flush();
+            }
+            return target.getAbsolutePath();
+        } catch (final Throwable throwable) {
+            Log.e(TAG, "Downloads export failed", throwable);
+            return null;
+        }
+    }
+
+    public String createPulseForgeFfmpegPipe() {
+        try {
+            return FFmpegKitConfig.registerNewFFmpegPipe(this);
+        } catch (final Throwable throwable) {
+            Log.e(TAG, "FFmpeg pipe creation failed", throwable);
+            return null;
+        }
+    }
+
+    public long startPulseForgeFfmpeg(final String[] arguments) {
+        try {
+            final FFmpegSession session = FFmpegKit.executeWithArgumentsAsync(
+                arguments,
+                completed -> { }
+            );
+            final long id = session.getSessionId();
+            pulseForgeFfmpegSessions.put(id, session);
+            return id;
+        } catch (final Throwable throwable) {
+            Log.e(TAG, "FFmpeg session start failed", throwable);
+            return -1L;
+        }
+    }
+
+    public int waitPulseForgeFfmpeg(final long sessionId) {
+        final FFmpegSession session = pulseForgeFfmpegSessions.get(sessionId);
+        if (session == null) return -32000;
+        try {
+            while (session.getReturnCode() == null) {
+                final String state = String.valueOf(session.getState());
+                if ("FAILED".equals(state)) return -32001;
+                Thread.sleep(10L);
+            }
+            final ReturnCode code = session.getReturnCode();
+            return code == null ? -32002 : code.getValue();
+        } catch (final InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return -32003;
+        } catch (final Throwable throwable) {
+            Log.e(TAG, "FFmpeg wait failed", throwable);
+            return -32004;
+        }
+    }
+
+    public String getPulseForgeFfmpegOutput(final long sessionId) {
+        final FFmpegSession session = pulseForgeFfmpegSessions.get(sessionId);
+        if (session == null) return "";
+        try {
+            final String output = session.getOutput();
+            return output == null ? "" : output;
+        } catch (final Throwable throwable) {
+            return "FFmpegKit output error: " + throwable;
+        }
+    }
+
+    public void cancelPulseForgeFfmpeg(final long sessionId) {
+        try {
+            FFmpegKit.cancel(sessionId);
+        } catch (final Throwable throwable) {
+            Log.w(TAG, "FFmpeg cancel failed", throwable);
+        }
+    }
+
+    public void closePulseForgeFfmpegPipe(final String path) {
+        if (path == null || path.isEmpty()) return;
+        try {
+            FFmpegKitConfig.closeFFmpegPipe(path);
+        } catch (final Throwable throwable) {
+            Log.w(TAG, "FFmpeg pipe close failed", throwable);
+        }
+    }
+
 }

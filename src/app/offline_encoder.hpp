@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -87,7 +88,12 @@ private:
     [[nodiscard]] bool commit_output(std::string* error);
 
     OfflineRenderPlan plan_;
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    std::int64_t android_session_id_{-1};
+    std::string android_pipe_path_;
+    std::ofstream android_input_;
+    std::string android_diagnostics_;
+#elif defined(_WIN32)
     // SDL's background-process flag correctly suppresses a console window on
     // Windows, but deliberately masks the child's exit code as zero. Keep the
     // native process and pipe handles opaque here so finish() can verify the
