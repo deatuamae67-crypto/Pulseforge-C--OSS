@@ -70,10 +70,17 @@ public:
             ? smoothed_frame_ms
             : (fps_valid ? 1'000.0 / smoothed_fps : target_frame_ms);
 
+        const double prelearn_density_ratio = visible_logical_notes == 0U
+            ? 0.0
+            : static_cast<double>(visible_logical_notes)
+                / std::max(learned_note_budget_, 1.0);
+        const bool note_pressure_relevant = prelearn_density_ratio >= 0.25;
+
         // Learn a conservative per-device logical-note budget. A frame-rate
-        // miss cuts the budget quickly; recovery raises it slowly to avoid a
-        // saw-tooth speed oscillation on mobile GPUs.
-        if (visible_logical_notes >= minimum_note_budget
+        // miss cuts the budget quickly only when notes occupy a meaningful
+        // fraction of that budget; unrelated shader/background stalls must not
+        // be "fixed" by changing scroll speed. Recovery is deliberately slow.
+        if (note_pressure_relevant
             && measured_frame_ms > target_frame_ms * 1.02) {
             const double performance_ratio = std::clamp(
                 target_frame_ms / measured_frame_ms,
@@ -97,11 +104,12 @@ public:
             ? 0.0
             : static_cast<double>(visible_logical_notes)
                 / std::max(learned_note_budget_, 1.0);
-        const double frame_pressure = visible_logical_notes >= minimum_note_budget
+        const double frame_pressure = note_pressure_relevant
             ? std::max(1.0, measured_frame_ms / target_frame_ms)
             : 1.0;
 
-        if (density_ratio > 1.05 || frame_pressure > 1.04) {
+        if (density_ratio > 1.05
+            || (note_pressure_relevant && frame_pressure > 1.04)) {
             // Logical notes on screen are approximately inverse to scroll
             // speed. Move toward that inverse solution, but cap one control
             // interval to 4x so a single diagnostic spike cannot teleport the
