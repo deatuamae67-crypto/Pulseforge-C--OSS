@@ -1,0 +1,39 @@
+name: Temporary dense route polish
+
+on:
+  push:
+    branches:
+      - perf/fix-dense-7fps-20260912
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Avoid duplicate compatibility retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/application.cpp')
+          s = p.read_text(encoding='utf-8')
+          old = "        if (options_.enable_large_chart_streaming\n            && materialized_chart_density_prefers_streaming(\n"
+          new = "        if (options_.enable_large_chart_streaming\n            && !preferred_streaming_attempted\n            && materialized_chart_density_prefers_streaming(\n"
+          if s.count(old) != 1:
+              raise SystemExit(f'dense route guard: expected 1 match, got {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          Path('.github/workflows/tmp-dense-fps-polish.yml').unlink()
+          PY
+          git checkout origin/main -- tools/autochart/ml-health.json
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'perf(runtime): avoid duplicate dense streaming retry'
+          git push origin HEAD:perf/fix-dense-7fps-20260912
