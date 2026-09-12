@@ -23,9 +23,33 @@ jobs:
           grep -n -C 3 'streaming_visual_cache_.*reset' src/app/application.cpp || true
           echo '=== cache speed/time invalidation sites ==='
           grep -n -C 3 'streaming_visual_cache_speed_\|rebuild_streaming_visual_cache\|cache_valid' src/app/application.cpp || true
-          echo '=== script camera update sites ==='
-          grep -n -C 4 'update_scene_camera\|script_cam_.*zoom\|cameraSetTarget' src/app/application.cpp || true
           echo '=== large chart routing thresholds ==='
           grep -n -C 4 'preferred_streaming_json_bytes\|materialized_chart_note_budget\|max_window_notes' src/app/application.cpp include/pulseforge/chart.hpp src/io/*.cpp || true
           echo '=== Taimuresu overkill per-frame APIs ==='
           grep -n -E 'function onUpdate|cameraSetTarget|setPropertyFromGroup|setProperty\(' 'mods/taimuresu spam amplified/taimuresu/data/Taimuresu_overkill_mode/script.lua' || true
+          echo '=== Taimuresu overkill chart density ==='
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('mods/taimuresu spam amplified/taimuresu/data/Taimuresu_overkill_mode/Taimuresu_overkill_mode-easy.json')
+          data=json.loads(p.read_text(encoding='utf-8'))
+          song=data.get('song', data)
+          times=[]
+          for section in song.get('notes', []):
+              for note in section.get('sectionNotes', []):
+                  if isinstance(note, list) and note:
+                      try: times.append(float(note[0]))
+                      except Exception: pass
+          times.sort()
+          print('bytes', p.stat().st_size, 'notes', len(times), 'first', times[0] if times else None, 'last', times[-1] if times else None)
+          from collections import deque
+          for window in (250,500,1000,2000,4000):
+              left=0; best=0; best_range=None
+              for right,t in enumerate(times):
+                  while left <= right and t-times[left] > window:
+                      left += 1
+                  n=right-left+1
+                  if n>best:
+                      best=n; best_range=(times[left], t)
+              print(f'max_notes_{window}ms', best, best_range)
+          PY
