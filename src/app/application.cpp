@@ -2772,6 +2772,7 @@ private:
             return false;
         }
         if (options_.enable_large_chart_streaming
+            && !preferred_streaming_attempted
             && materialized_chart_density_prefers_streaming(
                 *loaded_chart.chart,
                 options_.settings.performance.max_visible_notes
