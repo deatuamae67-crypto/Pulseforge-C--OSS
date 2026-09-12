@@ -1,4 +1,7 @@
 # Changelog
+- Android gameplay now exposes touch `F3` and `CAP` controls; `CAP` records a 10-second on-device performance report (frame/gameplay/Lua/note/cache/PVD/PFC/geometry/present, streaming pressure, memory plus ART/GC snapshots) and publishes it to `Downloads/PulseForge` for direct sharing without ADB or a PC.
+- Adds a persisted `Lua scripts: On/Off` option that globally disables chart Lua loading while preserving explicit command-line `--no-lua` precedence.
+- Android Rendering Mode no longer searches for `ffmpeg.exe`: the APK links the maintained FFmpegKit Android AAR, feeds the existing bounded raw-frame queue through an app-private FFmpeg pipe, uses Android MediaCodec H.264, and publishes finished MP4 files to `Downloads/PulseForge`.
 
 All notable public PulseForge changes are documented in this file.
 

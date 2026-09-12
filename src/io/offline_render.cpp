@@ -152,6 +152,12 @@ namespace {
     const OfflineRenderConfig& config,
     const std::vector<std::filesystem::path>& forbidden_roots
 ) {
+#if defined(__ANDROID__)
+    static_cast<void>(config);
+    static_cast<void>(forbidden_roots);
+    // Sentinel only: OfflineEncoder routes this plan to FFmpegKit through JNI.
+    return std::filesystem::path{"/android/ffmpegkit/ffmpeg"};
+#else
     if (!config.ffmpeg_executable.empty()) {
         // Never interpret an executable relative to the current working
         // directory. That directory may be controlled by a mod or imported
@@ -199,6 +205,7 @@ namespace {
         }
     }
     return std::nullopt;
+#endif
 }
 
 [[nodiscard]] std::string safe_stem(std::string_view source) {
@@ -498,6 +505,19 @@ OfflineRenderPlanResult build_offline_render_plan(
         ? OfflineRenderPixelFormat::yuv420p
         : request.config.pixel_format;
 
+#if defined(__ANDROID__)
+    // Android encodes in-process through FFmpegKit. H.264 MediaCodec avoids the
+    // GPL-only libx264 dependency and uses the device encoder shipped by Android.
+    const auto android_bitrate = std::clamp<std::uint64_t>(
+        static_cast<std::uint64_t>(plan.width) * plan.height * plan.fps / 8U,
+        2'000'000ULL,
+        80'000'000ULL
+    );
+    args.insert(args.end(), {
+        "-c:v", "h264_mediacodec",
+        "-b:v", std::to_string(android_bitrate),
+        "-pix_fmt", "yuv420p",
+#else
     args.insert(args.end(), {
         "-c:v", std::string(video_codec_name(effective_codec)),
         "-threads", std::to_string(request.config.thread_count),
@@ -510,6 +530,7 @@ OfflineRenderPlanResult build_offline_render_plan(
     args.insert(args.end(), {
         "-crf", std::to_string(request.config.crf),
         "-pix_fmt", std::string(pixel_format_name(effective_pixel_format)),
+#endif
         // Raw input already has the authoritative fixed cadence. Passthrough
         // forbids FFmpeg's vsync layer from synthesizing duplicate frames.
         "-fps_mode", "passthrough",
@@ -519,6 +540,7 @@ OfflineRenderPlanResult build_offline_render_plan(
             * request.config.keyframe_interval_seconds;
         args.insert(args.end(), {"-g", std::to_string(gop)});
     }
+#if !defined(__ANDROID__)
     if (request.config.maximum_performance) {
         // PULSEFORGE_P1_5_0E_FFMPEG_MAXIMUM_PERFORMANCE_ARGS_V1
         args.insert(args.end(), {
@@ -528,6 +550,7 @@ OfflineRenderPlanResult build_offline_render_plan(
             "-flush_packets", "0",
         });
     }
+#endif
     if (!plan.audio_inputs.empty()) {
         if (plan.audio_inputs.size() == 1U) {
             args.insert(args.end(), {"-map", "1:a:0"});

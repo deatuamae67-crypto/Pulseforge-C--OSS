@@ -2118,6 +2118,8 @@ template <std::size_t Size>
     const bool return_to_launcher
 ) {
     AppLaunchOptions result = base;
+    result.enable_lua = base.enable_lua
+        && base.settings.performance.lua_enabled;
     result.chart_path = entry.chart_path;
     result.catalog_song.reset();
     result.show_launcher = false;
@@ -5616,6 +5618,7 @@ void show_options(MenuSession& menu, AppLaunchOptions& options) {
             "Ultra-low latency mode: " + on_off(
                 performance.ultra_low_latency
             ),
+            "Lua scripts: " + on_off(performance.lua_enabled),
             "Audio visualizer opacity: "
                 + std::to_string(static_cast<int>(std::lround(
                     std::clamp(
@@ -5855,7 +5858,10 @@ void show_options(MenuSession& menu, AppLaunchOptions& options) {
                 audio.buffer_frames = 64U;
             }
             break;
-        case 32: {
+        case 32:
+            performance.lua_enabled = !performance.lua_enabled;
+            break;
+        case 33: {
             std::vector<std::string> opacity_choices;
             opacity_choices.reserve(101U);
             for (int percent = 0; percent <= 100; ++percent) {
@@ -5883,7 +5889,7 @@ void show_options(MenuSession& menu, AppLaunchOptions& options) {
             }
             break;
         }
-        case 33: {
+        case 34: {
             const std::vector<std::string> image_choices{
                 "Star of David",
                 "Circular symbol",
@@ -5952,7 +5958,7 @@ void show_options(MenuSession& menu, AppLaunchOptions& options) {
             }
             break;
         }
-        case 34: {
+        case 35: {
             std::vector<std::filesystem::path> discovery_roots =
                 options.content_roots;
             const auto append_discovery_root =
@@ -6055,13 +6061,13 @@ void show_options(MenuSession& menu, AppLaunchOptions& options) {
             }
             break;
         }
-        case 35:
+        case 36:
             show_discord_options(menu, options);
             break;
-        case 36:
+        case 37:
             show_touch_options(menu, options);
             break;
-        case 37:
+        case 38:
             show_controls_editor(
                 menu.window(),
                 menu.renderer(),
@@ -6108,6 +6114,8 @@ public:
         if (!options_.chart_path.empty() && !options_.show_launcher
             && !options_.catalog_song.has_value()) {
             auto direct = options_;
+            direct.enable_lua = direct.enable_lua
+                && direct.settings.performance.lua_enabled;
             const int result = make_gameplay_application(
                 std::move(direct),
                 discord_session_

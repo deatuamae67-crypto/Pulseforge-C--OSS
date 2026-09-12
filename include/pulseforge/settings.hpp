@@ -125,6 +125,8 @@ struct PerformanceSettings {
     std::uint32_t max_cosmetic_bursts_per_frame{32};
     std::uint32_t script_memory_mb{16};
     std::uint32_t script_instruction_budget{1'000'000};
+    // Global user switch: when false, charts run without loading any Lua.
+    bool lua_enabled{true};
     bool hot_reload_scripts{true};
     bool auto_pause_on_focus_loss{true};
     bool pause_on_controller_disconnect{true};

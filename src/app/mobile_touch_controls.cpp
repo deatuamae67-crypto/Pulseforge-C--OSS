@@ -54,6 +54,8 @@ enum class TouchAction : std::uint8_t {
     volume_down,
     volume_mute,
     volume_up,
+    diagnostics_toggle,
+    performance_capture,
     editor_play,
     editor_save,
     editor_undo,
@@ -516,6 +518,12 @@ private:
         key_map_[action_index(TouchAction::volume_up)] = action_key(
             bindings_, "volume_up", SDL_SCANCODE_EQUALS, SDL_KMOD_SHIFT
         );
+        key_map_[action_index(TouchAction::diagnostics_toggle)] = {
+            SDL_SCANCODE_F3, SDL_KMOD_NONE
+        };
+        key_map_[action_index(TouchAction::performance_capture)] = {
+            SDL_SCANCODE_F4, SDL_KMOD_NONE
+        };
         key_map_[action_index(TouchAction::editor_play)] = action_key(
             bindings_, "editor_play_pause", SDL_SCANCODE_SPACE
         );
@@ -617,6 +625,32 @@ private:
                 },
                 {238, 188, 61, 255},
                 "PAUSE",
+            });
+            const float diag_width = std::clamp(64.0F * settings_.scale, 48.0F, 86.0F);
+            const float diag_gap = std::clamp(6.0F * settings_.scale, 4.0F, 10.0F);
+            result.push_back({
+                TouchAction::diagnostics_toggle,
+                {
+                    safe.x + safe.w - pause_width - margin
+                        - diag_gap - diag_width * 2.0F - diag_gap,
+                    safe.y + margin,
+                    diag_width,
+                    pause_height,
+                },
+                {92, 186, 238, 255},
+                "F3",
+            });
+            result.push_back({
+                TouchAction::performance_capture,
+                {
+                    safe.x + safe.w - pause_width - margin
+                        - diag_gap - diag_width,
+                    safe.y + margin,
+                    diag_width,
+                    pause_height,
+                },
+                {103, 225, 150, 255},
+                "CAP",
             });
 
             // PULSEFORGE_1_0_0_ANDROID_PSYCH_SELECTOR_KEYS_V1
@@ -790,6 +824,8 @@ private:
                     || button.action == TouchAction::volume_down
                     || button.action == TouchAction::volume_mute
                     || button.action == TouchAction::volume_up
+                    || button.action == TouchAction::diagnostics_toggle
+                    || button.action == TouchAction::performance_capture
                     || button.action == TouchAction::gameplay_left
                     || button.action == TouchAction::gameplay_right
                     || button.action == TouchAction::gameplay_x
