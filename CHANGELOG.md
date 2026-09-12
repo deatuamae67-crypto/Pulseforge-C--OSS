@@ -17,6 +17,7 @@ All notable public PulseForge changes are documented in this file.
 - Switches dense PFC1 gameplay to indexed PVD/PFC viewport rendering before the judgment window saturates, eliminating full-window visual scans for extreme charts and materializing exact mutable notes only in the visible/judgment sliver.
 - Bounds the streaming judgment working set independently from visual density; the screen is represented by fixed-memory LOD rows instead of allocating one render object per logical note.
 - Adds a visual-only adaptive scroll controller targeting 60 FPS. It learns a conservative on-screen logical-note budget per device, raises scroll speed in discrete hysteretic steps under real note pressure, and relaxes toward the authored speed after frame-time/density recovery without altering song time, hit windows, score or replay determinism.
+- Fixes the persistent ~7 FPS path on Taimuresu Overkill and other dense Psych charts by routing 8 MiB+/250k-note/high-NPS sources into bounded PFC1 earlier and by keeping canonical PVD/PFC coverage cached across camera zoom decay, HUD-camera animation and draw-time strum transforms.
 
 ## [1.0.0] - 2026-09-05
 

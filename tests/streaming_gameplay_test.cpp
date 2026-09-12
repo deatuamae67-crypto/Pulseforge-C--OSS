@@ -1,4 +1,5 @@
 #include "pulseforge/adaptive_scroll.hpp"
+#include "pulseforge/dense_chart_routing.hpp"
 #include "pulseforge/gameplay.hpp"
 #include "pulseforge/packed_chart.hpp"
 #include "pulseforge/streaming_gameplay.hpp"
@@ -2002,12 +2003,57 @@ void test_adaptive_scroll_controller() {
         "disabled adaptation restores authored scroll speed");
 }
 
+void test_dense_chart_streaming_routing() {
+    require(
+        pulseforge::large_chart_source_prefers_streaming(15'934'282U),
+        "Taimuresu-size JSON takes streaming-first route"
+    );
+    require(
+        !pulseforge::large_chart_source_prefers_streaming(4U * 1024U * 1024U),
+        "small ordinary JSON remains materialized"
+    );
+    require(
+        pulseforge::materialized_note_count_prefers_streaming(250'000U)
+            && !pulseforge::materialized_note_count_prefers_streaming(249'999U),
+        "large note count is a routing hint, not a validity limit"
+    );
+
+    pulseforge::Chart dense;
+    dense.key_count = 4U;
+    dense.notes.reserve(17'000U);
+    for (std::size_t index = 0U; index < 17'000U; ++index) {
+        dense.notes.push_back({static_cast<double>(index) * 0.10, 0.0,
+            static_cast<std::uint16_t>(index % 4U),
+            pulseforge::NoteOwner::player, "normal"});
+    }
+    dense.normalize();
+    require(
+        pulseforge::materialized_chart_density_prefers_streaming(dense, 4'096U),
+        "extreme NPS below total-note threshold routes to PFC1"
+    );
+
+    pulseforge::Chart sparse;
+    sparse.key_count = 4U;
+    sparse.notes.reserve(17'000U);
+    for (std::size_t index = 0U; index < 17'000U; ++index) {
+        sparse.notes.push_back({static_cast<double>(index) * 10.0, 0.0,
+            static_cast<std::uint16_t>(index % 4U),
+            pulseforge::NoteOwner::player, "normal"});
+    }
+    sparse.normalize();
+    require(
+        !pulseforge::materialized_chart_density_prefers_streaming(sparse, 4'096U),
+        "long sparse charts are not forced into streaming by duration"
+    );
+}
+
 }  // namespace
 
 int main() {
     try {
         const TemporaryDirectory directory;
         test_adaptive_scroll_controller();
+        test_dense_chart_streaming_routing();
         test_real_input_holds_and_score(directory.path());
         test_explicit_catchup_budget(directory.path());
         test_large_explicit_chunk_uses_decoded_byte_budget(directory.path());
