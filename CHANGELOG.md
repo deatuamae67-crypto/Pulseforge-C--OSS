@@ -73,7 +73,7 @@ Each package is accompanied by SHA-256 metadata and platform-specific inspection
 
 The PulseForge engine/build source merged into `main` is byte-identical to the source at commit `fbb9ee22350a939071595721f5d6a35909d41a6d`, where both the cross-platform build-validation matrix and deterministic core-test matrix completed successfully.
 
-The integration was merged through PR #25 into `main` at commit `fe100c6f5ff5c69aff85ecf760696d5d`. Changes after the validated source commit were limited to documentation and `.github` repository/CI maintenance files.
+The integration was merged through PR #25 into `main` at commit `fe100c6f5ff5c69aff85ecf760696d5f0c5fd8d5`. Changes after the validated source commit were limited to documentation and `.github` repository/CI maintenance files.
 
 ### Distribution notes
 
