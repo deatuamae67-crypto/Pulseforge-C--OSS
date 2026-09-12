@@ -857,6 +857,9 @@ struct RuntimeScene::Implementation {
     std::uint64_t cpu_color_source_bytes{};
     std::uint64_t cpu_color_variant_bytes{};
     std::uint64_t cpu_color_pixels_this_frame{};
+    std::size_t wavy_segment_cap{psych_wavy_max_segments};
+    std::size_t wiggle_segment_cap{psych_wiggle_max_segments};
+    bool allow_cpu_heavy_texture_effects{true};
     std::vector<RuntimeSceneDiagnostic> diagnostics;
     NoteSkinFrames note_skin_frames{};
     // PULSEFORGE_P1_5_0B_BOUNDED_NOTE_SKIN_PROFILE_CACHE_V1
@@ -3093,6 +3096,11 @@ struct RuntimeScene::Implementation {
                 return nullptr;
             }
             const std::uint64_t pixels = width * height;
+            if (!allow_cpu_heavy_texture_effects
+                && (shader_kind == PsychShaderCompatKind::mosaic
+                    || shader_kind == PsychShaderCompatKind::gaussian_blur)) {
+                return nullptr;
+            }
             const std::uint64_t texture_pixel_limit =
                 shader_kind == PsychShaderCompatKind::gaussian_blur
                 ? psych_cpu_blur_max_pixels_per_texture
@@ -3376,10 +3384,11 @@ struct RuntimeScene::Implementation {
         const float draw_alpha,
         const double total_angle
     ) noexcept {
-        const auto segment_count = psych_wavy_segment_count(
+        const auto requested_segment_count = psych_wavy_segment_count(
             sprite.wavy_effect,
             destination.h
         );
+        const auto segment_count = std::min(requested_segment_count, wavy_segment_cap);
         if (segment_count == 0U
             || segment_count > psych_wavy_max_segments) {
             return false;
@@ -3643,11 +3652,12 @@ struct RuntimeScene::Implementation {
             || sprite.texture_index >= textures.size()) {
             return false;
         }
-        const auto segment_count = psych_wiggle_segment_count(
+        const auto requested_segment_count = psych_wiggle_segment_count(
             shader_state,
             destination.w,
             destination.h
         );
+        const auto segment_count = std::min(requested_segment_count, wiggle_segment_cap);
         if (segment_count == 0U
             || segment_count > psych_wiggle_max_segments) {
             return false;
@@ -5570,6 +5580,23 @@ bool RuntimeScene::render_note_skin_batch(
 ) noexcept {
     return implementation_ != nullptr
         && implementation_->render_note_skin_batch(draws);
+}
+
+void RuntimeScene::set_effect_lod(
+    const std::size_t wavy_cap,
+    const std::size_t wiggle_cap,
+    const bool allow_cpu_heavy_texture_effects
+) noexcept {
+    if (implementation_ == nullptr) {
+        return;
+    }
+    implementation_->wavy_segment_cap = std::clamp<std::size_t>(
+        wavy_cap, psych_wavy_min_segments, psych_wavy_max_segments
+    );
+    implementation_->wiggle_segment_cap = std::clamp<std::size_t>(
+        wiggle_cap, psych_wiggle_min_segments, psych_wiggle_max_segments
+    );
+    implementation_->allow_cpu_heavy_texture_effects = allow_cpu_heavy_texture_effects;
 }
 
 void RuntimeScene::begin_note_skin_profile_frame(const bool enabled) noexcept {

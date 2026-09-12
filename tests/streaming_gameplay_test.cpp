@@ -2047,6 +2047,36 @@ void test_dense_chart_streaming_routing() {
     );
 }
 
+
+void test_extreme_chart_visual_lod() {
+    const auto easy = pulseforge::dense_chart_visual_lod(1'059'988ULL, 70.0, 14.2);
+    require(easy.wavy_segment_cap == 64U && easy.wiggle_segment_cap == 24U
+            && easy.allow_cpu_heavy_texture_effects,
+        "one-million-note Easy gameplay keeps full stage quality");
+
+    const auto end_of_world = pulseforge::dense_chart_visual_lod(5'000'000ULL, 70.0, 14.2);
+    require(end_of_world.wavy_segment_cap == 40U
+            && end_of_world.wiggle_segment_cap == 18U
+            && end_of_world.allow_cpu_heavy_texture_effects,
+        "five-million-note charts start with a mild presentation LOD");
+
+    const auto overkill = pulseforge::dense_chart_visual_lod(33'000'000ULL, 70.0, 14.2);
+    require(overkill.wavy_segment_cap == 24U && overkill.wiggle_segment_cap == 12U
+            && !overkill.allow_cpu_heavy_texture_effects,
+        "33-million-note Overkill starts with bounded expensive effects");
+
+    const auto nullifier_collapse = pulseforge::dense_chart_visual_lod(50'000'000ULL, 7.0, 142.0);
+    require(nullifier_collapse.wavy_segment_cap == 8U
+            && nullifier_collapse.wiggle_segment_cap == 8U
+            && !nullifier_collapse.allow_cpu_heavy_texture_effects,
+        "50-million-note collapse drops presentation work to minimum LOD");
+
+    const auto nullifier_recovered = pulseforge::dense_chart_visual_lod(50'000'000ULL, 60.0, 16.6);
+    require(nullifier_recovered.wavy_segment_cap == 24U
+            && nullifier_recovered.wiggle_segment_cap == 12U,
+        "extreme chart effect quality recovers after stable 60 Hz pacing");
+}
+
 }  // namespace
 
 int main() {
@@ -2054,6 +2084,7 @@ int main() {
         const TemporaryDirectory directory;
         test_adaptive_scroll_controller();
         test_dense_chart_streaming_routing();
+        test_extreme_chart_visual_lod();
         test_real_input_holds_and_score(directory.path());
         test_explicit_catchup_budget(directory.path());
         test_large_explicit_chunk_uses_decoded_byte_budget(directory.path());

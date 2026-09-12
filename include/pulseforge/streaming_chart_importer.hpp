@@ -105,9 +105,13 @@ struct StreamingChartCacheOptions {
 
     // Offline rendering benefits from the multi-resolution visual index on
     // every frame. When true, a missing/corrupt PVD1 is rebuilt during render
-    // preparation and its size is committed to the manifest. Interactive play
-    // leaves this false and falls back immediately to exact PFC1 visits.
+    // preparation and its size is committed to the manifest.
     bool require_visual_density{false};
+
+    // Interactive charts at or above this logical-note count also repair PVD1
+    // automatically. Zero disables the automatic policy. This is a performance
+    // routing threshold, never a chart-validity or note-count limit.
+    std::uint64_t auto_require_visual_density_logical_notes{5'000'000ULL};
 };
 
 struct StreamingChartCacheResult {

@@ -3275,6 +3275,17 @@ if (const auto selected_skin = resolve_note_skin_selection(
             scene_roots,
             scene_limits
         );
+        if (scene_ != nullptr) {
+            const auto logical_notes = streaming_reader_.has_value()
+                ? streaming_reader_->logical_note_count()
+                : static_cast<std::uint64_t>(chart_->notes.size());
+            const auto effect_lod = dense_chart_visual_lod(logical_notes, 0.0, 0.0);
+            scene_->set_effect_lod(
+                effect_lod.wavy_segment_cap,
+                effect_lod.wiggle_segment_cap,
+                effect_lod.allow_cpu_heavy_texture_effects
+            );
+        }
         if (!parsed_note_skin.chart_default) {
             scene_->override_note_skin(
                 parsed_note_skin.style,
@@ -5066,6 +5077,21 @@ if (const auto selected_skin = resolve_note_skin_selection(
             options_.settings.performance.max_visible_notes,
             !options_.offline_render.enabled && !options_.smoke_test
         );
+        if (scene_ != nullptr) {
+            const auto logical_notes = streaming_reader_.has_value()
+                ? streaming_reader_->logical_note_count()
+                : (chart_.has_value()
+                    ? static_cast<std::uint64_t>(chart_->notes.size())
+                    : 0ULL);
+            const auto effect_lod = dense_chart_visual_lod(
+                logical_notes, smoothed_fps_, smoothed_frame_ms_
+            );
+            scene_->set_effect_lod(
+                effect_lod.wavy_segment_cap,
+                effect_lod.wiggle_segment_cap,
+                effect_lod.allow_cpu_heavy_texture_effects
+            );
+        }
         screen_flash_ = std::max(0.0F, screen_flash_ - elapsed * 2.8F);
         beat_pulse_ = options_.settings.visual.reduced_motion
             ? 0.0F

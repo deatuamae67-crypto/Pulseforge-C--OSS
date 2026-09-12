@@ -875,7 +875,7 @@ void test_runtime_cache_fingerprint_invalidation(
         "interactive reuse does not synchronously rebuild a missing optional PVD"
     );
 
-    options.require_visual_density = true;
+    options.auto_require_visual_density_logical_notes = 1U;
     const auto lazy_visual = pulseforge::prepare_streaming_chart_cache(
         source,
         options
