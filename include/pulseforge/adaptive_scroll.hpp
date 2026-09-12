@@ -84,7 +84,7 @@ public:
                 static_cast<double>(minimum_note_budget),
                 learned_note_budget_ * performance_ratio * 0.92
             );
-        } else if (measured_fps > target_fps * 1.18
+        } else if (measured_frame_ms <= target_frame_ms * 1.02
             && static_cast<double>(visible_logical_notes)
                 < learned_note_budget_ * 0.60) {
             learned_note_budget_ = std::min(
@@ -112,11 +112,12 @@ public:
             return;
         }
 
-        // Only relax after healthy headroom and clearly sub-budget density.
-        // One discrete step per 250 ms avoids invalidating the rolling visual
-        // cache every frame and makes the visual speed change readable.
+        // Only relax after the 60 Hz target is healthy and density is clearly
+        // sub-budget. 60-Hz VSync/caps therefore remain able to return toward
+        // the authored speed; requiring >60 FPS would make the boost sticky.
         if (multiplier_ > 1.0
-            && measured_fps >= target_fps * 1.10
+            && measured_frame_ms <= target_frame_ms * 1.02
+            && measured_fps >= target_fps * 0.97
             && static_cast<double>(visible_logical_notes)
                 <= learned_note_budget_ * 0.72) {
             multiplier_ = next_lower(multiplier_);
