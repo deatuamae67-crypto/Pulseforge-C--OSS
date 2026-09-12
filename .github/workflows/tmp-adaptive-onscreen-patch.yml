@@ -1,0 +1,370 @@
+name: Temporary adaptive onscreen streaming patch
+
+on:
+  push:
+    branches:
+      - perf/onscreen-streaming-adaptive-scroll-20260912
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply viewport streaming and adaptive scroll patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, got {count}")
+              return text.replace(old, new, 1)
+
+          app_path = Path('src/app/application.cpp')
+          app = app_path.read_text(encoding='utf-8')
+
+          app = replace_once(
+              app,
+              '#include "pulseforge/audio_controls.hpp"\n',
+              '#include "pulseforge/adaptive_scroll.hpp"\n#include "pulseforge/audio_controls.hpp"\n',
+              'adaptive include'
+          )
+
+          old_window = '''        // Judgment remains deliberately bounded. If this temporal window is
+          // denser than 262144 notes, overdue taps are resolved by the streaming
+          // scheduler while the independent visual range visitor below still
+          // accounts for every on-screen head through fixed-memory LOD bins.
+          streaming_options.max_window_notes = 262'144U;
+          '''
+          new_window = '''        // Judgment state is independent from visual density. Keep only a bounded
+          // near-receptor working set; dense excess is handled by the scheduler's
+          // arithmetic/bulk catch-up while the PVD/PFC range visitor represents
+          // the viewport without materializing every logical note.
+          const auto configured_visual_budget = static_cast<std::size_t>(
+              std::max<std::uint32_t>(
+                  options_.settings.performance.max_visible_notes,
+                  1U
+              )
+          );
+          const auto scaled_judgment_window = configured_visual_budget
+                  > std::numeric_limits<std::size_t>::max() / 2U
+              ? std::numeric_limits<std::size_t>::max()
+              : configured_visual_budget * 2U;
+          streaming_options.max_window_notes = std::clamp<std::size_t>(
+              scaled_judgment_window,
+              4'096U,
+              32'768U
+          );
+          '''
+          app = replace_once(app, old_window, new_window, 'bounded judgment window')
+
+          old_speed = '''        const double speed = 0.43
+              * chart_speed
+              * gameplay_settings().scroll_speed;
+          '''
+          new_speed = '''        const double base_speed = 0.43
+              * chart_speed
+              * gameplay_settings().scroll_speed;
+          // Density adaptation is visual-only. Song time, hit windows, score,
+          // replay determinism and every gameplay judgment keep authored timing.
+          const double speed = base_speed * adaptive_scroll_.multiplier();
+          '''
+          app = replace_once(app, old_speed, new_speed, 'adaptive visual speed')
+
+          screen_flash = '        screen_flash_ = std::max(0.0F, screen_flash_ - elapsed * 2.8F);\n'
+          adaptive_update = '''        adaptive_scroll_.update(
+              static_cast<double>(elapsed),
+              smoothed_fps_,
+              smoothed_frame_ms_,
+              rendered_notes_,
+              options_.settings.performance.max_visible_notes,
+              !options_.offline_render.enabled && !options_.smoke_test
+          );
+          ''' + screen_flash
+          app = replace_once(app, screen_flash, adaptive_update, 'adaptive update hook')
+
+          # Switch to indexed PVD/PFC visual rendering before the gameplay window
+          # reaches its hard cap. This avoids one/two O(window) scans per frame.
+          render_start = app.index('    void render_streaming_notes(\n')
+          render_end = app.index('    struct DenseReceptorClip final', render_start)
+          render = app[render_start:render_end]
+          old_render_open = '''    void render_streaming_notes(
+              const double visual_time,
+              const double speed
+          ) {
+              // A saturated judgment window may contain hundreds of thousands of
+              // entries. Decide on the indexed LOD path before walking it; the old
+              // order performed a full dense scan and then immediately discarded it.
+              if (streaming_session_->window_saturated()
+                  && render_saturated_streaming_notes(visual_time, speed)) {
+                  return;
+              }
+              auto& coverage = frame_note_coverage(
+                  streaming_session_->window_notes().size()
+              );
+          '''
+          new_render_open = '''    void render_streaming_notes(
+              const double visual_time,
+              const double speed
+          ) {
+              const auto notes = streaming_session_->window_notes();
+              const auto configured = static_cast<std::size_t>(
+                  std::max<std::uint32_t>(
+                      options_.settings.performance.max_visible_notes,
+                      1U
+                  )
+              );
+              const auto doubled = configured
+                      > std::numeric_limits<std::size_t>::max() / 2U
+                  ? std::numeric_limits<std::size_t>::max()
+                  : configured * 2U;
+              const auto indexed_threshold = std::clamp<std::size_t>(
+                  doubled,
+                  4'096U,
+                  32'768U
+              );
+              // Dense rendering is selected by actual working-set pressure, not
+              // only by hard saturation. PVD/PFC range queries are O(viewport),
+              // whereas walking a 50k-200k judgment window every frame is not.
+              const bool use_indexed_visuals =
+                  streaming_session_->window_saturated()
+                  || notes.size() > indexed_threshold
+                  || adaptive_scroll_.multiplier() > 1.0;
+              if (use_indexed_visuals
+                  && render_saturated_streaming_notes(visual_time, speed)) {
+                  return;
+              }
+              auto& coverage = frame_note_coverage(notes.size());
+          '''
+          if render.count(old_render_open) != 1:
+              raise SystemExit('render_streaming_notes opening did not match exactly once')
+          render = render.replace(old_render_open, new_render_open, 1)
+          render = render.replace(
+              'for (const auto& window : streaming_session_->window_notes()) {',
+              'for (const auto& window : notes) {'
+          )
+          app = app[:render_start] + render + app[render_end:]
+
+          # In the dense indexed path, exact mutable notes are only needed for the
+          # already-crossed visible/judgment sliver. Binary-search that time slice
+          # instead of scanning the complete gameplay window.
+          old_active = '''        auto& active_coverage = frame_note_coverage(
+              streaming_session_->window_notes().size()
+          );
+          const auto visual_us = bounded_microseconds(visual_time, false);
+          const auto streaming_kinds = streaming_reader_->kinds();
+          for (const auto& window : streaming_session_->window_notes()) {
+              if (window.note.time_us >= visual_us) {
+                  break;
+              }
+          '''
+          new_active = '''        const auto notes = streaming_session_->window_notes();
+          const auto visual_us = bounded_microseconds(visual_time, false);
+          const double miss_ms = std::isfinite(gameplay_settings().windows.miss_ms)
+              ? std::max(0.0, gameplay_settings().windows.miss_ms)
+              : 180.0;
+          const double active_past_ms = visible_time_window_ms(
+              static_cast<double>(logical_height) + 96.0,
+              minimum_visual_speed(speed),
+              miss_ms + 75.0
+          );
+          const auto first_active_us = bounded_microseconds(
+              visual_time - active_past_ms,
+              false
+          );
+          const auto active_begin = std::lower_bound(
+              notes.begin(),
+              notes.end(),
+              first_active_us,
+              [](const StreamingWindowNote& note, const std::int64_t time) {
+                  return note.note.time_us < time;
+              }
+          );
+          const auto active_end = std::lower_bound(
+              active_begin,
+              notes.end(),
+              visual_us,
+              [](const StreamingWindowNote& note, const std::int64_t time) {
+                  return note.note.time_us < time;
+              }
+          );
+          auto& active_coverage = frame_note_coverage(
+              static_cast<std::size_t>(std::distance(active_begin, active_end))
+          );
+          const auto streaming_kinds = streaming_reader_->kinds();
+          for (auto iterator = active_begin; iterator != active_end; ++iterator) {
+              const auto& window = *iterator;
+          '''
+          app = replace_once(app, old_active, new_active, 'indexed active slice')
+
+          old_count = '''        const auto active_count = active_coverage.represented_note_count();
+          const auto future_count = streaming_visual_cache_
+              ->represented_note_count();
+          rendered_notes_ = future_count
+                  > std::numeric_limits<std::uint64_t>::max() - active_count
+              ? std::numeric_limits<std::uint64_t>::max()
+              : future_count + active_count;
+          return true;
+          '''
+          new_count = '''        const auto active_count = active_coverage.represented_note_count();
+          // The rolling cache contains large offscreen margins. Feed the adaptive
+          // controller only logical heads that currently map into the viewport;
+          // otherwise a 4096 px cache margin would masquerade as on-screen NPS.
+          std::uint64_t future_visible_heads{};
+          const auto row_count = streaming_visual_cache_->row_count();
+          const double row_height = streaming_visual_cache_->row_height();
+          if (row_count != 0U && row_height > 0.0) {
+              const double source_top = std::max(0.0, -y_offset);
+              const double source_bottom = std::min(
+                  static_cast<double>(row_count) * row_height,
+                  static_cast<double>(logical_height) - y_offset
+              );
+              if (source_bottom > source_top) {
+                  const auto first_row = std::min<std::size_t>(
+                      row_count,
+                      static_cast<std::size_t>(std::floor(source_top / row_height))
+                  );
+                  const auto end_row = std::min<std::size_t>(
+                      row_count,
+                      static_cast<std::size_t>(std::ceil(source_bottom / row_height))
+                  );
+                  for (const auto owner : {
+                          NoteOwner::opponent,
+                          NoteOwner::secondary_opponent,
+                          NoteOwner::player,
+                      }) {
+                      for (std::uint16_t lane = 0U;
+                           lane < streaming_visual_cache_->lane_count();
+                           ++lane) {
+                          for (std::size_t row = first_row; row < end_row; ++row) {
+                              const auto count = streaming_visual_cache_->cell(
+                                  owner, lane, row
+                              ).head_count;
+                              future_visible_heads = count
+                                      > std::numeric_limits<std::uint64_t>::max()
+                                          - future_visible_heads
+                                  ? std::numeric_limits<std::uint64_t>::max()
+                                  : future_visible_heads + count;
+                          }
+                      }
+                  }
+              }
+          }
+          rendered_notes_ = future_visible_heads
+                  > std::numeric_limits<std::uint64_t>::max() - active_count
+              ? std::numeric_limits<std::uint64_t>::max()
+              : future_visible_heads + active_count;
+          return true;
+          '''
+          app = replace_once(app, old_count, new_count, 'viewport logical count')
+
+          member_anchor = '''    double smoothed_fps_{};
+              double smoothed_frame_ms_{};
+          '''
+          member_replacement = '''    double smoothed_fps_{};
+              double smoothed_frame_ms_{};
+              AdaptiveScrollController adaptive_scroll_;
+          '''
+          app = replace_once(app, member_anchor, member_replacement, 'adaptive member')
+
+          app_path.write_text(app, encoding='utf-8')
+
+          test_path = Path('tests/streaming_gameplay_test.cpp')
+          tests = test_path.read_text(encoding='utf-8')
+          tests = replace_once(
+              tests,
+              '#include "pulseforge/gameplay.hpp"\n',
+              '#include "pulseforge/adaptive_scroll.hpp"\n#include "pulseforge/gameplay.hpp"\n',
+              'adaptive test include'
+          )
+          test_function = r'''
+          void test_adaptive_scroll_controller() {
+              pulseforge::AdaptiveScrollController controller;
+              for (int index = 0; index < 4; ++index) {
+                  controller.update(0.25, 120.0, 8.3, 240U, 4'096U, true);
+              }
+              require(
+                  std::abs(controller.multiplier() - 1.0) < 0.000001,
+                  "adaptive scroll leaves ordinary low-density gameplay authored"
+              );
+
+              controller.update(0.25, 7.0, 142.0, 100'000U, 4'096U, true);
+              require(
+                  controller.multiplier() > 1.0,
+                  "adaptive scroll reacts immediately to pathological density"
+              );
+              require(
+                  controller.learned_note_budget() < 4'096U,
+                  "adaptive scroll learns a lower device budget after frame collapse"
+              );
+              const double first_boost = controller.multiplier();
+              for (int index = 0; index < 4; ++index) {
+                  controller.update(0.25, 7.0, 142.0, 100'000U, 4'096U, true);
+              }
+              require(
+                  controller.multiplier() >= first_boost
+                      && controller.multiplier() <= 64.0,
+                  "adaptive scroll increases discretely and remains bounded"
+              );
+
+              const double peak_boost = controller.multiplier();
+              for (int index = 0; index < 32; ++index) {
+                  controller.update(0.25, 60.0, 16.4, 32U, 4'096U, true);
+              }
+              require(
+                  controller.multiplier() < peak_boost,
+                  "adaptive scroll relaxes once 60 Hz and low density are restored"
+              );
+
+              pulseforge::AdaptiveScrollController density_only;
+              density_only.update(0.25, 120.0, 8.3, 10'000U, 4'096U, true);
+              require(
+                  density_only.multiplier() > 1.0,
+                  "logical on-screen density alone can trigger a visual speed boost"
+              );
+
+              controller.update(0.25, 60.0, 16.6, 32U, 4'096U, false);
+              require(
+                  std::abs(controller.multiplier() - 1.0) < 0.000001,
+                  "disabling adaptation restores authored scroll speed"
+              );
+          }
+
+          '''
+          namespace_tail = '\n}  // namespace\n\nint main() {\n'
+          tests = replace_once(
+              tests,
+              namespace_tail,
+              '\n' + test_function + '}  // namespace\n\nint main() {\n',
+              'adaptive test function'
+          )
+          tests = replace_once(
+              tests,
+              '''        const TemporaryDirectory directory;
+                  test_real_input_holds_and_score(directory.path());
+          ''',
+              '''        const TemporaryDirectory directory;
+                  test_adaptive_scroll_controller();
+                  test_real_input_holds_and_score(directory.path());
+          ''',
+              'adaptive test invocation'
+          )
+          test_path.write_text(tests, encoding='utf-8')
+
+          Path('.github/workflows/tmp-adaptive-onscreen-patch.yml').unlink()
+          PY
+
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/application.cpp tests/streaming_gameplay_test.cpp .github/workflows/tmp-adaptive-onscreen-patch.yml
+          git commit -m 'perf(runtime): materialize giant charts by viewport pressure'
+          git push origin HEAD:perf/onscreen-streaming-adaptive-scroll-20260912
