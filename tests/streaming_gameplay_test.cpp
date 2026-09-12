@@ -1,3 +1,4 @@
+#include "pulseforge/adaptive_scroll.hpp"
 #include "pulseforge/gameplay.hpp"
 #include "pulseforge/packed_chart.hpp"
 #include "pulseforge/streaming_gameplay.hpp"
@@ -1967,11 +1968,46 @@ void test_p1_5_0f_chart_total_uint64_saturation(
     );
 }
 
+void test_adaptive_scroll_controller() {
+    pulseforge::AdaptiveScrollController controller;
+    for (int index = 0; index < 4; ++index) {
+        controller.update(0.25, 120.0, 8.3, 240U, 4'096U, true);
+    }
+    require(std::abs(controller.multiplier() - 1.0) < 0.000001,
+        "adaptive scroll leaves ordinary low-density gameplay authored");
+    controller.update(0.25, 7.0, 142.0, 100'000U, 4'096U, true);
+    require(controller.multiplier() > 1.0,
+        "adaptive scroll reacts to pathological density");
+    require(controller.learned_note_budget() < 4'096U,
+        "adaptive scroll learns a lower device budget after frame collapse");
+    const double first_boost = controller.multiplier();
+    for (int index = 0; index < 4; ++index) {
+        controller.update(0.25, 7.0, 142.0, 100'000U, 4'096U, true);
+    }
+    require(controller.multiplier() >= first_boost
+            && controller.multiplier() <= 64.0,
+        "adaptive scroll grows discretely and remains bounded");
+    const double peak_boost = controller.multiplier();
+    for (int index = 0; index < 32; ++index) {
+        controller.update(0.25, 60.0, 16.4, 32U, 4'096U, true);
+    }
+    require(controller.multiplier() < peak_boost,
+        "adaptive scroll relaxes after 60 Hz recovery");
+    pulseforge::AdaptiveScrollController density_only;
+    density_only.update(0.25, 120.0, 8.3, 10'000U, 4'096U, true);
+    require(density_only.multiplier() > 1.0,
+        "on-screen logical density alone can raise visual speed");
+    controller.update(0.25, 60.0, 16.6, 32U, 4'096U, false);
+    require(std::abs(controller.multiplier() - 1.0) < 0.000001,
+        "disabled adaptation restores authored scroll speed");
+}
+
 }  // namespace
 
 int main() {
     try {
         const TemporaryDirectory directory;
+        test_adaptive_scroll_controller();
         test_real_input_holds_and_score(directory.path());
         test_explicit_catchup_budget(directory.path());
         test_large_explicit_chunk_uses_decoded_byte_budget(directory.path());

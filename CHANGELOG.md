@@ -14,6 +14,9 @@ All notable public PulseForge changes are documented in this file.
 - Removes the remaining Psych fast-loader raw-entry/5,000,000-note rejection so those values cannot reappear as chart-validity ceilings.
 - Uses SDL per-app writable storage for the Android large-chart streaming cache, with a temporary-directory fallback.
 - Restores the ten approved built-in menu/background tracks and makes streaming-editor note-type rows selectable with one touch/click while preserving free-form custom IDs.
+- Switches dense PFC1 gameplay to indexed PVD/PFC viewport rendering before the judgment window saturates, eliminating full-window visual scans for extreme charts and materializing exact mutable notes only in the visible/judgment sliver.
+- Bounds the streaming judgment working set independently from visual density; the screen is represented by fixed-memory LOD rows instead of allocating one render object per logical note.
+- Adds a visual-only adaptive scroll controller targeting 60 FPS. It learns a conservative on-screen logical-note budget per device, raises scroll speed in discrete hysteretic steps under real note pressure, and relaxes toward the authored speed after frame-time/density recovery without altering song time, hit windows, score or replay determinism.
 
 ## [1.0.0] - 2026-09-05
 

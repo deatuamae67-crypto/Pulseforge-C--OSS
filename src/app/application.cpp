@@ -10,6 +10,7 @@
 #include "mobile_touch_controls.hpp"
 #include "sdl_input_actions.hpp"
 
+#include "pulseforge/adaptive_scroll.hpp"
 #include "pulseforge/audio_controls.hpp"
 #include "pulseforge/audio_transport.hpp"
 #include "pulseforge/gameplay.hpp"
@@ -2600,11 +2601,25 @@ private:
                 )
             )
         );
-        // Judgment remains deliberately bounded. If this temporal window is
-        // denser than 262144 notes, overdue taps are resolved by the streaming
-        // scheduler while the independent visual range visitor below still
-        // accounts for every on-screen head through fixed-memory LOD bins.
-        streaming_options.max_window_notes = 262'144U;
+        // Judgment state is independent from visual density. Keep only a bounded
+        // near-receptor working set; dense excess is handled by the scheduler's
+        // arithmetic/bulk catch-up while the PVD/PFC range visitor represents
+        // the viewport without materializing every logical note.
+        const auto configured_visual_budget = static_cast<std::size_t>(
+            std::max<std::uint32_t>(
+                options_.settings.performance.max_visible_notes,
+                1U
+            )
+        );
+        const auto scaled_judgment_window = configured_visual_budget
+                > std::numeric_limits<std::size_t>::max() / 2U
+            ? std::numeric_limits<std::size_t>::max()
+            : configured_visual_budget * 2U;
+        streaming_options.max_window_notes = std::clamp<std::size_t>(
+            scaled_judgment_window,
+            4'096U,
+            32'768U
+        );
         // Non-batchable explicit recovery is deliberately frame-budgeted.
         // Bulk tap paths above handle the dense common case; the remainder is
         // capped below one 16k block so pathological sustains/manual recovery
@@ -5018,6 +5033,14 @@ if (const auto selected_skin = resolve_note_skin_selection(
                 scroll_tween_duration_ = 0.0;
             }
         }
+        adaptive_scroll_.update(
+            static_cast<double>(elapsed),
+            smoothed_fps_,
+            smoothed_frame_ms_,
+            rendered_notes_,
+            options_.settings.performance.max_visible_notes,
+            !options_.offline_render.enabled && !options_.smoke_test
+        );
         screen_flash_ = std::max(0.0F, screen_flash_ - elapsed * 2.8F);
         beat_pulse_ = options_.settings.visual.reduced_motion
             ? 0.0F
@@ -6113,9 +6136,12 @@ if (const auto selected_skin = resolve_note_skin_selection(
                     == ScrollSpeedMode::multiplicative
                 ? chart_->chart_scroll_speed
                 : 1.0;
-        const double speed = 0.43
+        const double base_speed = 0.43
             * chart_speed
             * gameplay_settings().scroll_speed;
+        // Density adaptation is visual-only. Song time, hit windows, score,
+        // replay determinism and every gameplay judgment keep authored timing.
+        const double speed = base_speed * adaptive_scroll_.multiplier();
         if (streaming_mode()) {
             render_streaming_notes(visual_time, speed);
             if (diagnostics_) {
@@ -7056,15 +7082,38 @@ if (const auto selected_skin = resolve_note_skin_selection(
             }
         }
 
-        auto& active_coverage = frame_note_coverage(
-            streaming_session_->window_notes().size()
-        );
+        const auto notes = streaming_session_->window_notes();
         const auto visual_us = bounded_microseconds(visual_time, false);
-        const auto streaming_kinds = streaming_reader_->kinds();
-        for (const auto& window : streaming_session_->window_notes()) {
-            if (window.note.time_us >= visual_us) {
-                break;
+        const double miss_ms = std::isfinite(gameplay_settings().windows.miss_ms)
+            ? std::max(0.0, gameplay_settings().windows.miss_ms)
+            : 180.0;
+        const double active_past_ms = visible_time_window_ms(
+            static_cast<double>(logical_height) + 96.0,
+            minimum_visual_speed(speed),
+            miss_ms + 75.0
+        );
+        const auto first_active_us = bounded_microseconds(
+            visual_time - active_past_ms,
+            false
+        );
+        const auto active_begin = std::lower_bound(
+            notes.begin(), notes.end(), first_active_us,
+            [](const StreamingWindowNote& note, const std::int64_t time) {
+                return note.note.time_us < time;
             }
+        );
+        const auto active_end = std::lower_bound(
+            active_begin, notes.end(), visual_us,
+            [](const StreamingWindowNote& note, const std::int64_t time) {
+                return note.note.time_us < time;
+            }
+        );
+        auto& active_coverage = frame_note_coverage(
+            static_cast<std::size_t>(std::distance(active_begin, active_end))
+        );
+        const auto streaming_kinds = streaming_reader_->kinds();
+        for (auto iterator = active_begin; iterator != active_end; ++iterator) {
+            const auto& window = *iterator;
             // Both explicit records and arithmetic PatternRun occurrences can
             // remain pending inside the hit/miss window after crossing the
             // receptor.  Re-add every bounded window entry here; otherwise the
@@ -7131,12 +7180,52 @@ if (const auto selected_skin = resolve_note_skin_selection(
             }
         );
         const auto active_count = active_coverage.represented_note_count();
-        const auto future_count = streaming_visual_cache_
-            ->represented_note_count();
-        rendered_notes_ = future_count
+        // Count only cache heads mapped into the actual 720p viewport.
+        std::uint64_t future_visible_heads{};
+        const auto row_count = streaming_visual_cache_->row_count();
+        const double row_height = streaming_visual_cache_->row_height();
+        if (row_count != 0U && row_height > 0.0) {
+            const double source_top = std::max(0.0, -y_offset);
+            const double source_bottom = std::min(
+                static_cast<double>(row_count) * row_height,
+                static_cast<double>(logical_height) - y_offset
+            );
+            if (source_bottom > source_top) {
+                const auto first_row = std::min<std::size_t>(
+                    row_count, static_cast<std::size_t>(
+                        std::floor(source_top / row_height)
+                    )
+                );
+                const auto end_row = std::min<std::size_t>(
+                    row_count, static_cast<std::size_t>(
+                        std::ceil(source_bottom / row_height)
+                    )
+                );
+                for (const auto owner : {
+                        NoteOwner::opponent,
+                        NoteOwner::secondary_opponent,
+                        NoteOwner::player,
+                    }) {
+                    for (std::uint16_t lane = 0U;
+                         lane < streaming_visual_cache_->lane_count(); ++lane) {
+                        for (std::size_t row = first_row; row < end_row; ++row) {
+                            const auto count = streaming_visual_cache_->cell(
+                                owner, lane, row
+                            ).head_count;
+                            future_visible_heads = count
+                                    > std::numeric_limits<std::uint64_t>::max()
+                                        - future_visible_heads
+                                ? std::numeric_limits<std::uint64_t>::max()
+                                : future_visible_heads + count;
+                        }
+                    }
+                }
+            }
+        }
+        rendered_notes_ = future_visible_heads
                 > std::numeric_limits<std::uint64_t>::max() - active_count
             ? std::numeric_limits<std::uint64_t>::max()
-            : future_count + active_count;
+            : future_visible_heads + active_count;
         return true;
     }
 
@@ -7144,18 +7233,34 @@ if (const auto selected_skin = resolve_note_skin_selection(
         const double visual_time,
         const double speed
     ) {
-        // A saturated judgment window may contain hundreds of thousands of
-        // entries. Decide on the indexed LOD path before walking it; the old
-        // order performed a full dense scan and then immediately discarded it.
-        if (streaming_session_->window_saturated()
+        const auto notes = streaming_session_->window_notes();
+        const auto configured = static_cast<std::size_t>(
+            std::max<std::uint32_t>(
+                options_.settings.performance.max_visible_notes,
+                1U
+            )
+        );
+        const auto doubled = configured
+                > std::numeric_limits<std::size_t>::max() / 2U
+            ? std::numeric_limits<std::size_t>::max()
+            : configured * 2U;
+        const auto indexed_threshold = std::clamp<std::size_t>(
+            doubled,
+            4'096U,
+            32'768U
+        );
+        // Enter fixed-memory indexed LOD before hard saturation.
+        const bool use_indexed_visuals =
+            streaming_session_->window_saturated()
+            || notes.size() > indexed_threshold
+            || adaptive_scroll_.multiplier() > 1.0;
+        if (use_indexed_visuals
             && render_saturated_streaming_notes(visual_time, speed)) {
             return;
         }
-        auto& coverage = frame_note_coverage(
-            streaming_session_->window_notes().size()
-        );
+        auto& coverage = frame_note_coverage(notes.size());
         const auto streaming_kinds = streaming_reader_->kinds();
-        for (const auto& window : streaming_session_->window_notes()) {
+        for (const auto& window : notes) {
             if (!note_is_visible(window.state)) {
                 continue;
             }
@@ -7209,7 +7314,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
             static_cast<std::size_t>(chart_->key_count) * 3U,
             std::numeric_limits<std::int32_t>::min()
         );
-        for (const auto& window : streaming_session_->window_notes()) {
+        for (const auto& window : notes) {
             if (!note_is_visible(window.state)) {
                 continue;
             }
@@ -13914,6 +14019,7 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
     std::uint32_t note_profile_rebuilds_last_second_{};
     double smoothed_fps_{};
     double smoothed_frame_ms_{};
+    AdaptiveScrollController adaptive_scroll_;
     float screen_flash_{};
     float beat_pulse_{};
     double scroll_tween_from_{};
