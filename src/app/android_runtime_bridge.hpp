@@ -1,8 +1,12 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulseforge::detail {
 
@@ -19,5 +23,27 @@ namespace pulseforge::detail {
     std::string_view display_name,
     std::string_view mime_type
 );
+
+struct AndroidFfmpegSession final {
+    std::int64_t id{-1};
+    std::filesystem::path pipe_path;
+};
+
+// Android uses the in-APK FFmpegKit runtime instead of trying to execute a
+// desktop ffmpeg/ffmpeg.exe. The first raw-video pipe argument is replaced by
+// an app-private FIFO owned by FFmpegKit.
+[[nodiscard]] std::optional<AndroidFfmpegSession> start_android_ffmpeg(
+    std::span<const std::string> arguments,
+    std::string* error = nullptr
+);
+
+[[nodiscard]] bool finish_android_ffmpeg(
+    std::int64_t session_id,
+    int& exit_code,
+    std::string& diagnostic_output,
+    std::string* error = nullptr
+);
+
+void cancel_android_ffmpeg(std::int64_t session_id) noexcept;
 
 }  // namespace pulseforge::detail
