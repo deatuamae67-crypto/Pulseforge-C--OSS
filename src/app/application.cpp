@@ -11,6 +11,7 @@
 #include "sdl_input_actions.hpp"
 
 #include "pulseforge/adaptive_scroll.hpp"
+#include "pulseforge/dense_chart_routing.hpp"
 #include "pulseforge/audio_controls.hpp"
 #include "pulseforge/audio_transport.hpp"
 #include "pulseforge/gameplay.hpp"
@@ -2715,15 +2716,12 @@ private:
             );
         }
 
-        // PULSEFORGE_1_0_0_STREAMING_FIRST_WITH_COMPAT_FALLBACK_V1
-        // Source size is a performance hint, never a compatibility gate. Keep
-        // the zero-materialization fast path for genuinely huge Psych charts,
-        // but if the PFC1 importer does not understand this JSON dialect, retry
-        // the format-aware materialized loader instead of treating 32 MiB as a
-        // hard limit. This preserves monster-chart memory behavior while also
-        // accepting large V-Slice/Denpa/other supported JSON dialects.
-        constexpr std::uintmax_t preferred_streaming_json_bytes =
-            32U * 1024U * 1024U;
+        // PULSEFORGE_1_0_0_STREAMING_FIRST_WITH_COMPAT_FALLBACK_V2
+        // Source size is a performance hint, never a compatibility gate. Route
+        // moderately large JSON to PFC1 before materialization as well: the
+        // 15.9 MiB / 1,059,988-note Taimuresu Overkill chart proved that 32 MiB
+        // was far too late for high-NPS content. Unsupported dialects still
+        // fall back transparently to the format-aware materialized loader.
         bool preferred_streaming_attempted = false;
         std::string preferred_streaming_error;
         if (options_.enable_large_chart_streaming && !options_.chart_path.empty()) {
@@ -2731,7 +2729,7 @@ private:
             const auto source_bytes = std::filesystem::file_size(
                 options_.chart_path, size_error
             );
-            if (!size_error && source_bytes > preferred_streaming_json_bytes) {
+            if (!size_error && large_chart_source_prefers_streaming(source_bytes)) {
                 preferred_streaming_attempted = true;
                 std::cerr
                     << "[PulseForge][streaming] source is " << source_bytes
@@ -2772,6 +2770,31 @@ private:
             last_error_ = loaded_chart.error;
             std::cerr << "Chart error: " << loaded_chart.error << '\n';
             return false;
+        }
+        if (options_.enable_large_chart_streaming
+            && materialized_chart_density_prefers_streaming(
+                *loaded_chart.chart,
+                options_.settings.performance.max_visible_notes
+            )) {
+            std::cerr
+                << "[PulseForge][streaming] materialized chart has "
+                << loaded_chart.chart->notes.size()
+                << " notes and exceeds the dense viewport working-set hint; "
+                   "retrying as bounded PFC1 before gameplay\n";
+            if (load_streaming_content(
+                    "dense materialized chart performance route"
+                )) {
+                return true;
+            }
+            const auto density_streaming_error = last_error_;
+            last_error_.clear();
+            set_loading_phase(ContentLoadPhase::parsing_chart);
+            std::cerr
+                << "[PulseForge][streaming] dense-route PFC1 fallback was not "
+                   "available; continuing with the compatible materialized chart"
+                << (density_streaming_error.empty()
+                    ? "\n"
+                    : ": " + density_streaming_error + "\n");
         }
         chart_ = std::move(*loaded_chart.chart);
         if (options_.instrumental_override.has_value()) {
@@ -4864,7 +4887,8 @@ if (const auto selected_skin = resolve_note_skin_selection(
                     script_cam_hud_alpha_
                 );
             }
-            streaming_visual_cache_.reset();
+            // Camera transforms are applied at draw time; keep the canonical
+            // PVD/PFC time-lane cache alive across zoom pulses.
         }
 #endif
         if (name == "Change P1 Mania" || name == "Change Player Mania"
@@ -5002,7 +5026,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
         script_cam_hud_zoom_ = std::clamp(next_hud, 0.05, 8.0);
         update_scene_camera();
         update_scene_hud_camera();
-        streaming_visual_cache_.reset();
+        // Camera zoom decay is a draw-time presentation transform.
     }
 #endif
 
@@ -10791,7 +10815,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
             else if (name == "camHUD.angle") script_cam_hud_angle_ = std::clamp(number, -360'000.0, 360'000.0);
             else script_cam_hud_alpha_ = std::clamp(number, 0.0, 1.0);
             update_scene_hud_camera();
-            streaming_visual_cache_.reset();
+            // HUD-camera transforms are consumed at draw time; preserve PVD/PFC.
             error.clear();
             return true;
         }
@@ -10923,7 +10947,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
             } else if (tween.property == "angle") state.angle = value;
             else if (tween.property == "alpha") state.alpha = std::clamp(value, 0.0, 1.0);
             else return false;
-            streaming_visual_cache_.reset();
+            // Dense drawing applies strum x/y/scale/angle/alpha dynamically.
             return true;
         }
         if (tween.target == ScriptTweenTarget::camera_game) {
@@ -10950,7 +10974,7 @@ if (const auto selected_skin = resolve_note_skin_selection(
                 script_cam_hud_x_, script_cam_hud_y_, script_cam_hud_zoom_,
                 script_cam_hud_angle_, script_cam_hud_alpha_
             );
-            streaming_visual_cache_.reset();
+            // Camera/HUD tweening must not rebuild dense note coverage per frame.
             return true;
         }
         if (auto hud = script_hud_objects_.find(tween.object);
