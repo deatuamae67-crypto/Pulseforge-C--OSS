@@ -1,5 +1,6 @@
 #include "android_runtime_bridge.hpp"
 
+#include <charconv>
 #include <string>
 
 #if defined(__ANDROID__)
@@ -14,7 +15,7 @@ namespace {
 class AndroidLocalFrame final {
 public:
     explicit AndroidLocalFrame(JNIEnv* const env) noexcept : env_(env) {
-        valid_ = env_ != nullptr && env_->PushLocalFrame(24) == JNI_OK;
+        valid_ = env_ != nullptr && env_->PushLocalFrame(64) == JNI_OK;
     }
     ~AndroidLocalFrame() {
         if (valid_) env_->PopLocalFrame(nullptr);
@@ -62,6 +63,31 @@ private:
     if (clear_exception(env)) return {};
     return result;
 }
+
+[[nodiscard]] jobjectArray java_string_array(
+    JNIEnv* const env,
+    const std::span<const std::string> values
+) {
+    if (env == nullptr || values.size() > static_cast<std::size_t>(INT32_MAX)) {
+        return nullptr;
+    }
+    const auto string_class = env->FindClass("java/lang/String");
+    if (string_class == nullptr || clear_exception(env)) return nullptr;
+    const auto result = env->NewObjectArray(
+        static_cast<jsize>(values.size()),
+        string_class,
+        nullptr
+    );
+    if (result == nullptr || clear_exception(env)) return nullptr;
+    for (std::size_t index = 0U; index < values.size(); ++index) {
+        const auto value = env->NewStringUTF(values[index].c_str());
+        if (value == nullptr || clear_exception(env)) return nullptr;
+        env->SetObjectArrayElement(result, static_cast<jsize>(index), value);
+        if (clear_exception(env)) return nullptr;
+        env->DeleteLocalRef(value);
+    }
+    return result;
+}
 #endif
 
 [[nodiscard]] std::string path_utf8(const std::filesystem::path& path) {
@@ -70,6 +96,10 @@ private:
         reinterpret_cast<const char*>(value.data()),
         value.size(),
     };
+}
+
+void assign_error(std::string* const error, std::string message) {
+    if (error != nullptr) *error = std::move(message);
 }
 
 }  // namespace
@@ -138,6 +168,160 @@ std::string publish_file_to_downloads(
     static_cast<void>(display_name);
     static_cast<void>(mime_type);
     return path_utf8(source);
+#endif
+}
+
+std::optional<AndroidFfmpegSession> start_android_ffmpeg(
+    const std::span<const std::string> arguments,
+    std::string* const error
+) {
+#if defined(__ANDROID__)
+    auto* const env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+    AndroidLocalFrame frame(env);
+    if (!frame.valid()) {
+        assign_error(error, "Android JNI is unavailable for FFmpegKit");
+        return std::nullopt;
+    }
+    const auto owner = activity(env);
+    if (owner == nullptr) {
+        assign_error(error, "Android activity is unavailable for FFmpegKit");
+        return std::nullopt;
+    }
+    const auto call = method(
+        env,
+        owner,
+        "beginPulseForgeFfmpeg",
+        "([Ljava/lang/String;)Ljava/lang/String;"
+    );
+    if (call == nullptr) {
+        assign_error(error, "embedded Android FFmpegKit bridge is unavailable");
+        return std::nullopt;
+    }
+    const auto java_arguments = java_string_array(env, arguments);
+    if (java_arguments == nullptr) {
+        assign_error(error, "could not marshal FFmpegKit arguments");
+        return std::nullopt;
+    }
+    const auto value = static_cast<jstring>(env->CallObjectMethod(
+        owner,
+        call,
+        java_arguments
+    ));
+    if (clear_exception(env)) {
+        assign_error(error, "FFmpegKit failed while creating the Android encode session");
+        return std::nullopt;
+    }
+    const auto result = java_string(env, value);
+    const auto newline = result.find('\n');
+    if (newline == std::string::npos || newline == 0U
+        || newline + 1U >= result.size()) {
+        assign_error(
+            error,
+            result.empty()
+                ? "FFmpegKit did not return a raw-video pipe"
+                : result
+        );
+        return std::nullopt;
+    }
+    std::int64_t id{-1};
+    const auto parsed = std::from_chars(
+        result.data(), result.data() + newline, id
+    );
+    if (parsed.ec != std::errc{} || parsed.ptr != result.data() + newline
+        || id < 0) {
+        assign_error(error, "FFmpegKit returned an invalid session id");
+        return std::nullopt;
+    }
+    if (error != nullptr) error->clear();
+    return AndroidFfmpegSession{
+        id,
+        std::filesystem::path(result.substr(newline + 1U)),
+    };
+#else
+    static_cast<void>(arguments);
+    assign_error(error, "embedded FFmpegKit is available only on Android");
+    return std::nullopt;
+#endif
+}
+
+bool finish_android_ffmpeg(
+    const std::int64_t session_id,
+    int& exit_code,
+    std::string& diagnostic_output,
+    std::string* const error
+) {
+#if defined(__ANDROID__)
+    auto* const env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+    AndroidLocalFrame frame(env);
+    if (!frame.valid()) {
+        assign_error(error, "Android JNI is unavailable while waiting for FFmpegKit");
+        return false;
+    }
+    const auto owner = activity(env);
+    const auto call = method(
+        env,
+        owner,
+        "finishPulseForgeFfmpeg",
+        "(J)Ljava/lang/String;"
+    );
+    if (call == nullptr) {
+        assign_error(error, "embedded Android FFmpegKit wait bridge is unavailable");
+        return false;
+    }
+    const auto value = static_cast<jstring>(env->CallObjectMethod(
+        owner,
+        call,
+        static_cast<jlong>(session_id)
+    ));
+    if (clear_exception(env)) {
+        assign_error(error, "FFmpegKit failed while finalizing the Android encode session");
+        return false;
+    }
+    const auto result = java_string(env, value);
+    const auto newline = result.find('\n');
+    const auto code_text = result.substr(0U, newline);
+    const auto parsed = std::from_chars(
+        code_text.data(), code_text.data() + code_text.size(), exit_code
+    );
+    if (parsed.ec != std::errc{} || parsed.ptr != code_text.data() + code_text.size()) {
+        assign_error(
+            error,
+            result.empty() ? "FFmpegKit returned no completion status" : result
+        );
+        return false;
+    }
+    diagnostic_output = newline == std::string::npos
+        ? std::string{}
+        : result.substr(newline + 1U);
+    if (error != nullptr) error->clear();
+    return true;
+#else
+    static_cast<void>(session_id);
+    static_cast<void>(exit_code);
+    static_cast<void>(diagnostic_output);
+    assign_error(error, "embedded FFmpegKit is available only on Android");
+    return false;
+#endif
+}
+
+void cancel_android_ffmpeg(const std::int64_t session_id) noexcept {
+#if defined(__ANDROID__)
+    if (session_id < 0) return;
+    auto* const env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+    AndroidLocalFrame frame(env);
+    if (!frame.valid()) return;
+    const auto owner = activity(env);
+    const auto call = method(
+        env,
+        owner,
+        "cancelPulseForgeFfmpeg",
+        "(J)V"
+    );
+    if (call == nullptr) return;
+    env->CallVoidMethod(owner, call, static_cast<jlong>(session_id));
+    static_cast<void>(clear_exception(env));
+#else
+    static_cast<void>(session_id);
 #endif
 }
 
