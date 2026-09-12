@@ -14,6 +14,9 @@ All notable public PulseForge changes are documented in this file.
 - Removes the remaining Psych fast-loader raw-entry/5,000,000-note rejection so those values cannot reappear as chart-validity ceilings.
 - Uses SDL per-app writable storage for the Android large-chart streaming cache, with a temporary-directory fallback.
 - Restores the ten approved built-in menu/background tracks and makes streaming-editor note-type rows selectable with one touch/click while preserving free-form custom IDs.
+- Switches dense PFC1 gameplay to indexed PVD/PFC viewport rendering before the judgment window saturates, eliminating full-window visual scans for extreme charts and materializing exact mutable notes only in the visible/judgment sliver.
+- Bounds the streaming judgment working set independently from visual density; the screen is represented by fixed-memory LOD rows instead of allocating one render object per logical note.
+- Adds a visual-only adaptive scroll controller targeting 60 FPS. It learns a conservative on-screen logical-note budget per device, raises scroll speed in discrete hysteretic steps under real note pressure, and relaxes toward the authored speed after frame-time/density recovery without altering song time, hit windows, score or replay determinism.
 
 ## [1.0.0] - 2026-09-05
 
@@ -70,7 +73,7 @@ Each package is accompanied by SHA-256 metadata and platform-specific inspection
 
 The PulseForge engine/build source merged into `main` is byte-identical to the source at commit `fbb9ee22350a939071595721f5d6a35909d41a6d`, where both the cross-platform build-validation matrix and deterministic core-test matrix completed successfully.
 
-The integration was merged through PR #25 into `main` at commit `fe100c6f5ff5c69aff85ecf760696d5f0c5fd8d5`. Changes after the validated source commit were limited to documentation and `.github` repository/CI maintenance files.
+The integration was merged through PR #25 into `main` at commit `fe100c6f5ff5c69aff85ecf760696d5d`. Changes after the validated source commit were limited to documentation and `.github` repository/CI maintenance files.
 
 ### Distribution notes
 
