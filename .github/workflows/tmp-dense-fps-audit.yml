@@ -1,0 +1,31 @@
+name: Temporary dense gameplay FPS audit
+
+on:
+  push:
+    branches:
+      - perf/fix-dense-7fps-20260912
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inspect dense gameplay hot paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== streaming_visual_cache_ reset/invalidation sites ==='
+          grep -n -C 3 'streaming_visual_cache_.*reset' src/app/application.cpp || true
+          echo '=== cache speed/time invalidation sites ==='
+          grep -n -C 3 'streaming_visual_cache_speed_\|rebuild_streaming_visual_cache\|cache_valid' src/app/application.cpp || true
+          echo '=== script camera update sites ==='
+          grep -n -C 4 'update_scene_camera\|script_cam_.*zoom\|cameraSetTarget' src/app/application.cpp || true
+          echo '=== large chart routing thresholds ==='
+          grep -n -C 4 'preferred_streaming_json_bytes\|materialized_chart_note_budget\|max_window_notes' src/app/application.cpp include/pulseforge/chart.hpp src/io/*.cpp || true
+          echo '=== Taimuresu overkill per-frame APIs ==='
+          grep -n -E 'function onUpdate|cameraSetTarget|setPropertyFromGroup|setProperty\(' 'mods/taimuresu spam amplified/taimuresu/data/Taimuresu_overkill_mode/script.lua' || true
