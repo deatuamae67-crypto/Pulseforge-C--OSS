@@ -29,6 +29,7 @@ All notable public PulseForge changes are documented in this file.
 
 ### Fixed
 
+- Extreme-chart runtime now repairs missing PVD1 indexes automatically at 5M+ logical notes, removes no-op Lua logical-note callback fan-out after callbacks are known absent, and dynamically reduces presentation-only wavy/wiggle/CPU-heavy stage effects when 5M-50M+ charts threaten the 60 FPS frame budget; note timing, judgment, scoring and chart validity are unchanged.
 - Adds Overkill/Timeless Lua compatibility: `addGlitchEffect` receives a bounded renderer-native fallback; `setScrollFactor(tag)` and legacy `setLuaSpriteScrollFactor` follow Psych semantics; fractional `curDecBeat`/`curDecStep` and resolved `mustHitSection` are available; a bounded literal-only `string.find` and allow-listed character `getAnimationName` bridge prevent the original scripts from aborting without exposing general Lua patterns or native reflection; Psych easing names are case-insensitive and include quad/cube/quart/quint/sine/circ families for modchart fidelity.
 - Isolates executable Psych/Denpa/SC:R Lua discovery to the selected content/mod roots. Unrelated sibling mods can no longer inject `onStartCountdown()` / `Function_Stop` into the active SC:R chart and freeze gameplay at `t=0`.
 - Keeps broad fallback discovery for non-executable content while explicitly disabling sibling stock-provider injection for executable script discovery.

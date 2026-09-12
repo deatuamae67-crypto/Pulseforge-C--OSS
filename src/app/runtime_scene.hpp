@@ -205,6 +205,14 @@ public:
     [[nodiscard]] RuntimeNoteSkinProfileStats note_skin_profile_stats()
         const noexcept;
 
+    // Presentation-only LOD for extreme charts. It never changes chart time,
+    // note positions, input, scoring, replay state or Lua-visible properties.
+    void set_effect_lod(
+        std::size_t wavy_segment_cap,
+        std::size_t wiggle_segment_cap,
+        bool allow_cpu_heavy_texture_effects
+    ) noexcept;
+
     // Switches the matching player/opponent/secondary-opponent atlas to a sing
     // (or miss) animation. Sustain notes may extend the pose to their tail. The lookup is allocation-free after the event and falls back
     // silently when a mod character does not define that direction.

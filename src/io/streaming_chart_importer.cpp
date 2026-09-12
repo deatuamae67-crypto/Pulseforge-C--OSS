@@ -4603,7 +4603,12 @@ StreamingChartCacheResult prepare_streaming_chart_cache(
                         std::uintmax_t committed_pvd_bytes =
                             visual_valid ? actual_pvd_bytes : 0U;
 
-                        if (!visual_valid && options.require_visual_density) {
+                        const bool visual_density_required =
+            options.require_visual_density
+            || (options.auto_require_visual_density_logical_notes != 0U
+                && reader->logical_note_count()
+                    >= options.auto_require_visual_density_logical_notes);
+        if (!visual_valid && visual_density_required) {
                             filesystem_error.clear();
                             std::filesystem::remove(
                                 pvd_path,

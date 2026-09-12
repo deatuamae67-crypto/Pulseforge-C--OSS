@@ -626,6 +626,14 @@ struct LuaRuntime::Impl {
         return static_cast<Impl*>(userdata);
     }
 
+    [[nodiscard]] bool callback_available(const Callback callback) const noexcept {
+        if (!script_loaded || state == nullptr) {
+            return false;
+        }
+        const auto index = static_cast<std::size_t>(callback);
+        return !disabled[index] && !absent[index];
+    }
+
     [[nodiscard]] static void* allocate(
         void* userdata,
         void* pointer,
@@ -3178,11 +3186,21 @@ LuaDispatchReport LuaRuntime::dispatch_frame(
     for (const auto& event : session.frame_events()) {
         switch (event.type) {
         case GameplayEventType::note_hit:
-        case GameplayEventType::note_miss:
         case GameplayEventType::hold_tick:
+            if (impl_->callback_available(Impl::Callback::good_note_hit)) {
+                plan(event.logical_occurrence_count);
+            }
+            break;
+        case GameplayEventType::note_miss:
         case GameplayEventType::hold_drop:
+            if (impl_->callback_available(Impl::Callback::note_miss)) {
+                plan(event.logical_occurrence_count);
+            }
+            break;
         case GameplayEventType::opponent_hit:
-            plan(event.logical_occurrence_count);
+            if (impl_->callback_available(Impl::Callback::opponent_note_hit)) {
+                plan(event.logical_occurrence_count);
+            }
             break;
         case GameplayEventType::ghost_tap:
             plan(2U);
@@ -3249,13 +3267,24 @@ LuaDispatchReport LuaRuntime::dispatch_frame(
         const auto runs = static_cast<std::size_t>(
             std::min<std::uint64_t>(count, available)
         );
+        std::size_t executed = 0U;
+        bool callback_unavailable = false;
         for (std::size_t index = 0U; index < runs; ++index) {
-            accumulate(report, callback(index));
+            const auto current = callback(index);
+            accumulate(report, current);
+            ++executed;
+            if (current.status == LuaCallStatus::missing
+                || current.status == LuaCallStatus::disabled) {
+                callback_unavailable = true;
+                break;
+            }
         }
-        event_callbacks_used += runs;
-        if (count > runs) {
-            add_skipped(count - static_cast<std::uint64_t>(runs));
-            fanout_truncated = true;
+        event_callbacks_used += executed;
+        if (count > executed) {
+            add_skipped(count - static_cast<std::uint64_t>(executed));
+            if (!callback_unavailable && count > runs) {
+                fanout_truncated = true;
+            }
         }
     };
 
@@ -3458,11 +3487,21 @@ LuaDispatchReport LuaRuntime::dispatch_frame(
     for (const auto& event : events) {
         switch (event.type) {
         case GameplayEventType::note_hit:
-        case GameplayEventType::note_miss:
         case GameplayEventType::hold_tick:
+            if (impl_->callback_available(Impl::Callback::good_note_hit)) {
+                plan(event.logical_occurrence_count);
+            }
+            break;
+        case GameplayEventType::note_miss:
         case GameplayEventType::hold_drop:
+            if (impl_->callback_available(Impl::Callback::note_miss)) {
+                plan(event.logical_occurrence_count);
+            }
+            break;
         case GameplayEventType::opponent_hit:
-            plan(event.logical_occurrence_count);
+            if (impl_->callback_available(Impl::Callback::opponent_note_hit)) {
+                plan(event.logical_occurrence_count);
+            }
             break;
         case GameplayEventType::beat:
             plan(event.occurrence_count);
@@ -3549,13 +3588,24 @@ LuaDispatchReport LuaRuntime::dispatch_frame(
         const auto runs = static_cast<std::size_t>(
             std::min<std::uint64_t>(count, available)
         );
+        std::size_t executed = 0U;
+        bool callback_unavailable = false;
         for (std::size_t index = 0U; index < runs; ++index) {
-            accumulate(report, callback(index));
+            const auto current = callback(index);
+            accumulate(report, current);
+            ++executed;
+            if (current.status == LuaCallStatus::missing
+                || current.status == LuaCallStatus::disabled) {
+                callback_unavailable = true;
+                break;
+            }
         }
-        event_callbacks_used += runs;
-        if (count > runs) {
-            add_skipped(count - static_cast<std::uint64_t>(runs));
-            fanout_truncated = true;
+        event_callbacks_used += executed;
+        if (count > executed) {
+            add_skipped(count - static_cast<std::uint64_t>(executed));
+            if (!callback_unavailable && count > runs) {
+                fanout_truncated = true;
+            }
         }
     };
 
