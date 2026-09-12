@@ -517,6 +517,7 @@ if(PULSEFORGE_BUILD_APP)
 
     add_library(pulseforge_runtime STATIC
         src/app/application.cpp
+        src/app/android_runtime_bridge.cpp
         src/app/controls_ui.cpp
         src/app/CoreEngine.cpp
         src/app/discord_presence.cpp

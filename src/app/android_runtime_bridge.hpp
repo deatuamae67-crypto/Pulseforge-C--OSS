@@ -1,8 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -10,14 +10,8 @@
 
 namespace pulseforge::detail {
 
-// Returns a compact platform/runtime snapshot suitable for performance reports.
-// Android includes ART/GC counters and Java heap figures; other platforms return
-// an empty string so the gameplay capture remains completely portable.
 [[nodiscard]] std::string android_runtime_diagnostics();
 
-// Publishes an app-private file into the user-visible Downloads/PulseForge
-// collection on Android. Returns the published content URI/path on success.
-// Other platforms simply return the original filesystem path.
 [[nodiscard]] std::string publish_file_to_downloads(
     const std::filesystem::path& source,
     std::string_view display_name,
@@ -25,25 +19,20 @@ namespace pulseforge::detail {
 );
 
 struct AndroidFfmpegSession final {
-    std::int64_t id{-1};
-    std::filesystem::path pipe_path;
+    std::int64_t session_id{-1};
+    std::string input_pipe;
 };
 
-// Android uses the in-APK FFmpegKit runtime instead of trying to execute a
-// desktop ffmpeg/ffmpeg.exe. The first raw-video pipe argument is replaced by
-// an app-private FIFO owned by FFmpegKit.
-[[nodiscard]] std::optional<AndroidFfmpegSession> start_android_ffmpeg(
+[[nodiscard]] bool android_ffmpeg_available() noexcept;
+[[nodiscard]] AndroidFfmpegSession start_android_ffmpeg(
     std::span<const std::string> arguments,
     std::string* error = nullptr
 );
-
-[[nodiscard]] bool finish_android_ffmpeg(
+[[nodiscard]] int wait_android_ffmpeg(
     std::int64_t session_id,
-    int& exit_code,
-    std::string& diagnostic_output,
-    std::string* error = nullptr
+    std::string* output = nullptr
 );
-
 void cancel_android_ffmpeg(std::int64_t session_id) noexcept;
+void close_android_ffmpeg_pipe(std::string_view path) noexcept;
 
 }  // namespace pulseforge::detail
