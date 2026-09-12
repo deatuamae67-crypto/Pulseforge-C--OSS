@@ -1189,7 +1189,9 @@ bool OfflineEncoder::commit_output(std::string* error) {
 }
 
 bool OfflineEncoder::finish(std::string* error) {
-#if defined(_WIN32)
+#if defined(__ANDROID__)
+    const bool process_ready = android_session_id_ >= 0;
+#elif defined(_WIN32)
     const bool process_ready = process_handle_ != nullptr;
 #else
     const bool process_ready = process_ != nullptr;
