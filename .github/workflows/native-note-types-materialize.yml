@@ -1,0 +1,181 @@
+name: Native note types materialize
+
+on:
+  push:
+    branches:
+      - feat/native-mod-note-types
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: ${{ !contains(github.event.head_commit.message, '[native-note-types-materialized]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/native-mod-note-types
+          fetch-depth: 0
+
+      - name: Materialize verified native assets and runtime policy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p assets/custom_notetypes assets/images assets/sounds
+
+          download_drive() {
+            local id="$1"
+            local output="$2"
+            local expected="$3"
+            local tmp="${output}.tmp"
+            rm -f "$tmp"
+            curl --fail --location --silent --show-error --retry 4 --retry-delay 2 \
+              "https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t" \
+              --output "$tmp"
+            printf '%s  %s\n' "$expected" "$tmp" | sha256sum --check --strict
+            mv "$tmp" "$output"
+          }
+
+          # Canonical assets recovered from the Complete mod corpus. Every file
+          # is pinned by SHA-256 so an HTML/error response can never be committed.
+          download_drive "1njelxjaAAzJKiN0b7eAe1PWCbdVBhhep" "assets/images/BULLET.png" \
+            "d0f03b7e0e934e21fbbc1a2e2fd2e87186912a1d189634256dc0fda23847aca7"
+          download_drive "1eMwtiYc6uQTfRGN1_c15Z1kAxqwoRNa2" "assets/images/BULLET.xml" \
+            "ef2518bb1547b8a3a2517314bed0633e65e02c2415ea162fb5166508759a17c1"
+          download_drive "1XfDfWpVRpPWgcR5jDhKE5iaeF0C5Wsga" "assets/sounds/gunshot.ogg" \
+            "6b899114bf877f2516b13ffcd4830f6215314b067175fda365c41642b00580e7"
+
+          # Hurt Note is a PulseForge/Psych built-in, so its referenced visual
+          # assets must also exist in a clean engine checkout.
+          download_drive "1eRwLm_4zp8AZ-Jrwwwt5ga7aHBi6p-HV" "assets/images/HURTNOTE_assets.png" \
+            "1ddf5e827ee678337b3bbff8f95a0e5d9477c6426502b3c2648ad0965c0e65f1"
+          download_drive "1ya25SaDCch7QgL9gJCzBWcwCHqYZO8gh" "assets/images/HURTNOTE_assets.xml" \
+            "fd89cdbc5cbb46bee7bac996978b72edb3762b95ac16a255d4770885316ad6c3"
+          download_drive "1M8NVSCIyS1LwusCCwyB20qKYIZet0z8I" "assets/images/HURTnoteSplashes.png" \
+            "2d46bec38f43aedb61d57ad9b7dfe17b24e0a2e3a318de1c3d5e34fa333d771a"
+          download_drive "1CGRiluOLNK46BJvLbTVxUYfmAPM8ilXv" "assets/images/HURTnoteSplashes.xml" \
+            "ee131fccaf35fda3f02e5bdea9d931fad763fc2e129909d694a8ac97a6912ba2"
+
+          cat > "assets/custom_notetypes/the note.txt" <<'EOF'
+          # Native fallback for the real Complete-corpus custom note type.
+          # An active mod can still override this exact ID from its own root.
+          texture = BULLET
+          missHealth = 0.6
+          EOF
+
+          cat > "assets/custom_notetypes/the note.lua" <<'EOF'
+          -- PulseForge native fallback for the real Psych custom note type
+          -- "the note". Texture and missHealth are data-driven in the sibling
+          -- .txt file so they are available even when Lua is disabled.
+          local dodgeAnimations = {'dodge', 'dodge', 'dodge', 'dodge'}
+
+          function goodNoteHit(id, noteData, noteType, isSustainNote)
+              if noteType ~= 'the note' then
+                  return
+              end
+
+              local lane = (tonumber(noteData) or 0) + 1
+              characterPlayAnim('boyfriend', dodgeAnimations[lane] or 'dodge', true)
+              setProperty('boyfriend.specialAnim', true)
+              characterPlayAnim('dad', 'Shoot', true)
+              setProperty('dad.specialAnim', true)
+              playSound('gunshot', 1)
+          end
+          EOF
+
+          cat > "assets/custom_notetypes/3rd Player.lua" <<'EOF'
+          -- Native identity placeholder. The Complete corpus ships this custom
+          -- note-type file empty; preserving the ID intentionally adds no
+          -- gameplay or visual behavior.
+          EOF
+
+          cat > "assets/custom_notetypes/5th Player.lua" <<'EOF'
+          -- Native identity placeholder. The Complete corpus ships this custom
+          -- note-type file empty; preserving the ID intentionally adds no
+          -- gameplay or visual behavior.
+          EOF
+
+          cat > "assets/custom_notetypes/README.md" <<'EOF'
+          # Native custom note types
+
+          These files are clean-install fallbacks for note-type IDs observed in
+          PulseForge's Complete compatibility corpus. Resolution remains layered:
+          the selected/active mod wins when it provides the same ID; these files
+          are only the engine fallback.
+
+          `the note` includes its original BULLET skin and gunshot sound. Its
+          texture and miss penalty are declared in `the note.txt`, while its
+          hit animation/sound behavior lives in `the note.lua`.
+
+          `3rd Player` and `5th Player` are deliberately no-op identity files:
+          the source corpus contains empty scripts for those IDs, so PulseForge
+          preserves them without inventing semantics.
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/app/application.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          old = """        const auto parsed_note_skin = parse_note_skin_selection(
+              options_.settings.visual.note_skin_selection
+          );
+          """
+          new = old + "        manual_note_skin_override_active_ = !parsed_note_skin.chart_default;\n"
+          assert text.count(old) == 1, 'note-skin selection anchor changed'
+          text = text.replace(old, new, 1)
+
+          old = """    ) const noexcept {
+              custom_texture_missing = false;
+              const auto* state = script_note_visual_state(owner, kind);
+          """
+          new = """    ) const noexcept {
+              custom_texture_missing = false;
+              if (manual_note_skin_override_active_) {
+                  // An explicit user skin is visually authoritative. Gameplay
+                  // behavior for the note kind remains installed separately.
+                  return detail::runtime_note_skin_default_profile;
+              }
+              const auto* state = script_note_visual_state(owner, kind);
+          """
+          assert text.count(old) == 1, 'per-kind note-skin profile anchor changed'
+          text = text.replace(old, new, 1)
+
+          old = """    bool note_scroll_multiplier_active_{};
+              bool note_sustain_disable_policy_active_{};
+              std::array<
+          """
+          new = """    bool note_scroll_multiplier_active_{};
+              bool note_sustain_disable_policy_active_{};
+              bool manual_note_skin_override_active_{};
+              std::array<
+          """
+          assert text.count(old) == 1, 'note visual state member anchor changed'
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          # Safety checks: prove that the generated patch has the intended
+          # policy and that all externally materialized bytes still match.
+          grep -q 'manual_note_skin_override_active_ = !parsed_note_skin.chart_default' src/app/application.cpp
+          grep -q 'if (manual_note_skin_override_active_)' src/app/application.cpp
+          grep -q '^texture = BULLET$' "assets/custom_notetypes/the note.txt"
+          grep -q '^missHealth = 0.6$' "assets/custom_notetypes/the note.txt"
+
+      - name: Commit materialized result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets src/app/application.cpp
+          if git diff --cached --quiet; then
+            echo "No materialized changes to commit."
+            exit 0
+          fi
+          git commit -m "feat: bundle native mod note types and skins [native-note-types-materialized]"
+          git push origin HEAD:feat/native-mod-note-types
