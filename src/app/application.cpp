@@ -1678,6 +1678,12 @@ private:
         output << "PulseForge on-device performance capture\n";
         output << "build=" << PULSEFORGE_PATCH_BUILD << '\n';
         output << "chart=" << path_utf8(options_.chart_path) << '\n';
+        output << "runtime_mode="
+               << (streaming_mode() ? "streaming" : "materialized") << '\n';
+        output << "source_bytes=" << source_chart_bytes_ << '\n';
+        output << "logical_note_total=" << chart_source_note_count() << '\n';
+        output << "streaming_attempted="
+               << (streaming_attempted_ ? "yes" : "no") << '\n';
         output << "duration_target_ms=10000\n";
         output << "samples=" << performance_capture_.rows.size() << '\n';
         output << "average_fps=" << (count > 0.0 ? fps_sum / count : 0.0) << '\n';
@@ -1685,6 +1691,11 @@ private:
         output << "average_frame_ms=" << (count > 0.0 ? frame_sum / count : 0.0) << '\n';
         output << "maximum_smoothed_frame_ms=" << max_frame << '\n';
         output << "lua_setting=" << (options_.settings.performance.lua_enabled ? "on" : "off") << '\n';
+        output << "\n[streaming_fallback_error]\n"
+               << (streaming_fallback_error_.empty()
+                    ? std::string{"<none>"}
+                    : streaming_fallback_error_)
+               << '\n';
         output << "\n[android_runtime_start]\n" << performance_capture_.android_start_stats;
         output << "\n[android_runtime_end]\n" << detail::android_runtime_diagnostics();
         output << "\n[frames_csv]\n";
@@ -2418,18 +2429,18 @@ private:
     }
 
     void gameplay_update(const double song_time_ms) {
+        const auto gameplay_started_ns = profiling_active()
+            ? SDL_GetTicksNS()
+            : std::uint64_t{0U};
         if (streaming_mode()) {
-            const auto gameplay_started_ns = profiling_active()
-                ? SDL_GetTicksNS()
-                : std::uint64_t{0U};
             static_cast<void>(streaming_session_->update(song_time_ms));
-            if (profiling_active()) {
-                note_profile_frame_.gameplay_update_ns =
-                    SDL_GetTicksNS() - gameplay_started_ns;
-            }
             report_streaming_runtime_error();
         } else {
             session_->update(song_time_ms);
+        }
+        if (profiling_active()) {
+            note_profile_frame_.gameplay_update_ns =
+                SDL_GetTicksNS() - gameplay_started_ns;
         }
     }
 
@@ -2656,6 +2667,7 @@ private:
     [[nodiscard]] bool load_streaming_content(
         const std::string_view materialized_error
     ) {
+        streaming_attempted_ = true;
         if (options_.replay_path.has_value()) {
             std::cerr
                 << "Replay error: large-chart streaming does not yet support "
@@ -2664,6 +2676,27 @@ private:
         }
         StreamingChartCacheOptions cache_options;
         cache_options.cache_root = options_.large_chart_cache_root;
+#if defined(__ANDROID__)
+        // The interactive gameplay path must not fall back to the process CWD
+        // on Android. The launcher/editor already use SDL's writable per-app
+        // storage, but gameplay owns a separate cache preparation path.
+        if (cache_options.cache_root.empty()) {
+            if (char* preference = SDL_GetPrefPath("PulseForge", "PulseForge");
+                preference != nullptr) {
+                cache_options.cache_root = std::filesystem::path(preference)
+                    / "cache" / "large-charts";
+                SDL_free(preference);
+            } else {
+                std::error_code temporary_error;
+                const auto temporary_root =
+                    std::filesystem::temp_directory_path(temporary_error);
+                if (!temporary_error) {
+                    cache_options.cache_root = temporary_root
+                        / "pulseforge" / "large-charts";
+                }
+            }
+        }
+#endif
         cache_options.difficulty = options_.chart_options.difficulty;
         cache_options.difficulty_explicit =
             options_.chart_options.difficulty_explicit;
@@ -2677,6 +2710,7 @@ private:
         if (!cached) {
             last_error_ = "Chart error: " + std::string(materialized_error)
                 + " | Streaming fallback error: " + cached.error;
+            streaming_fallback_error_ = last_error_;
             std::cerr << "Chart error: " << materialized_error << '\n'
                       << "Streaming fallback error: " << cached.error << '\n';
             return false;
@@ -2811,6 +2845,7 @@ private:
         );
         if (!created.has_value()) {
             last_error_ = session_error;
+            streaming_fallback_error_ = last_error_;
             std::cerr << session_error << '\n';
             streaming_reader_.reset();
             streaming_pattern_prefix_end_us_.clear();
@@ -2877,6 +2912,23 @@ private:
 
     [[nodiscard]] bool load_content() {
         set_loading_phase(ContentLoadPhase::parsing_chart);
+        streaming_attempted_ = false;
+        streaming_fallback_error_.clear();
+        source_chart_bytes_ = 0U;
+        if (!options_.chart_path.empty()) {
+            std::error_code source_size_error;
+            const auto source_size = std::filesystem::file_size(
+                options_.chart_path, source_size_error
+            );
+            if (!source_size_error) {
+                source_chart_bytes_ = source_size
+                        > static_cast<std::uintmax_t>(
+                            std::numeric_limits<std::uint64_t>::max()
+                        )
+                    ? std::numeric_limits<std::uint64_t>::max()
+                    : static_cast<std::uint64_t>(source_size);
+            }
+        }
 
         // MIDI/PFM are source/interchange formats that compile straight to
         // the bounded PFC1 runtime. They deliberately bypass the materialized
@@ -14231,6 +14283,9 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
     std::size_t printed_lua_diagnostics_{};
 #endif
     std::string last_error_;
+    std::string streaming_fallback_error_;
+    std::uint64_t source_chart_bytes_{};
+    bool streaming_attempted_{};
     std::string offline_frame_error_;
     std::string post_effect_message_;
     std::uint64_t last_frame_ns_{};
