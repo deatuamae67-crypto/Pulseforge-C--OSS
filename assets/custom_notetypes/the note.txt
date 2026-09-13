@@ -1,0 +1,4 @@
+# Native fallback for the real Complete-corpus custom note type.
+# An active mod can still override this exact ID from its own root.
+texture = BULLET
+missHealth = 0.6

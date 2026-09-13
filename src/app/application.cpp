@@ -3470,6 +3470,7 @@ private:
         const auto parsed_note_skin = parse_note_skin_selection(
             options_.settings.visual.note_skin_selection
         );
+        manual_note_skin_override_active_ = !parsed_note_skin.chart_default;
         // An explicit user note-skin choice is authoritative. Quality and
         // performance profiles may simplify everything around the notes, while
         // dense LOD represents that same skin with bounded textured batches.
@@ -6042,6 +6043,11 @@ if (const auto selected_skin = resolve_note_skin_selection(
         bool& custom_texture_missing
     ) const noexcept {
         custom_texture_missing = false;
+        if (manual_note_skin_override_active_) {
+            // An explicit user skin is visually authoritative. Gameplay
+            // behavior for the note kind remains installed separately.
+            return detail::runtime_note_skin_default_profile;
+        }
         const auto* state = script_note_visual_state(owner, kind);
         if (state == nullptr || state->texture.empty()) {
             return detail::runtime_note_skin_default_profile;
@@ -14221,6 +14227,7 @@ if (name == "setHealthBarColors" || name == "setTimeBarColors") {
     double minimum_note_scroll_multiplier_{1.0};
     bool note_scroll_multiplier_active_{};
     bool note_sustain_disable_policy_active_{};
+    bool manual_note_skin_override_active_{};
     std::array<
         std::map<std::string, ScriptNoteVisualState, std::less<>>,
         3U

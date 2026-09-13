@@ -1,0 +1,3 @@
+-- Native identity placeholder. The Complete corpus ships this custom
+-- note-type file empty; preserving the ID intentionally adds no
+-- gameplay or visual behavior.
