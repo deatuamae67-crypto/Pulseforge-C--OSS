@@ -2676,6 +2676,27 @@ private:
         }
         StreamingChartCacheOptions cache_options;
         cache_options.cache_root = options_.large_chart_cache_root;
+#if defined(__ANDROID__)
+        // The interactive gameplay path must not fall back to the process CWD
+        // on Android. The launcher/editor already use SDL's writable per-app
+        // storage, but gameplay owns a separate cache preparation path.
+        if (cache_options.cache_root.empty()) {
+            if (char* preference = SDL_GetPrefPath("PulseForge", "PulseForge");
+                preference != nullptr) {
+                cache_options.cache_root = std::filesystem::path(preference)
+                    / "cache" / "large-charts";
+                SDL_free(preference);
+            } else {
+                std::error_code temporary_error;
+                const auto temporary_root =
+                    std::filesystem::temp_directory_path(temporary_error);
+                if (!temporary_error) {
+                    cache_options.cache_root = temporary_root
+                        / "pulseforge" / "large-charts";
+                }
+            }
+        }
+#endif
         cache_options.difficulty = options_.chart_options.difficulty;
         cache_options.difficulty_explicit =
             options_.chart_options.difficulty_explicit;
