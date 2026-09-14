@@ -1,11 +1,11 @@
-[CmdletBinding()]
+[CmdletBinding()
 param()
 
 $ErrorActionPreference = 'Stop'
 $url = $env:PULSEFORGE_DISCORD_SDK_ARCHIVE_URL
 $require = $env:PULSEFORGE_DISCORD_SDK_REQUIRE
 if ([string]::IsNullOrWhiteSpace($require)) {
-    $require = 'all'
+    $require = 'windows'
 }
 if ($require -notin @('windows', 'linux', 'macos', 'android', 'all')) {
     throw 'PULSEFORGE_DISCORD_SDK_REQUIRE must be windows, linux, macos, android or all.'
