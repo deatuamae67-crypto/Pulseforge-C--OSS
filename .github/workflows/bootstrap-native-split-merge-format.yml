@@ -1,0 +1,35 @@
+name: Bootstrap split-chart launcher formatting cleanup
+
+on:
+  push:
+    branches: [feat/native-split-chart-merge-ui]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: feat/native-split-chart-merge-ui
+      - name: Normalize launcher dispatch indentation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/launcher.cpp')
+          s = p.read_text(encoding='utf-8')
+          old = '''        if (*selected == 3U) {\n    const auto merged = run_split_chart_merge_workflow(menu, options);\n    if (merged.quit_requested) {\n        result.quit_requested = true;\n        return result;\n    }\n    result.content_changed = result.content_changed\n        || merged.content_changed;\n    continue;\n}\nEditorUiOutcome outcome;\n// Editor timelines and descriptor workspaces must remain silent so\n'''
+          new = '''        if (*selected == 3U) {\n            const auto merged = run_split_chart_merge_workflow(menu, options);\n            if (merged.quit_requested) {\n                result.quit_requested = true;\n                return result;\n            }\n            result.content_changed = result.content_changed\n                || merged.content_changed;\n            continue;\n        }\n        EditorUiOutcome outcome;\n        // Editor timelines and descriptor workspaces must remain silent so\n'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one malformed dispatch block, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+          git diff --check
+          git config user.name 'PulseForge CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/app/launcher.cpp
+          git commit -m 'Normalize split-chart launcher dispatch formatting'
+          git push origin HEAD:feat/native-split-chart-merge-ui
