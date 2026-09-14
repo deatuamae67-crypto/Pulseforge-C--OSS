@@ -194,6 +194,7 @@ private:
 
 [[nodiscard]] std::span<const std::string_view> builtin_note_type_ids() noexcept;
 [[nodiscard]] std::span<const std::string_view> bundled_note_type_ids() noexcept;
+[[nodiscard]] std::span<const std::string_view> bundled_note_type_ids() noexcept;
 
 // Allocation-free compatibility classifier for import/hot paths. It accepts
 // `Hurt Note` plus historical hurt, hurt-note, hurt_note, and mine spellings
