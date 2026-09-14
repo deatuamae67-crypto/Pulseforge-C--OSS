@@ -60,6 +60,17 @@ tasks.register('preparePulseForgeAssets', Sync) {
         include 'ui/**'
         include 'shaders/**'
         include 'menu/**'
+        // Engine-bundled compatibility NoteTypes must survive Android's
+        // intentionally selective asset staging. Their IDs are also exposed by
+        // the editor catalogue, so package the matching definitions/visuals.
+        include 'custom_notetypes/**'
+        include 'images/BULLET.png'
+        include 'images/BULLET.xml'
+        include 'images/HURTNOTE_assets.png'
+        include 'images/HURTNOTE_assets.xml'
+        include 'images/HURTnoteSplashes.png'
+        include 'images/HURTnoteSplashes.xml'
+        include 'sounds/gunshot.ogg'
         include 'intro/README.md'
         include 'intro/watch-dogs-boot-FiL0S0V.mp4'
         include 'intro/watch-dogs-decoded/**'
