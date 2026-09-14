@@ -1,5 +1,6 @@
 #include "pulseforge/editor_choices.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -26,6 +27,40 @@ void write_file(const std::filesystem::path& path) {
     require(static_cast<bool>(stream), "fixture file opens");
     stream << "fixture";
     require(static_cast<bool>(stream), "fixture file is written");
+}
+
+[[nodiscard]] bool contains_value(
+    const std::vector<std::string>& values,
+    const std::string_view expected
+) {
+    return std::ranges::any_of(values, [&](const std::string& value) {
+        return value == expected;
+    });
+}
+
+void require_all_builtin_note_types(
+    const pulseforge::ChartEditorChoiceCatalog& choices,
+    const std::string_view context
+) {
+    for (const auto id : pulseforge::builtin_note_type_ids()) {
+        require(
+            contains_value(choices.note_types, id),
+            std::string(context) + ": missing native NoteType " + std::string(id)
+        );
+    }
+}
+
+void test_native_note_type_catalog_invariant() {
+    const pulseforge::ChartEditorChoiceCatalog choices;
+    const auto ids = pulseforge::builtin_note_type_ids();
+    require(
+        choices.note_types.size() == ids.size(),
+        "fresh editor catalog contains exactly the native NoteTypes"
+    );
+    require_all_builtin_note_types(
+        choices,
+        "fresh catalog is immediately usable without filesystem discovery"
+    );
 }
 
 void test_filter_and_ranking() {
@@ -141,9 +176,17 @@ void test_choice_discovery() {
             choices.stages == std::vector<std::string>{"lua-stage", "philly"},
             "JSON and static Lua stages are discovered"
         );
+        require_all_builtin_note_types(
+            choices,
+            "filesystem discovery preserves native NoteTypes"
+        );
         require(
-            choices.note_types == std::vector<std::string>{"Hurt Note", "Txt Note"},
-            "filesystem discovery contributes only mod-provided note types"
+            contains_value(choices.note_types, "Txt Note"),
+            "filesystem discovery appends mod-provided NoteTypes"
+        );
+        require(
+            choices.note_types.size() == pulseforge::builtin_note_type_ids().size() + 1U,
+            "filesystem NoteTypes are de-duplicated against native IDs"
         );
         require(
             choices.event_names == std::vector<std::string>{"Camera Flash"},
@@ -166,8 +209,12 @@ void test_choice_discovery() {
         const auto bounded = pulseforge::discover_chart_editor_choices(roots, shallow);
         require(bounded.scripts.empty(), "depth limit bounds recursive discovery");
         require(
-            bounded.note_types.empty(),
-            "native note types are core registry entries, not filesystem discoveries"
+            bounded.note_types.size() == pulseforge::builtin_note_type_ids().size(),
+            "native NoteTypes remain available when discovery is depth-bounded"
+        );
+        require_all_builtin_note_types(
+            bounded,
+            "bounded discovery preserves native NoteTypes"
         );
 
         const auto directory_only_root = root / "directory-budget";
@@ -185,6 +232,10 @@ void test_choice_discovery() {
             entry_limited.characters.empty(),
             "directory entries consume the global synchronous scan budget"
         );
+        require_all_builtin_note_types(
+            entry_limited,
+            "entry-budget exhaustion cannot remove native NoteTypes"
+        );
     } catch (...) {
         std::error_code cleanup_error;
         std::filesystem::remove_all(root, cleanup_error);
@@ -198,6 +249,7 @@ void test_choice_discovery() {
 
 int main() {
     try {
+        test_native_note_type_catalog_invariant();
         test_filter_and_ranking();
         test_navigation_and_viewport();
         test_choice_discovery();
