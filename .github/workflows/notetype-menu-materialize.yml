@@ -1,0 +1,127 @@
+name: Native NoteType menu materializer
+
+on:
+  push:
+    branches:
+      - fix/native-notetype-menu-discord-release
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: ${{ !contains(github.event.head_commit.message, '[notetype-menu-materialized]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: fix/native-notetype-menu-discord-release
+          fetch-depth: 0
+
+      - name: Patch bundled NoteType catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def one(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              print(f'{path}: {count} anchor(s)')
+              if count != 1:
+                  raise SystemExit(f'expected exactly one anchor in {path}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          one(
+              'include/pulseforge/note_types.hpp',
+              '[[nodiscard]] std::span<const std::string_view> builtin_note_type_ids() noexcept;\n',
+              '[[nodiscard]] std::span<const std::string_view> builtin_note_type_ids() noexcept;\n'
+              '[[nodiscard]] std::span<const std::string_view> bundled_note_type_ids() noexcept;\n'
+          )
+
+          one(
+              'src/core/note_types.cpp',
+              '};\n\n[[nodiscard]] constexpr bool ascii_space(const char value) noexcept {',
+              '};\n\n'
+              '// Engine-shipped compatibility types. These remain custom/overrideable\n'
+              '// in NoteTypeRegistry, but are always visible in editor menus.\n'
+              'constexpr std::array<std::string_view, 3U> bundled_ids{\n'
+              '    "the note",\n'
+              '    "3rd Player",\n'
+              '    "5th Player",\n'
+              '};\n\n'
+              '[[nodiscard]] constexpr bool ascii_space(const char value) noexcept {'
+          )
+
+          one(
+              'src/core/note_types.cpp',
+              'std::span<const std::string_view> builtin_note_type_ids() noexcept {\n'
+              '    return builtin_ids;\n'
+              '}\n',
+              'std::span<const std::string_view> builtin_note_type_ids() noexcept {\n'
+              '    return builtin_ids;\n'
+              '}\n\n'
+              'std::span<const std::string_view> bundled_note_type_ids() noexcept {\n'
+              '    return bundled_ids;\n'
+              '}\n'
+          )
+
+          one(
+              'src/app/editor_ui.cpp',
+              '    for (const auto id : builtin_note_type_ids()) {\n'
+              '        builtins.note_types.emplace_back(id);\n'
+              '    }\n',
+              '    for (const auto id : builtin_note_type_ids()) {\n'
+              '        builtins.note_types.emplace_back(id);\n'
+              '    }\n'
+              '    for (const auto id : bundled_note_type_ids()) {\n'
+              '        builtins.note_types.emplace_back(id);\n'
+              '    }\n'
+          )
+
+          one(
+              'src/app/streaming_editor_ui.cpp',
+              '    for (const auto id : builtin_note_type_ids()) {\n'
+              '        choices.note_types.emplace_back(id);\n'
+              '    }\n',
+              '    for (const auto id : builtin_note_type_ids()) {\n'
+              '        choices.note_types.emplace_back(id);\n'
+              '    }\n'
+              '    for (const auto id : bundled_note_type_ids()) {\n'
+              '        choices.note_types.emplace_back(id);\n'
+              '    }\n'
+          )
+
+          one(
+              'tests/note_types_test.cpp',
+              '    require(ids.back() == "GF Cross Fade", "JS cross-fade built-in is exposed");\n',
+              '    require(ids.back() == "GF Cross Fade", "JS cross-fade built-in is exposed");\n\n'
+              '    const auto bundled = pulseforge::bundled_note_type_ids();\n'
+              '    require(bundled.size() == 3U, "engine-bundled custom note types are exposed");\n'
+              '    require(bundled[0] == "the note", "the note is a native editor choice");\n'
+              '    require(bundled[1] == "3rd Player", "3rd Player is a native editor choice");\n'
+              '    require(bundled[2] == "5th Player", "5th Player is a native editor choice");\n'
+              '    require(\n'
+              '        registry.find("the note") == nullptr,\n'
+              '        "bundled custom note types remain overrideable"\n'
+              '    );\n'
+          )
+          PY
+
+          grep -q 'bundled_note_type_ids' include/pulseforge/note_types.hpp
+          grep -q '"the note"' src/core/note_types.cpp
+          grep -q 'bundled_note_type_ids' src/app/editor_ui.cpp
+          grep -q 'bundled_note_type_ids' src/app/streaming_editor_ui.cpp
+
+      - name: Commit NoteType menu integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add include/pulseforge/note_types.hpp src/core/note_types.cpp \
+            src/app/editor_ui.cpp src/app/streaming_editor_ui.cpp tests/note_types_test.cpp
+          git commit -m 'fix: expose bundled note types in editor menus [notetype-menu-materialized]'
+          git push origin HEAD:fix/native-notetype-menu-discord-release
