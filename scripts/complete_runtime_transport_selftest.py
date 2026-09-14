@@ -37,23 +37,27 @@ def main() -> int:
         "install_complete_runtime_staging",
     ):
         require(transport, needle)
+    locale = (ROOT / "src/app/system_locale.hpp").read_text(encoding="utf-8")
     for needle in (
-        "Install the mods now?",
-        '"Yes"',
-        '"No"',
+        "complete_ui_strings()",
         "PULSEFORGE_COMPLETE_MANIFEST",
         "PULSEFORGE_MOD_ROOT",
         "run_progress_window",
     ):
         require(gate, needle)
     for needle in (
+        "SDL_GetPreferredLocales",
+        "SystemUiLanguage::portuguese",
+        "SystemUiLanguage::english",
+        "SystemUiLanguage::spanish",
+        "SystemUiLanguage::french",
+        "SystemUiLanguage::german",
+        "SystemUiLanguage::japanese",
+        "SystemUiLanguage::chinese",
         "Pretende instalar os mods agora?",
-        '"Sim"',
-        '"Não"',
-        "ficheiros",
-        "a preparar instalação",
+        "Install the mods now?",
     ):
-        forbid(gate, needle)
+        require(locale, needle)
     for needle in (
         "HttpURLConnection",
         "CookieManager",

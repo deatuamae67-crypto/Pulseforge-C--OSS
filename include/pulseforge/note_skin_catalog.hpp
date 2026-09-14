@@ -20,6 +20,7 @@ struct NoteSkinCatalogEntry {
     std::string style;
     std::filesystem::path source_root;
     bool pixel{};
+    bool builtin{};
 };
 
 struct ParsedNoteSkinSelection {
@@ -246,8 +247,8 @@ inline void append_mod_children(
     const std::filesystem::path& source_root
 ) {
     const auto name = path_utf8(source_root.filename());
-    if (name.empty()) return "content root";
-    if (lower_ascii(name) == "assets") return "built-in assets";
+    if (name.empty()) return "PulseForge native";
+    if (lower_ascii(name) == "assets") return "PulseForge native";
     return name;
 }
 
@@ -289,12 +290,17 @@ inline void add_entry(
     entry.selection = make_selection(pixel, style, source_root);
     entry.display_name = pretty_name(style, pixel)
         + "  //  " + source_label(source_root);
+    entry.builtin = false;
 
     if (std::none_of(
             entries.begin(),
             entries.end(),
             [&](const NoteSkinCatalogEntry& existing) {
-                return existing.selection == entry.selection;
+                // A native style is authoritative: do not duplicate it merely
+                // because a mod ships an atlas with the same logical name.
+                return existing.selection == entry.selection
+                    || (existing.builtin && existing.pixel == entry.pixel
+                        && equals_ascii_insensitive(existing.style, entry.style));
             }
         )) {
         entries.push_back(std::move(entry));
@@ -482,7 +488,27 @@ inline void scan_pixel_directory(
 
     const auto install_roots = expand_install_roots(roots);
     std::vector<NoteSkinCatalogEntry> entries;
-    entries.reserve(64U);
+    entries.reserve(68U);
+
+    // Native engine-owned logical skins. These exist even when the platform
+    // cannot enumerate packaged assets (Android) and are kept ahead of mod
+    // discovery. BULLET and HURTNOTE_assets are shipped by the engine itself.
+    entries.push_back({
+        "atlas:NOTE_assets", "Classic  //  PulseForge native",
+        "NOTE_assets", {}, false, true,
+    });
+    entries.push_back({
+        "pixel:arrows-pixels", "Pixel  //  PulseForge native",
+        "arrows-pixels", {}, true, true,
+    });
+    entries.push_back({
+        "atlas:HURTNOTE_assets", "HURTNOTE assets  //  PulseForge native",
+        "HURTNOTE_assets", {}, false, true,
+    });
+    entries.push_back({
+        "atlas:BULLET", "BULLET  //  PulseForge native",
+        "BULLET", {}, false, true,
+    });
     std::size_t examined_files{};
 
     constexpr std::string_view atlas_directories[]{

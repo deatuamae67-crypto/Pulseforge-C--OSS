@@ -19,9 +19,12 @@ void require(const bool condition, const std::string_view message) {
 void test_builtin_semantics() {
     pulseforge::NoteTypeRegistry registry;
     const auto ids = pulseforge::builtin_note_type_ids();
-    require(ids.size() == 8U, "all editor-compatible built-ins are exposed");
+    require(ids.size() == 11U, "all editor-compatible built-ins are exposed");
     require(ids.front() == "normal", "normal is the canonical fallback");
-    require(ids.back() == "GF Cross Fade", "JS cross-fade built-in is exposed");
+    require(ids[7U] == "GF Cross Fade", "JS cross-fade built-in is exposed");
+    require(ids[8U] == "3rd Player", "third-player native identity is exposed");
+    require(ids[9U] == "5th Player", "fifth-player native identity is exposed");
+    require(ids.back() == "the note", "Complete bullet note is a native built-in");
 
     const auto alt = registry.resolve("Alt Animation");
     require(alt.behavior().animation.suffix == "-alt", "alt animation adds suffix");
@@ -72,6 +75,32 @@ void test_builtin_semantics() {
         gf_cross_fade.behavior().cross_fade
             == pulseforge::NoteCrossFadeTarget::girlfriend,
         "GF Cross Fade targets the girlfriend"
+    );
+
+    const auto third = registry.resolve("3rd Player");
+    require(!third.used_fallback, "3rd Player is a native identity type");
+    require(third.behavior().builtin, "3rd Player cannot be replaced by a mod");
+    const auto fifth = registry.resolve("5th Player");
+    require(!fifth.used_fallback, "5th Player is a native identity type");
+    require(fifth.behavior().builtin, "5th Player cannot be replaced by a mod");
+    const auto bullet = registry.resolve("the note");
+    require(!bullet.used_fallback, "the note is a native built-in");
+    require(bullet.behavior().builtin, "the note cannot be replaced by a mod");
+    require(bullet.behavior().health.miss == 0.6, "the note keeps its native miss penalty");
+    require(bullet.behavior().visual.texture_id == "BULLET", "the note uses native BULLET skin");
+    require(bullet.behavior().feedback.hitsound_enabled, "the note enables its native gunshot");
+    require(bullet.behavior().feedback.hitsound_id == "gunshot", "the note uses native gunshot id");
+
+    pulseforge::NoteTypeDefinition attempted_override;
+    attempted_override.id = "the note";
+    std::string override_error;
+    require(
+        !registry.register_definition(
+            std::move(attempted_override),
+            pulseforge::NoteTypeReplacePolicy::replace_custom,
+            &override_error
+        ),
+        "mods cannot replace a native NoteType"
     );
 }
 
