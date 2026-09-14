@@ -1,0 +1,170 @@
+name: Discord release materializer
+
+on:
+  push:
+    branches:
+      - fix/native-notetype-menu-discord-release
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: ${{ !contains(github.event.head_commit.message, '[discord-release-materialized]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: fix/native-notetype-menu-discord-release
+          fetch-depth: 0
+
+      - name: Patch all distributed engine release workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflows = [
+              Path('.github/workflows/release-artifacts.yml'),
+              Path('.github/workflows/release-complete-runtimes.yml'),
+              Path('.github/workflows/complete-testing-draft.yml'),
+          ]
+
+          def replace_one(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{label}: expected 1 occurrence, found {count}')
+              return text.replace(old, new, 1)
+
+          for path in workflows:
+              text = path.read_text(encoding='utf-8')
+              original = text
+
+              # Make future changes to the private-SDK hydration contract rebuild releases.
+              if "      - 'scripts/prepare-discord-release-sdk.sh'\n" not in text:
+                  trigger_candidates = [
+                      "      - 'third_party/**'\n",
+                      "      - 'platform/android/**'\n",
+                      "      - 'platform/android/app/build.gradle'\n",
+                  ]
+                  for anchor in trigger_candidates:
+                      if anchor in text:
+                          text = text.replace(
+                              anchor,
+                              anchor
+                              + "      - 'scripts/prepare-discord-release-sdk.sh'\n"
+                              + "      - 'scripts/prepare-discord-release-sdk.ps1'\n",
+                              1,
+                          )
+                          break
+
+              # Supply the authenticated archive URL without committing or publishing SDK bytes.
+              env_anchor = 'env:\n'
+              if 'PULSEFORGE_DISCORD_SDK_ARCHIVE_URL: ${{ secrets.PULSEFORGE_DISCORD_SDK_ARCHIVE_URL }}' not in text:
+                  if env_anchor not in text:
+                      raise RuntimeError(f'{path}: workflow env block missing')
+                  text = text.replace(
+                      env_anchor,
+                      env_anchor
+                      + '  PULSEFORGE_DISCORD_SDK_ARCHIVE_URL: ${{ secrets.PULSEFORGE_DISCORD_SDK_ARCHIVE_URL }}\n',
+                      1,
+                  )
+
+              # Windows: stage authorized SDK, then fail closed if CMake cannot activate it.
+              windows = '          cmake --preset windows-msvc\n'
+              if windows in text:
+                  text = replace_one(
+                      text,
+                      windows,
+                      "          & scripts/prepare-discord-release-sdk.ps1\n"
+                      "          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
+                      "          cmake --preset windows-msvc -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON\n",
+                      f'{path}: windows configure',
+                  )
+              elif 'cmake --preset windows-msvc -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON' not in text:
+                  raise RuntimeError(f'{path}: Windows release configure command missing')
+
+              # Linux and macOS: same release-only hydration and fail-closed configure.
+              linux = '          cmake --preset linux-release\n'
+              if linux in text:
+                  text = replace_one(
+                      text,
+                      linux,
+                      "          bash scripts/prepare-discord-release-sdk.sh\n"
+                      "          cmake --preset linux-release -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON\n",
+                      f'{path}: linux configure',
+                  )
+              elif 'cmake --preset linux-release -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON' not in text:
+                  raise RuntimeError(f'{path}: Linux release configure command missing')
+
+              mac = "          cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}'\n"
+              if mac in text:
+                  text = replace_one(
+                      text,
+                      mac,
+                      "          bash scripts/prepare-discord-release-sdk.sh\n"
+                      "          cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}' -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON\n",
+                      f'{path}: macOS configure',
+                  )
+              elif 'macos-release' in text and 'PULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON' not in text:
+                  raise RuntimeError(f'{path}: macOS release configure command missing')
+
+              # Android: stage the full SDK before Gradle. build.gradle discovers the
+              # AAR and itself turns PULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK on.
+              android = '          chmod +x platform/android/gradlew\n'
+              if android in text:
+                  # Some workflows contain exactly one Android build command; scope by
+                  # the chmod anchor, which is not present in desktop jobs.
+                  text = replace_one(
+                      text,
+                      android,
+                      "          bash scripts/prepare-discord-release-sdk.sh\n"
+                      "          chmod +x platform/android/gradlew\n",
+                      f'{path}: Android SDK stage',
+                  )
+              elif 'bash scripts/prepare-discord-release-sdk.sh\n          chmod +x platform/android/gradlew' not in text:
+                  raise RuntimeError(f'{path}: Android build anchor missing')
+
+              # Explicitly pass the production AAR/application ID to Gradle wherever
+              # the release command uses the shared external build root.
+              build_root = '            -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android" \\\n'
+              if build_root in text and 'PULSEFORGE_DISCORD_SDK_AAR=' not in text:
+                  text = text.replace(
+                      build_root,
+                      build_root
+                      + '            -PPULSEFORGE_DISCORD_SDK_AAR="$GITHUB_WORKSPACE/third_party/discord_social_sdk/android/discord_partner_sdk.aar" \\\n'
+                      + '            -PPULSEFORGE_DISCORD_APPLICATION_ID=1544144634832355429 \\\n',
+                      1,
+                  )
+
+              if text == original:
+                  raise RuntimeError(f'{path}: no changes made')
+              path.write_text(text, encoding='utf-8')
+              print(f'patched {path}')
+          PY
+
+          for f in \
+            .github/workflows/release-artifacts.yml \
+            .github/workflows/release-complete-runtimes.yml \
+            .github/workflows/complete-testing-draft.yml; do
+            grep -q 'PULSEFORGE_DISCORD_SDK_ARCHIVE_URL' "$f"
+            grep -q 'prepare-discord-release-sdk.ps1' "$f"
+            test "$(grep -c 'bash scripts/prepare-discord-release-sdk.sh' "$f")" -ge 3
+            grep -q 'windows-msvc -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON' "$f"
+            grep -q 'linux-release -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON' "$f"
+            grep -q 'macos-release.*PULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON' "$f"
+          done
+          bash -n scripts/prepare-discord-release-sdk.sh
+
+      - name: Commit Discord release integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/release-artifacts.yml \
+            .github/workflows/release-complete-runtimes.yml \
+            .github/workflows/complete-testing-draft.yml
+          git commit -m 'build: require Discord Social SDK in release engines [discord-release-materialized]'
+          git push origin HEAD:fix/native-notetype-menu-discord-release
