@@ -23,6 +23,16 @@ void test_builtin_semantics() {
     require(ids.front() == "normal", "normal is the canonical fallback");
     require(ids.back() == "GF Cross Fade", "JS cross-fade built-in is exposed");
 
+    const auto bundled = pulseforge::bundled_note_type_ids();
+    require(bundled.size() == 3U, "engine-bundled custom note types are exposed");
+    require(bundled[0] == "the note", "the note is a native editor choice");
+    require(bundled[1] == "3rd Player", "3rd Player is a native editor choice");
+    require(bundled[2] == "5th Player", "5th Player is a native editor choice");
+    require(
+        registry.find("the note") == nullptr,
+        "bundled custom note types remain overrideable"
+    );
+
     const auto alt = registry.resolve("Alt Animation");
     require(alt.behavior().animation.suffix == "-alt", "alt animation adds suffix");
     const auto gf = registry.resolve("GF Sing");

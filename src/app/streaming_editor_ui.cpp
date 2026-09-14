@@ -195,6 +195,9 @@ void text(
     for (const auto id : builtin_note_type_ids()) {
         choices.note_types.emplace_back(id);
     }
+    for (const auto id : bundled_note_type_ids()) {
+        choices.note_types.emplace_back(id);
+    }
     for (const auto& value : editor.note_kinds()) {
         choices.note_types.push_back(value);
     }
