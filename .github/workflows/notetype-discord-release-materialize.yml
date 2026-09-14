@@ -1,0 +1,222 @@
+name: Native NoteType and Discord release materializer
+
+on:
+  push:
+    branches:
+      - fix/native-notetype-menu-discord-release
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: ${{ !contains(github.event.head_commit.message, '[notetype-discord-materialized]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: fix/native-notetype-menu-discord-release
+          fetch-depth: 0
+
+      - name: Patch native NoteType catalog and Discord-enabled release pipeline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'anchor missing in {path}: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+              p.write_text(text, encoding='utf-8')
+
+          # Keep engine-shipped/custom note types separate from immutable built-ins.
+          # This makes them always visible in editor menus while preserving active-mod
+          # override semantics in NoteTypeRegistry.
+          replace_once(
+              'include/pulseforge/note_types.hpp',
+              '[[nodiscard]] std::span<const std::string_view> builtin_note_type_ids() noexcept;\n',
+              '[[nodiscard]] std::span<const std::string_view> builtin_note_type_ids() noexcept;\n'
+              '[[nodiscard]] std::span<const std::string_view> bundled_note_type_ids() noexcept;\n'
+          )
+
+          replace_once(
+              'src/core/note_types.cpp',
+              'constexpr std::array<std::string_view, 8U> builtin_ids{\n'
+              '    "normal",\n'
+              '    "Alt Animation",\n'
+              '    "GF Sing",\n'
+              '    "Hurt Note",\n'
+              '    "Hey!",\n'
+              '    "No Animation",\n'
+              '    "Cross Fade",\n'
+              '    "GF Cross Fade",\n'
+              '};\n',
+              'constexpr std::array<std::string_view, 8U> builtin_ids{\n'
+              '    "normal",\n'
+              '    "Alt Animation",\n'
+              '    "GF Sing",\n'
+              '    "Hurt Note",\n'
+              '    "Hey!",\n'
+              '    "No Animation",\n'
+              '    "Cross Fade",\n'
+              '    "GF Cross Fade",\n'
+              '};\n\n'
+              '// Engine-shipped compatibility types. These are editor-visible native\n'
+              '// choices but intentionally remain custom/overrideable in the registry.\n'
+              'constexpr std::array<std::string_view, 3U> bundled_ids{\n'
+              '    "the note",\n'
+              '    "3rd Player",\n'
+              '    "5th Player",\n'
+              '};\n'
+          )
+
+          replace_once(
+              'src/core/note_types.cpp',
+              'std::span<const std::string_view> builtin_note_type_ids() noexcept {\n'
+              '    return builtin_ids;\n'
+              '}\n',
+              'std::span<const std::string_view> builtin_note_type_ids() noexcept {\n'
+              '    return builtin_ids;\n'
+              '}\n\n'
+              'std::span<const std::string_view> bundled_note_type_ids() noexcept {\n'
+              '    return bundled_ids;\n'
+              '}\n'
+          )
+
+          replace_once(
+              'src/app/editor_ui.cpp',
+              '    for (const auto id : builtin_note_type_ids()) {\n'
+              '        builtins.note_types.emplace_back(id);\n'
+              '    }\n',
+              '    for (const auto id : builtin_note_type_ids()) {\n'
+              '        builtins.note_types.emplace_back(id);\n'
+              '    }\n'
+              '    for (const auto id : bundled_note_type_ids()) {\n'
+              '        builtins.note_types.emplace_back(id);\n'
+              '    }\n'
+          )
+
+          replace_once(
+              'src/app/streaming_editor_ui.cpp',
+              '    for (const auto id : builtin_note_type_ids()) {\n'
+              '        choices.note_types.emplace_back(id);\n'
+              '    }\n',
+              '    for (const auto id : builtin_note_type_ids()) {\n'
+              '        choices.note_types.emplace_back(id);\n'
+              '    }\n'
+              '    for (const auto id : bundled_note_type_ids()) {\n'
+              '        choices.note_types.emplace_back(id);\n'
+              '    }\n'
+          )
+
+          replace_once(
+              'tests/note_types_test.cpp',
+              '    require(ids.back() == "GF Cross Fade", "JS cross-fade built-in is exposed");\n',
+              '    require(ids.back() == "GF Cross Fade", "JS cross-fade built-in is exposed");\n\n'
+              '    const auto bundled = pulseforge::bundled_note_type_ids();\n'
+              '    require(bundled.size() == 3U, "engine-bundled custom note types are exposed");\n'
+              '    require(bundled[0] == "the note", "the note is a native editor choice");\n'
+              '    require(bundled[1] == "3rd Player", "3rd Player is a native editor choice");\n'
+              '    require(bundled[2] == "5th Player", "5th Player is a native editor choice");\n'
+              '    require(\n'
+              '        registry.find("the note") == nullptr,\n'
+              '        "bundled custom note types remain overrideable rather than immutable built-ins"\n'
+              '    );\n'
+          )
+
+          workflow_path = Path('.github/workflows/complete-testing-draft.yml')
+          workflow = workflow_path.read_text(encoding='utf-8')
+
+          # Make source changes to this release contract trigger its validation job.
+          workflow = workflow.replace(
+              "      - 'platform/android/app/build.gradle'\n",
+              "      - 'platform/android/app/build.gradle'\n      - 'scripts/prepare-discord-release-sdk.sh'\n",
+              1,
+          )
+          workflow = workflow.replace(
+              "      - 'scripts/complete_release_package.sh'\n",
+              "      - 'scripts/complete_release_package.sh'\n      - 'scripts/prepare-discord-release-sdk.sh'\n",
+              1,
+          )
+
+          # Validate the release-only SDK hydration contract without exposing secrets.
+          anchor = '          bash -n "$package"\n'
+          if anchor not in workflow:
+              raise SystemExit('release validation anchor missing')
+          workflow = workflow.replace(
+              anchor,
+              anchor
+              + '          bash -n scripts/prepare-discord-release-sdk.sh\n'
+              + "          grep -Fq 'PULSEFORGE_DISCORD_SDK_ARCHIVE_URL' \"$workflow\"\n"
+              + "          grep -Fq 'PULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON' \"$workflow\"\n",
+              1,
+          )
+
+          # Hydrate the authorized private SDK only in the push/main build-stage.
+          anchor = "      - name: Inject Complete runtime manifest into Android source assets\n"
+          if anchor not in workflow:
+              raise SystemExit('Android manifest injection anchor missing')
+          sdk_step = '''      - name: Stage authorized Discord Social SDK for release\n        shell: bash\n        env:\n          PULSEFORGE_DISCORD_SDK_ARCHIVE_URL: ${{ secrets.PULSEFORGE_DISCORD_SDK_ARCHIVE_URL }}\n        run: |\n          set -euo pipefail\n          bash scripts/prepare-discord-release-sdk.sh\n\n'''
+          workflow = workflow.replace(anchor, sdk_step + anchor, 1)
+
+          # Desktop releases must fail closed if SDK activation is lost. Android's
+          # Gradle integration already switches REQUIRE on when the staged AAR exists.
+          replacements = {
+              '          cmake --preset windows-msvc\n':
+                  '          cmake --preset windows-msvc -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON\n',
+              '          cmake --preset linux-release\n':
+                  '          cmake --preset linux-release -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON\n',
+              "          cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}'\n":
+                  "          cmake --preset macos-release -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}' -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON\n",
+          }
+          for old, new in replacements.items():
+              if workflow.count(old) != 1:
+                  raise SystemExit(f'unexpected release configure anchor count for {old!r}: {workflow.count(old)}')
+              workflow = workflow.replace(old, new, 1)
+
+          # Pin the Android build explicitly to the staged production AAR and app ID.
+          android_anchor = '              -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android" \\\n              :app:assembleRelease; then\n'
+          if android_anchor not in workflow:
+              raise SystemExit('Android Gradle release anchor missing')
+          workflow = workflow.replace(
+              android_anchor,
+              '              -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android" \\\n'
+              '              -PPULSEFORGE_DISCORD_SDK_AAR="$GITHUB_WORKSPACE/third_party/discord_social_sdk/android/discord_partner_sdk.aar" \\\n'
+              '              -PPULSEFORGE_DISCORD_APPLICATION_ID=1544144634832355429 \\\n'
+              '              :app:assembleRelease; then\n',
+              1,
+          )
+
+          workflow_path.write_text(workflow, encoding='utf-8')
+          PY
+
+          # Static guards before committing.
+          grep -q 'bundled_note_type_ids' include/pulseforge/note_types.hpp
+          grep -q '"the note"' src/core/note_types.cpp
+          grep -q 'bundled_note_type_ids' src/app/editor_ui.cpp
+          grep -q 'bundled_note_type_ids' src/app/streaming_editor_ui.cpp
+          grep -q 'PULSEFORGE_DISCORD_SDK_ARCHIVE_URL' .github/workflows/complete-testing-draft.yml
+          grep -q 'PULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON' .github/workflows/complete-testing-draft.yml
+          bash -n scripts/prepare-discord-release-sdk.sh
+
+      - name: Commit materialized changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add include/pulseforge/note_types.hpp src/core/note_types.cpp \
+            src/app/editor_ui.cpp src/app/streaming_editor_ui.cpp \
+            tests/note_types_test.cpp .github/workflows/complete-testing-draft.yml \
+            scripts/prepare-discord-release-sdk.sh
+          if git diff --cached --quiet; then
+            echo 'No materialized changes.'
+            exit 0
+          fi
+          git commit -m 'fix: expose native note types and require Discord SDK releases [notetype-discord-materialized]'
+          git push origin HEAD:fix/native-notetype-menu-discord-release
