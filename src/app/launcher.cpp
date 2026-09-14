@@ -20,6 +20,7 @@
 #include "pulseforge/note_skin_catalog.hpp"
 #include "pulseforge/packed_chart.hpp"
 #include "pulseforge/streaming_chart_importer.hpp"
+#include "pulseforge/split_chart_merger.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -3827,6 +3828,412 @@ void draw_autochart_progress(
     }
 }
 
+
+struct SplitChartFileDialogState final {
+    std::mutex mutex;
+    std::vector<std::filesystem::path> selected;
+    std::string error;
+    std::atomic<bool> complete{};
+};
+
+void SDLCALL split_chart_file_dialog_callback(
+    void* const userdata,
+    const char* const* file_list,
+    const int filter
+) {
+    static_cast<void>(filter);
+    auto& state = *static_cast<SplitChartFileDialogState*>(userdata);
+    {
+        const std::scoped_lock lock(state.mutex);
+        if (file_list == nullptr) {
+            state.error = "The native file dialog failed";
+        } else {
+            for (std::size_t index = 0U; file_list[index] != nullptr; ++index) {
+                const std::string_view selected(file_list[index]);
+                std::u8string encoded;
+                encoded.reserve(selected.size());
+                for (const unsigned char character : selected) {
+                    encoded.push_back(static_cast<char8_t>(character));
+                }
+                state.selected.emplace_back(encoded);
+            }
+        }
+    }
+    state.complete.store(true, std::memory_order_release);
+}
+
+[[nodiscard]] std::vector<std::filesystem::path> choose_split_chart_sources(
+    MenuSession& menu,
+    std::string& error
+) {
+    constexpr std::array filters{
+        SDL_DialogFileFilter{"Psych/FNF JSON chart parts", "json"},
+    };
+    SplitChartFileDialogState state;
+    SDL_ShowOpenFileDialog(
+        split_chart_file_dialog_callback,
+        &state,
+        menu.window(),
+        filters.data(),
+        static_cast<int>(filters.size()),
+        nullptr,
+        true
+    );
+
+    while (!state.complete.load(std::memory_order_acquire)) {
+        menu.update_music();
+        SDL_Event event;
+        while (poll_mobile_event(&event)) {
+            if (event.type == SDL_EVENT_QUIT
+                || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+                menu.request_close();
+            }
+        }
+        draw_menu_background(
+            menu.renderer(),
+            SDL_GetTicks(),
+            menu.theme(),
+            SDL_Color{89, 220, 183, 255}
+        );
+        draw_text(
+            menu.renderer(), 94.0F, 270.0F,
+            "MERGE SPLIT CHARTS  //  SELECT JSON PARTS",
+            {126, 246, 220, 255}, 2.0F
+        );
+        draw_text(
+            menu.renderer(), 94.0F, 325.0F,
+            "Select every part of one split chart. Multi-select is enabled.",
+            {218, 214, 236, 255}, 1.35F
+        );
+        present_with_mobile_touch(menu.renderer());
+        SDL_Delay(8U);
+    }
+
+    const std::scoped_lock lock(state.mutex);
+    error = state.error;
+    return state.selected;
+}
+
+[[nodiscard]] std::vector<std::filesystem::path> naturalize_split_chart_sources(
+    const std::vector<std::filesystem::path>& selected,
+    std::string& error
+) {
+    if (selected.size() < 2U) {
+        error = "Select at least two JSON chart parts.";
+        return {};
+    }
+    const auto parent = selected.front().parent_path().lexically_normal();
+    for (const auto& path : selected) {
+        if (path.parent_path().lexically_normal() != parent) {
+            error = "All split chart parts must be selected from the same folder.";
+            return {};
+        }
+    }
+
+    const auto discovered = discover_split_chart_parts(parent);
+    std::vector<std::filesystem::path> ordered;
+    ordered.reserve(selected.size());
+    for (const auto& candidate : discovered) {
+        const auto found = std::ranges::find_if(
+            selected,
+            [&](const std::filesystem::path& chosen) {
+                return chosen.lexically_normal() == candidate.lexically_normal();
+            }
+        );
+        if (found != selected.end()) ordered.push_back(candidate);
+    }
+    if (ordered.size() != selected.size()) {
+        error = "One or more selected files are not regular .json chart files.";
+        return {};
+    }
+    return ordered;
+}
+
+[[nodiscard]] std::filesystem::path split_chart_merge_output(
+    const AppLaunchOptions& options,
+    const std::filesystem::path& first_input
+) {
+    auto stem = path_as_utf8(first_input.stem());
+    const auto lower = lower_ascii(stem);
+    if (const auto part = lower.find(" part "); part != std::string::npos) {
+        stem.resize(part);
+    }
+    stem = editor_slug(stem);
+    if (stem.empty()) stem = "merged-chart";
+    const auto root = choose_mods_root(options)
+        / "pulseforge-created" / "charts";
+    auto output = root / (stem + "-merged.json");
+    std::error_code exists_error;
+    for (std::uint32_t copy = 2U;
+         std::filesystem::exists(output, exists_error) && !exists_error
+             && copy < 100'000U;
+         ++copy) {
+        output = root / (
+            stem + "-merged-" + std::to_string(copy) + ".json"
+        );
+    }
+    return output;
+}
+
+struct SplitChartMergeWorkflowResult final {
+    bool quit_requested{};
+    bool content_changed{};
+};
+
+[[nodiscard]] SplitChartMergeResult run_native_split_chart_merge_screen(
+    MenuSession& menu,
+    const std::vector<std::filesystem::path>& inputs,
+    const std::filesystem::path& output,
+    const SplitChartMergeStrategy strategy
+) {
+    SplitChartMergeProgress progress;
+    SplitChartMergeOptions options;
+    std::atomic<bool> cancel{};
+    std::atomic<bool> done{};
+    options.strategy = strategy;
+    options.cancel = &cancel;
+    options.progress = &progress;
+    options.sort_memory_bytes = 128U * 1024U * 1024U;
+    options.maximum_open_runs = 32U;
+
+    SplitChartMergeResult result;
+    std::thread worker([&]() {
+        try {
+            result = merge_split_charts(inputs, output, options);
+        } catch (...) {
+            result.success = false;
+            result.error = "Unexpected exception while merging split charts";
+        }
+        done.store(true, std::memory_order_release);
+    });
+
+    while (!done.load(std::memory_order_acquire)) {
+        menu.update_music();
+        SDL_Event event;
+        while (poll_mobile_event(&event)) {
+            if (event.type == SDL_EVENT_QUIT
+                || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+                menu.request_close();
+                cancel.store(true, std::memory_order_release);
+            } else if (event.type == SDL_EVENT_KEY_DOWN) {
+                if (menu.handle_audio_action(event.key)) continue;
+                if (event.key.key == SDLK_ESCAPE) {
+                    cancel.store(true, std::memory_order_release);
+                }
+            } else if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+                static_cast<void>(menu.handle_audio_action(event.gbutton));
+            }
+        }
+
+        const auto total_bytes = progress.source_bytes_total.load(
+            std::memory_order_relaxed
+        );
+        const auto indexed_bytes = progress.source_bytes_indexed.load(
+            std::memory_order_relaxed
+        );
+        const auto sections_done = progress.sections_done.load(
+            std::memory_order_relaxed
+        );
+        const auto sections_total = progress.sections_total.load(
+            std::memory_order_relaxed
+        );
+        const auto notes = progress.notes_written.load(
+            std::memory_order_relaxed
+        );
+        std::string detail;
+        {
+            const std::scoped_lock lock(progress.detail_mutex);
+            detail = progress.detail;
+        }
+        const double indexing = total_bytes == 0U
+            ? 0.0
+            : std::clamp(
+                  static_cast<double>(indexed_bytes)
+                      / static_cast<double>(total_bytes),
+                  0.0,
+                  1.0
+              );
+        const double merging = sections_total == 0U
+            ? 0.0
+            : std::clamp(
+                  static_cast<double>(sections_done)
+                      / static_cast<double>(sections_total),
+                  0.0,
+                  1.0
+              );
+        const double fraction = sections_total == 0U
+            ? indexing * 0.35
+            : 0.35 + merging * 0.65;
+
+        menu.publish_presence(
+            RuntimeActivityKind::editor,
+            "Merging split chart JSON files",
+            {}, {}, 0U, fraction, notes
+        );
+        draw_menu_background(
+            menu.renderer(), SDL_GetTicks(), menu.theme(),
+            SDL_Color{89, 220, 183, 255}
+        );
+        draw_text(
+            menu.renderer(), 94.0F, 220.0F,
+            "MERGE SPLIT CHARTS",
+            {126, 246, 220, 255}, 2.0F
+        );
+        draw_text(
+            menu.renderer(), 94.0F, 285.0F,
+            detail.empty() ? "Preparing bounded merge..." : detail,
+            {218, 214, 236, 255}, 1.35F
+        );
+        draw_text(
+            menu.renderer(), 94.0F, 335.0F,
+            "FILES " + std::to_string(inputs.size())
+                + "  //  NOTES WRITTEN " + std::to_string(notes),
+            {218, 214, 236, 255}, 1.25F
+        );
+        draw_text(
+            menu.renderer(), 94.0F, 380.0F,
+            "SECTIONS " + std::to_string(sections_done)
+                + "/" + std::to_string(sections_total),
+            {218, 214, 236, 255}, 1.25F
+        );
+        draw_text(
+            menu.renderer(), 94.0F, 445.0F,
+            cancel.load(std::memory_order_relaxed)
+                ? "CANCELLING SAFELY..."
+                : "ESC cancels. Partial output is never published.",
+            {170, 181, 205, 255}, 1.15F
+        );
+        present_with_mobile_touch(menu.renderer());
+        SDL_Delay(8U);
+    }
+    worker.join();
+    return result;
+}
+
+[[nodiscard]] SplitChartMergeWorkflowResult run_split_chart_merge_workflow(
+    MenuSession& menu,
+    const AppLaunchOptions& options
+) {
+    SplitChartMergeWorkflowResult workflow;
+    std::string error;
+    const auto selected = choose_split_chart_sources(menu, error);
+    if (menu.close_requested()) {
+        workflow.quit_requested = true;
+        return workflow;
+    }
+    if (!error.empty()) {
+        const std::array<std::string, 1> back{"Back"};
+        static_cast<void>(browse_choices(
+            menu, "MERGE SPLIT CHARTS  //  FILE ERROR", back, error
+        ));
+        return workflow;
+    }
+    if (selected.empty()) return workflow;
+
+    auto inputs = naturalize_split_chart_sources(selected, error);
+    if (inputs.empty()) {
+        const std::array<std::string, 1> back{"Back"};
+        static_cast<void>(browse_choices(
+            menu, "MERGE SPLIT CHARTS  //  INVALID INPUT", back, error
+        ));
+        return workflow;
+    }
+
+    const std::array strategy_choices{
+        std::string{"Fast chronological merge  //  recommended"},
+        std::string{"Bounded external sort  //  accepts unsorted parts"},
+        std::string{"Cancel"},
+    };
+    const auto strategy_choice = browse_choices(
+        menu,
+        "MERGE SPLIT CHARTS  //  STRATEGY",
+        strategy_choices,
+        "Fast mode keeps roughly one note per input in RAM. External sort uses a 128 MiB run budget."
+    );
+    if (!strategy_choice.has_value() || *strategy_choice == 2U) {
+        return workflow;
+    }
+    auto strategy = *strategy_choice == 0U
+        ? SplitChartMergeStrategy::k_way
+        : SplitChartMergeStrategy::external_sort;
+
+    const auto output = split_chart_merge_output(options, inputs.front());
+    std::error_code directory_error;
+    std::filesystem::create_directories(output.parent_path(), directory_error);
+    if (directory_error) {
+        const std::array<std::string, 1> back{"Back"};
+        static_cast<void>(browse_choices(
+            menu,
+            "MERGE SPLIT CHARTS  //  OUTPUT ERROR",
+            back,
+            "Cannot create PulseForge Created Content/charts: "
+                + directory_error.message()
+        ));
+        return workflow;
+    }
+
+    auto result = run_native_split_chart_merge_screen(
+        menu, inputs, output, strategy
+    );
+    if (menu.close_requested()) {
+        workflow.quit_requested = true;
+        return workflow;
+    }
+    if (!result.success && !result.cancelled
+        && strategy == SplitChartMergeStrategy::k_way
+        && result.error.find("external_sort") != std::string::npos) {
+        const std::array retry{
+            std::string{"Retry with bounded external sort"},
+            std::string{"Cancel"},
+        };
+        const auto retry_choice = browse_choices(
+            menu,
+            "MERGE SPLIT CHARTS  //  UNSORTED SOURCE",
+            retry,
+            "One source part is not internally chronological. External sort handles this without loading the full chart into RAM."
+        );
+        if (retry_choice.has_value() && *retry_choice == 0U) {
+            strategy = SplitChartMergeStrategy::external_sort;
+            result = run_native_split_chart_merge_screen(
+                menu, inputs, output, strategy
+            );
+        }
+    }
+
+    if (result.cancelled) {
+        const std::array<std::string, 1> done{"Return to Editors"};
+        static_cast<void>(browse_choices(
+            menu,
+            "MERGE SPLIT CHARTS  //  CANCELLED",
+            done,
+            "Merge cancelled. No partial chart was published."
+        ));
+        return workflow;
+    }
+    if (!result.success) {
+        const std::array<std::string, 1> back{"Back"};
+        static_cast<void>(browse_choices(
+            menu,
+            "MERGE SPLIT CHARTS  //  FAILED",
+            back,
+            result.error
+        ));
+        return workflow;
+    }
+
+    workflow.content_changed = true;
+    const std::array<std::string, 1> done{"Return to Editors"};
+    static_cast<void>(browse_choices(
+        menu,
+        "MERGE SPLIT CHARTS  //  COMPLETE",
+        done,
+        "Merged " + std::to_string(result.note_count)
+            + " notes from " + std::to_string(result.input_count)
+            + " files into " + path_as_utf8(result.output_path)
+    ));
+    return workflow;
+}
+
 [[nodiscard]] EditorUiOutcome run_new_chart_editor(
     MenuSession& menu,
     const EditorStorage& storage,
@@ -4187,6 +4594,7 @@ void draw_autochart_progress(
             std::string("Create a new chart"),
             std::string("Edit an installed chart"),
             std::string("AutoChart from audio / video"),
+            std::string("Merge split JSON charts  //  millions-safe"),
             std::string("Create a character"),
             std::string("Create a week"),
             std::string("Back"),
@@ -4212,8 +4620,18 @@ void draw_autochart_progress(
                 || autochart.content_changed;
             continue;
         }
-        EditorUiOutcome outcome;
-        // Editor timelines and descriptor workspaces must remain silent so
+        if (*selected == 3U) {
+    const auto merged = run_split_chart_merge_workflow(menu, options);
+    if (merged.quit_requested) {
+        result.quit_requested = true;
+        return result;
+    }
+    result.content_changed = result.content_changed
+        || merged.content_changed;
+    continue;
+}
+EditorUiOutcome outcome;
+// Editor timelines and descriptor workspaces must remain silent so
         // chart audio and precise editing feedback are never masked.
         menu.suspend_music();
         if (*selected == 0U) {
@@ -4235,7 +4653,7 @@ void draw_autochart_progress(
                 catalog.entries()[*chart],
                 options
             );
-        } else if (*selected == 3U) {
+        } else if (*selected == 4U) {
             outcome = run_new_character_editor(menu, storage);
         } else {
             outcome = run_new_week_editor(menu, storage);

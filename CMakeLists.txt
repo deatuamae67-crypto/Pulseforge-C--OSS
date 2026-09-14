@@ -289,6 +289,7 @@ add_library(pulseforge_core STATIC
     src/io/settings_loader.cpp
     src/io/stage_lua.cpp
     src/io/streaming_chart_importer.cpp
+    src/io/split_chart_merger.cpp
     src/io/visual_density_index.cpp
     src/io/virtual_file_system.cpp
     src/autochart/autochart_review.cpp
@@ -1233,6 +1234,17 @@ if(PULSEFORGE_BUILD_TESTS)
     target_link_libraries(pulseforge_note_type_tests PRIVATE pulseforge_core)
     pulseforge_set_warnings(pulseforge_note_type_tests)
     add_test(NAME pulseforge.note_types COMMAND pulseforge_note_type_tests)
+
+    add_executable(
+    pulseforge_split_chart_merger_tests
+    tests/split_chart_merger_native_test.cpp
+)
+target_link_libraries(pulseforge_split_chart_merger_tests PRIVATE pulseforge_core)
+pulseforge_set_warnings(pulseforge_split_chart_merger_tests)
+add_test(
+    NAME pulseforge.split_chart_merger
+    COMMAND pulseforge_split_chart_merger_tests
+)
 
     if(PULSEFORGE_ENABLE_LUA)
         add_executable(pulseforge_lua_tests tests/lua_test.cpp)
