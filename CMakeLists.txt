@@ -1236,15 +1236,17 @@ if(PULSEFORGE_BUILD_TESTS)
     add_test(NAME pulseforge.note_types COMMAND pulseforge_note_type_tests)
 
     add_executable(
-    pulseforge_split_chart_merger_tests
-    tests/split_chart_merger_native_test.cpp
-)
-target_link_libraries(pulseforge_split_chart_merger_tests PRIVATE pulseforge_core)
-pulseforge_set_warnings(pulseforge_split_chart_merger_tests)
-add_test(
-    NAME pulseforge.split_chart_merger
-    COMMAND pulseforge_split_chart_merger_tests
-)
+        pulseforge_split_chart_merger_tests
+        tests/split_chart_merger_native_test.cpp
+    )
+    target_link_libraries(
+        pulseforge_split_chart_merger_tests PRIVATE pulseforge_core
+    )
+    pulseforge_set_warnings(pulseforge_split_chart_merger_tests)
+    add_test(
+        NAME pulseforge.split_chart_merger
+        COMMAND pulseforge_split_chart_merger_tests
+    )
 
     if(PULSEFORGE_ENABLE_LUA)
         add_executable(pulseforge_lua_tests tests/lua_test.cpp)
