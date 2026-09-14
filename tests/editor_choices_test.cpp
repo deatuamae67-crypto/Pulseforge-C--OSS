@@ -142,9 +142,8 @@ void test_choice_discovery() {
             "JSON and static Lua stages are discovered"
         );
         require(
-            choices.note_types
-                == std::vector<std::string>{"Hurt Note", "Txt Note"},
-            "Lua and H-Slice text note types are discovered"
+            choices.note_types == std::vector<std::string>{"Hurt Note", "Txt Note"},
+            "filesystem discovery contributes only mod-provided note types"
         );
         require(
             choices.event_names == std::vector<std::string>{"Camera Flash"},
@@ -166,6 +165,10 @@ void test_choice_discovery() {
         shallow.maximum_depth = 0U;
         const auto bounded = pulseforge::discover_chart_editor_choices(roots, shallow);
         require(bounded.scripts.empty(), "depth limit bounds recursive discovery");
+        require(
+            bounded.note_types.empty(),
+            "native note types are core registry entries, not filesystem discoveries"
+        );
 
         const auto directory_only_root = root / "directory-budget";
         write_file(

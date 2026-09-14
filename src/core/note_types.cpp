@@ -27,7 +27,7 @@ constexpr std::size_t maximum_definition_id_bytes = 128U;
 constexpr std::size_t maximum_logical_id_bytes = 128U;
 constexpr std::size_t maximum_animation_suffix_bytes = 64U;
 
-constexpr std::array<std::string_view, 8U> builtin_ids{
+constexpr std::array<std::string_view, 11U> builtin_ids{
     "normal",
     "Alt Animation",
     "GF Sing",
@@ -36,6 +36,9 @@ constexpr std::array<std::string_view, 8U> builtin_ids{
     "No Animation",
     "Cross Fade",
     "GF Cross Fade",
+    "3rd Player",
+    "5th Player",
+    "the note",
 };
 
 [[nodiscard]] constexpr bool ascii_space(const char value) noexcept {
@@ -378,7 +381,18 @@ void assign_error(std::string* const error, std::string message) {
     } else if (id == "GF Cross Fade") {
         result.animation.target = NoteAnimationTarget::girlfriend;
         result.cross_fade = NoteCrossFadeTarget::girlfriend;
+    } else if (id == "the note") {
+        // Native PulseForge definition recovered from the Complete corpus.
+        // The registry marks this built-in, so a mod cannot replace its core
+        // semantics. The bundled animation hook may add presentation only.
+        result.health.miss = 0.6;
+        result.visual.texture_id = "BULLET";
+        result.feedback.hitsound_enabled = true;
+        result.feedback.hitsound_id = "gunshot";
     }
+    // 3rd Player and 5th Player are intentionally native identity types. The
+    // source corpus defines no extra semantics for them, so normal gameplay is
+    // correct while their exact IDs remain first-class and immutable.
     return result;
 }
 

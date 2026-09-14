@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <cctype>
 #include <cmath>
@@ -17,6 +18,7 @@
 #include <functional>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -1752,9 +1754,17 @@ void draw_chart_inspector(
     }
     static_cast<void>(button(
         renderer,
-        {854.0F, 610.0F, 382.0F, 36.0F},
-        "CTRL+S  SAVE PROJECT + PSYCH",
-        contains({854.0F, 610.0F, 382.0F, 36.0F}, mouse_x, mouse_y),
+        {854.0F, 610.0F, 184.0F, 36.0F},
+        "A  IMPORT AUDIO",
+        contains({854.0F, 610.0F, 184.0F, 36.0F}, mouse_x, mouse_y),
+        true,
+        cyan
+    ));
+    static_cast<void>(button(
+        renderer,
+        {1'052.0F, 610.0F, 184.0F, 36.0F},
+        "CTRL+S  SAVE",
+        contains({1'052.0F, 610.0F, 184.0F, 36.0F}, mouse_x, mouse_y),
         can_save,
         success
     ));
@@ -1836,6 +1846,37 @@ void draw_chart_inspector(
 ) noexcept {
     std::error_code error;
     return !path.empty() && std::filesystem::is_regular_file(path, error);
+}
+
+struct EditorAudioImportDialogState final {
+    std::mutex mutex;
+    std::filesystem::path selected;
+    std::string error;
+    std::atomic<bool> complete{false};
+    std::atomic<bool> active{false};
+};
+
+void SDLCALL editor_audio_import_dialog_callback(
+    void* const userdata,
+    const char* const* file_list,
+    const int /*filter*/
+) {
+    auto* const state = static_cast<EditorAudioImportDialogState*>(userdata);
+    if (state == nullptr) return;
+    {
+        std::scoped_lock lock(state->mutex);
+        state->selected.clear();
+        state->error.clear();
+        if (file_list == nullptr) {
+            const char* const message = SDL_GetError();
+            state->error = message != nullptr && message[0] != '\0'
+                ? message
+                : "Audio file dialog failed";
+        } else if (file_list[0] != nullptr && file_list[0][0] != '\0') {
+            state->selected = std::filesystem::path{file_list[0]};
+        }
+    }
+    state->complete.store(true, std::memory_order_release);
 }
 
 [[nodiscard]] std::filesystem::path direct_audio_candidate(
@@ -2106,7 +2147,9 @@ EditorUiOutcome run_chart_editor_ui(
         editor.metadata().audio,
         structural_duration_ms
     );
-    auto* const editor_audio = audio_session.transport();
+    AudioTransport* editor_audio = audio_session.transport();
+    std::unique_ptr<AudioTransport> imported_audio;
+    EditorAudioImportDialogState audio_import_dialog;
     ChartViewState view;
     if (editor_audio != nullptr) {
         view.playhead_ms = editor_audio->position_ms();
@@ -2643,6 +2686,95 @@ EditorUiOutcome run_chart_editor_ui(
         );
     };
 
+    const auto begin_audio_import = [&]() {
+        if (audio_import_dialog.active.exchange(true, std::memory_order_acq_rel)) {
+            status = "Audio file picker is already open";
+            status_error = false;
+            return;
+        }
+        {
+            std::scoped_lock lock(audio_import_dialog.mutex);
+            audio_import_dialog.selected.clear();
+            audio_import_dialog.error.clear();
+        }
+        audio_import_dialog.complete.store(false, std::memory_order_release);
+        static constexpr std::array<SDL_DialogFileFilter, 2U> filters{{
+            {"Audio", "mp3;ogg;wav;flac;opus;m4a;aac"},
+            {"All files", "*"},
+        }};
+        SDL_ShowOpenFileDialog(
+            editor_audio_import_dialog_callback,
+            &audio_import_dialog,
+            window,
+            filters.data(),
+            static_cast<int>(filters.size()),
+            nullptr,
+            false
+        );
+        status = "Choose an audio file to chart";
+        status_error = false;
+    };
+
+    const auto process_audio_import = [&]() {
+        if (!audio_import_dialog.complete.exchange(false, std::memory_order_acq_rel)) {
+            return;
+        }
+        audio_import_dialog.active.store(false, std::memory_order_release);
+        std::filesystem::path selected;
+        std::string dialog_error;
+        {
+            std::scoped_lock lock(audio_import_dialog.mutex);
+            selected = audio_import_dialog.selected;
+            dialog_error = audio_import_dialog.error;
+        }
+        if (!dialog_error.empty()) {
+            status = "Audio import failed: " + dialog_error;
+            status_error = true;
+            return;
+        }
+        if (selected.empty()) {
+            status = "Audio import cancelled";
+            status_error = false;
+            return;
+        }
+
+        auto candidate = std::make_unique<AudioTransport>();
+        std::string audio_error;
+        if (!candidate->initialize(options.audio_settings, options.audio_backend, &audio_error)) {
+            status = "Audio import failed: " + audio_error;
+            status_error = true;
+            return;
+        }
+        AudioManifest manifest;
+        manifest.instrumental = selected;
+        if (!candidate->load(manifest, structural_duration_ms, 120.0, &audio_error)) {
+            status = "Audio import failed: " + audio_error;
+            status_error = true;
+            return;
+        }
+        candidate->set_looping(false);
+        candidate->set_playback_rate(1.0);
+
+        auto metadata = editor.metadata();
+        metadata.audio = manifest;
+        std::string metadata_error;
+        if (!editor.set_metadata(metadata, &metadata_error)) {
+            status = "Audio loaded but chart metadata rejected it: " + metadata_error;
+            status_error = true;
+            return;
+        }
+        if (editor_audio != nullptr
+            && editor_audio->state() == AudioTransportState::playing) {
+            editor_audio->pause();
+        }
+        imported_audio = std::move(candidate);
+        editor_audio = imported_audio.get();
+        view.playhead_ms = 0.0;
+        editor_audio->seek_ms(0.0);
+        status = "Audio imported: " + selected.filename().string();
+        status_error = false;
+    };
+
     const auto begin_scroll_edit = [&]() {
         inline_editor.begin(
             window,
@@ -2666,6 +2798,7 @@ EditorUiOutcome run_chart_editor_ui(
     };
 
     while (running) {
+        process_audio_import();
         if (editor_audio != nullptr
             && editor_audio->state() == AudioTransportState::playing) {
             view.playhead_ms = editor_audio->position_ms();
@@ -2927,6 +3060,9 @@ EditorUiOutcome run_chart_editor_ui(
                         begin_event_edit();
                     }
                     break;
+                case SDL_SCANCODE_A:
+                    begin_audio_import();
+                    break;
                 case SDL_SCANCODE_N:
                     begin_note_kind_edit();
                     break;
@@ -3136,7 +3272,14 @@ EditorUiOutcome run_chart_editor_ui(
                     begin_scripts_edit();
                 } else if (event.button.button == SDL_BUTTON_LEFT
                            && contains(
-                               {854.0F, 610.0F, 382.0F, 36.0F},
+                               {854.0F, 610.0F, 184.0F, 36.0F},
+                               event.button.x,
+                               event.button.y
+                           )) {
+                    begin_audio_import();
+                } else if (event.button.button == SDL_BUTTON_LEFT
+                           && contains(
+                               {1'052.0F, 610.0F, 184.0F, 36.0F},
                                event.button.x,
                                event.button.y
                            )) {

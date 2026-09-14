@@ -13,6 +13,9 @@ namespace pulseforge {
 struct ChartEditorChoiceCatalog {
     std::vector<std::string> characters;
     std::vector<std::string> stages;
+    // Native NoteTypes are injected from builtin_note_type_ids() by both
+    // editor frontends. Filesystem discovery only contributes additional mod
+    // types, so the core list is available even on packaged/mobile builds.
     std::vector<std::string> note_types;
     std::vector<std::string> note_styles;
     std::vector<std::string> event_names;

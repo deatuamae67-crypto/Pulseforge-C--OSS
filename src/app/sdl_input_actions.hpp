@@ -63,6 +63,45 @@ namespace pulseforge::detail {
     return raw != nullptr && canonicalize_input_name(raw) == name;
 }
 
+[[nodiscard]] inline bool default_volume_up_layout_fallback(
+    const ActionBinding& binding,
+    const SDL_KeyboardEvent& event
+) {
+    // The historical default was Shift+=, which assumes a US-like layout.
+    // On layouts such as Portuguese, '+" can be a different physical key.
+    // Keep remapping authoritative: this compatibility path only activates
+    // while the action still contains that historical default binding.
+    bool historical_default = false;
+    for (const auto& input : binding.inputs) {
+        if (input.device == InputDevice::keyboard
+            && canonicalize_input_name(input.name) == "shift+equals") {
+            historical_default = true;
+            break;
+        }
+    }
+    if (!historical_default) {
+        return false;
+    }
+
+    const auto modifiers = event.mod;
+    if ((modifiers & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_GUI)) != 0U) {
+        return false;
+    }
+    if (event.scancode == SDL_SCANCODE_EQUALS
+        || event.scancode == SDL_SCANCODE_KP_PLUS) {
+        return true;
+    }
+
+    // SDL key names are layout-aware, unlike scancodes. This catches the
+    // dedicated '+' position used by several non-US keyboard layouts.
+    const char* logical = SDL_GetKeyName(event.key);
+    if (logical == nullptr) {
+        return false;
+    }
+    const auto logical_name = canonicalize_input_name(logical);
+    return logical_name == "+" || logical_name == "plus";
+}
+
 [[nodiscard]] inline bool keyboard_action_matches(
     const InputBindings& bindings,
     const std::string_view action,
@@ -78,7 +117,8 @@ namespace pulseforge::detail {
             return true;
         }
     }
-    return false;
+    return action == "volume_up"
+        && default_volume_up_layout_fallback(*binding, event);
 }
 
 [[nodiscard]] inline bool gamepad_action_matches(

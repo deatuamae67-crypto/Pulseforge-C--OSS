@@ -87,6 +87,11 @@ package_windows() {
   rm -rf "$root" "$out"
   mkdir -p "$root/$package/bin" "$out"
   cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-windows-x86_64/." "$root/$package/"
+  rm -rf "$root/$package/include" "$root/$package/docs"
+  if [[ -d "$root/$package/lib" ]]; then
+    find "$root/$package/lib" -type f       \( -name '*.a' -o -name '*.lib' -o -name '*.cmake' -o -name '*.pc' \) -delete
+    find "$root/$package/lib" -type d -empty -delete
+  fi
   rm -rf "$root/$package/bin/assets" "$root/$package/bin/mods"
   ln -s "$GITHUB_WORKSPACE/assets" "$root/$package/bin/assets"
   test -f "$root/$package/bin/pulseforge.exe"
@@ -106,6 +111,11 @@ package_unix_desktop() {
   rm -rf "$root" "$out"
   mkdir -p "$root/$package/bin" "$out"
   cp -a "$RUNNER_TEMP/compiled/complete-engine-stage-${stage_key}/." "$root/$package/"
+  rm -rf "$root/$package/include" "$root/$package/docs"
+  if [[ -d "$root/$package/lib" ]]; then
+    find "$root/$package/lib" -type f       \( -name '*.a' -o -name '*.lib' -o -name '*.cmake' -o -name '*.pc' \) -delete
+    find "$root/$package/lib" -type d -empty -delete
+  fi
   rm -rf "$root/$package/bin/assets" "$root/$package/bin/mods"
   ln -s "$GITHUB_WORKSPACE/assets" "$root/$package/bin/assets"
   if [[ "$stage_key" == linux-* ]]; then
