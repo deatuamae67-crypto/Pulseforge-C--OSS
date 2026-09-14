@@ -1177,6 +1177,9 @@ struct IndexedNote {
     for (const auto id : bundled_note_type_ids()) {
         builtins.note_types.emplace_back(id);
     }
+    for (const auto id : bundled_note_type_ids()) {
+        builtins.note_types.emplace_back(id);
+    }
     builtins.note_styles = {"funkin", "normal", "pixel"};
     builtins.event_names = {
         "Add Camera Zoom", "Camera Flash", "Change Character",

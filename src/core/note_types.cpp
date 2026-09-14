@@ -54,6 +54,14 @@ constexpr std::array<std::string_view, 3U> bundled_ids{
     "5th Player",
 };
 
+// Engine-shipped compatibility types. These remain custom/overrideable
+// in NoteTypeRegistry, but are always visible in editor menus.
+constexpr std::array<std::string_view, 3U> bundled_ids{
+    "the note",
+    "3rd Player",
+    "5th Player",
+};
+
 [[nodiscard]] constexpr bool ascii_space(const char value) noexcept {
     return value == ' ' || value == '\t' || value == '\r' || value == '\n'
         || value == '\f' || value == '\v';
@@ -1050,6 +1058,10 @@ bool NoteTypeRegistry::register_text(
 
 std::span<const std::string_view> builtin_note_type_ids() noexcept {
     return builtin_ids;
+}
+
+std::span<const std::string_view> bundled_note_type_ids() noexcept {
+    return bundled_ids;
 }
 
 std::span<const std::string_view> bundled_note_type_ids() noexcept {
