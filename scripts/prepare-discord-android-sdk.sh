@@ -5,7 +5,8 @@ set -euo pipefail
 # directly or wrapped in a ZIP/TAR archive. The private source URL is never
 # printed and the original SDK input is never published as an artifact.
 url="${PULSEFORGE_DISCORD_SDK_ARCHIVE_URL:-}"
-if [[ -z "$url" ]]; then
+local_input="${PULSEFORGE_DISCORD_SDK_LOCAL_INPUT:-}"
+if [[ -z "$local_input" && -z "$url" ]]; then
   echo 'PULSEFORGE_DISCORD_SDK_ARCHIVE_URL is required for Discord-enabled Android builds.' >&2
   exit 1
 fi
@@ -17,8 +18,13 @@ mkdir -p -- "$work_root"
 raw="$work_root/sdk.download"
 staged="$work_root/discord_partner_sdk.aar"
 
-curl --fail --location --silent --show-error --retry 4 --retry-delay 2 \
-  "$url" --output "$raw"
+if [[ -n "$local_input" ]]; then
+  [[ -s "$local_input" ]] || { echo 'Local Discord Android SDK input is missing or empty.' >&2; exit 1; }
+  cp -- "$local_input" "$raw"
+else
+  curl --fail --location --silent --show-error --retry 4 --retry-delay 2 \
+    "$url" --output "$raw"
+fi
 [[ -s "$raw" ]] || { echo 'Downloaded Discord Android SDK input is empty.' >&2; exit 1; }
 
 python3 - "$raw" "$staged" <<'PY'
@@ -26,7 +32,6 @@ from __future__ import annotations
 
 import io
 import pathlib
-import shutil
 import sys
 import tarfile
 import zipfile
