@@ -127,21 +127,21 @@ namespace complete_gate_detail {
         {
             SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT,
             1,
-            "Sim",
+            "Yes",
         },
         {
             SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT,
             0,
-            "Não",
+            "No",
         },
     }};
     const std::string message =
-        "O PulseForge Complete tem " + std::to_string(pending_mods)
-        + (pending_mods == 1U ? " mod por instalar/atualizar (" : " mods por instalar/atualizar (")
-        + std::to_string(pending_files) + " ficheiros).\n\n"
-          "Pretende instalar os mods agora?\n\n"
-          "Os ficheiros são transferidos diretamente do Google Drive para a pasta de mods. "
-          "Se escolher Não, o PulseForge volta a perguntar num próximo arranque.";
+        "PulseForge Complete has " + std::to_string(pending_mods)
+        + (pending_mods == 1U ? " mod to install/update (" : " mods to install/update (")
+        + std::to_string(pending_files) + " files).\n\n"
+          "Install the mods now?\n\n"
+          "Files are transferred directly from Google Drive into the mods folder. "
+          "If you choose No, PulseForge will ask again on a later launch.";
     const SDL_MessageBoxData data{
         .flags = SDL_MESSAGEBOX_INFORMATION,
         .window = nullptr,
@@ -161,10 +161,10 @@ namespace complete_gate_detail {
 
 inline void show_complete_error(const std::string& error) {
     const std::string message =
-        "Não foi possível concluir a instalação dos mods Complete.\n\n"
+        "PulseForge could not complete the Complete mod installation.\n\n"
         + error
-        + "\n\nO conteúdo já instalado foi preservado. O PulseForge pode continuar e tentará "
-          "novamente num próximo arranque.";
+        + "\n\nAlready installed content was preserved. PulseForge can continue and will "
+          "try again on a later launch.";
     SDL_ShowSimpleMessageBox(
         SDL_MESSAGEBOX_ERROR,
         "PulseForge Complete",
@@ -223,7 +223,7 @@ inline CompleteTransferResult run_progress_window(
     progress.total_mods.store(total_mods, std::memory_order_relaxed);
 
     SDL_Window* window = SDL_CreateWindow(
-        "PulseForge Complete — a preparar instalação",
+        "PulseForge Complete — preparing installation",
         960,
         280,
         SDL_WINDOW_HIGH_PIXEL_DENSITY
@@ -275,10 +275,10 @@ inline CompleteTransferResult run_progress_window(
         }
         if (window != nullptr) {
             const std::string title = cancel.load(std::memory_order_relaxed)
-                ? "PulseForge Complete — a cancelar..."
+                ? "PulseForge Complete — cancelling..."
                 : "PulseForge Complete — " + detail + " — mods "
                     + std::to_string(mods_done) + '/' + std::to_string(mods_total)
-                    + " — ficheiros " + std::to_string(files_done) + '/'
+                    + " — files " + std::to_string(files_done) + '/'
                     + std::to_string(files_total);
             SDL_SetWindowTitle(window, title.c_str());
         }
