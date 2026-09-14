@@ -1,5 +1,7 @@
 #pragma once
 
+#include "pulseforge/note_types.hpp"
+
 #include <cstddef>
 #include <filesystem>
 #include <optional>
@@ -11,11 +13,20 @@
 namespace pulseforge {
 
 struct ChartEditorChoiceCatalog {
+    ChartEditorChoiceCatalog() {
+        const auto builtins = builtin_note_type_ids();
+        note_types.reserve(builtins.size());
+        for (const auto id : builtins) {
+            note_types.emplace_back(id);
+        }
+    }
+
     std::vector<std::string> characters;
     std::vector<std::string> stages;
-    // Native NoteTypes are injected from builtin_note_type_ids() by both
-    // editor frontends. Filesystem discovery only contributes additional mod
-    // types, so the core list is available even on packaged/mobile builds.
+    // Native NoteTypes are a catalog invariant. Filesystem discovery and
+    // callers may contribute additional mod types, but a freshly constructed
+    // catalog is already usable on packaged/mobile builds even when no content
+    // root can be scanned.
     std::vector<std::string> note_types;
     std::vector<std::string> note_styles;
     std::vector<std::string> event_names;
@@ -36,7 +47,8 @@ struct ChartEditorChoiceDiscoveryLimits {
 // Scans content roots by the folder conventions shared by Psych Engine and
 // related forks. The scan is bounded, does not follow directory symlinks and
 // never opens scripts or assets. Results are sorted and de-duplicated using
-// ASCII case-insensitive comparisons so the UI remains deterministic.
+// ASCII case-insensitive comparisons so the UI remains deterministic. Native
+// NoteTypes remain present even when no roots are readable.
 [[nodiscard]] ChartEditorChoiceCatalog discover_chart_editor_choices(
     std::span<const std::filesystem::path> roots,
     const ChartEditorChoiceDiscoveryLimits& limits = {}

@@ -1,0 +1,310 @@
+name: PulseForge private Discord-enabled builds
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-discord-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PULSEFORGE_DISCORD_APPLICATION_ID: '1544144634832355429'
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      PULSEFORGE_DISCORD_SDK_ARCHIVE_URL: ${{ secrets.PULSEFORGE_DISCORD_WINDOWS_SDK_ARCHIVE_URL || secrets.PULSEFORGE_DISCORD_SDK_ARCHIVE_URL }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Require private Windows Discord SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:PULSEFORGE_DISCORD_SDK_ARCHIVE_URL)) {
+            throw 'Configure PULSEFORGE_DISCORD_WINDOWS_SDK_ARCHIVE_URL or PULSEFORGE_DISCORD_SDK_ARCHIVE_URL before running this workflow.'
+          }
+
+      - name: Hydrate authorized Discord Social SDK
+        shell: pwsh
+        run: ./scripts/prepare-discord-release-sdk.ps1
+
+      - name: Build Discord-enabled Windows Release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --preset windows-msvc `
+            "-DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON" `
+            "-DPULSEFORGE_DISCORD_APPLICATION_ID=$env:PULSEFORGE_DISCORD_APPLICATION_ID"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build --preset windows-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage and verify Windows package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'PulseForge-Discord-Windows-x86_64'
+          cmake --install out/build/msvc --config Release --prefix "$stage"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = Join-Path $stage 'bin/pulseforge.exe'
+          $sdk = Join-Path $stage 'bin/discord_partner_sdk.dll'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Missing $exe" }
+          if (-not (Test-Path -LiteralPath $sdk -PathType Leaf)) { throw "Missing $sdk" }
+
+      - name: Upload Discord-enabled Windows build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PulseForge-Discord-Windows-x86_64
+          path: ${{ runner.temp }}/PulseForge-Discord-Windows-x86_64
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-x86_64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PULSEFORGE_DISCORD_SDK_ARCHIVE_URL: ${{ secrets.PULSEFORGE_DISCORD_LINUX_SDK_ARCHIVE_URL || secrets.PULSEFORGE_DISCORD_SDK_ARCHIVE_URL }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Require private Linux Discord SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PULSEFORGE_DISCORD_SDK_ARCHIVE_URL:-}" ]]; then
+            echo '::error::Configure PULSEFORGE_DISCORD_LINUX_SDK_ARCHIVE_URL or PULSEFORGE_DISCORD_SDK_ARCHIVE_URL before running this workflow.'
+            exit 1
+          fi
+
+      - name: Hydrate authorized Discord Social SDK
+        shell: bash
+        run: bash scripts/prepare-discord-release-sdk.sh
+
+      - name: Install Linux dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config file \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+            libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev \
+            libegl1-mesa-dev libgl1-mesa-dev
+
+      - name: Build Discord-enabled Linux Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset linux-release \
+            -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON \
+            -DPULSEFORGE_DISCORD_APPLICATION_ID="$PULSEFORGE_DISCORD_APPLICATION_ID"
+          cmake --build --preset linux-release --parallel 2
+
+      - name: Stage and verify Linux package
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/PulseForge-Discord-Linux-x86_64"
+          cmake --install out/build/linux-release --prefix "$stage"
+          test -x "$stage/bin/pulseforge"
+          test -f "$stage/bin/libdiscord_partner_sdk.so"
+          ldd "$stage/bin/pulseforge" | tee "$RUNNER_TEMP/pulseforge-discord.ldd.txt"
+          ! grep -q 'not found' "$RUNNER_TEMP/pulseforge-discord.ldd.txt"
+
+      - name: Upload Discord-enabled Linux build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PulseForge-Discord-Linux-x86_64
+          path: |
+            ${{ runner.temp }}/PulseForge-Discord-Linux-x86_64
+            ${{ runner.temp }}/pulseforge-discord.ldd.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-26-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      PULSEFORGE_DISCORD_SDK_ARCHIVE_URL: ${{ secrets.PULSEFORGE_DISCORD_MACOS_SDK_ARCHIVE_URL || secrets.PULSEFORGE_DISCORD_SDK_ARCHIVE_URL }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Require private macOS Discord SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PULSEFORGE_DISCORD_SDK_ARCHIVE_URL:-}" ]]; then
+            echo '::error::Configure PULSEFORGE_DISCORD_MACOS_SDK_ARCHIVE_URL or PULSEFORGE_DISCORD_SDK_ARCHIVE_URL before running this workflow.'
+            exit 1
+          fi
+
+      - name: Hydrate authorized Discord Social SDK
+        shell: bash
+        run: bash scripts/prepare-discord-release-sdk.sh
+
+      - name: Ensure build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v cmake >/dev/null || brew install cmake
+          command -v ninja >/dev/null || brew install ninja
+
+      - name: Build Discord-enabled macOS Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --preset macos-release \
+            -DCMAKE_OSX_ARCHITECTURES='${{ matrix.arch }}' \
+            -DPULSEFORGE_REQUIRE_DISCORD_SOCIAL_SDK=ON \
+            -DPULSEFORGE_DISCORD_APPLICATION_ID="$PULSEFORGE_DISCORD_APPLICATION_ID"
+          cmake --build --preset macos-release --parallel 2
+
+      - name: Stage and verify macOS package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="PulseForge-Discord-macOS-${{ matrix.arch }}"
+          stage="$RUNNER_TEMP/$package"
+          archive="$RUNNER_TEMP/$package.tar.gz"
+          cmake --install out/build/macos-release --prefix "$stage"
+          app="$stage/PulseForge.app"
+          binary="$app/Contents/MacOS/pulseforge"
+          framework="$app/Contents/Frameworks/discord_partner_sdk.framework"
+          test -x "$binary"
+          test -d "$framework"
+          test -f "$framework/Versions/A/discord_partner_sdk"
+          codesign --deep --force --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          lipo -archs "$binary" | tee "$RUNNER_TEMP/$package.arch.txt"
+          grep -qx '${{ matrix.arch }}' "$RUNNER_TEMP/$package.arch.txt"
+          tar -C "$RUNNER_TEMP" -czf "$archive" "$package"
+
+      - name: Upload Discord-enabled macOS build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PulseForge-Discord-macOS-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/PulseForge-Discord-macOS-${{ matrix.arch }}.tar.gz
+            ${{ runner.temp }}/PulseForge-Discord-macOS-${{ matrix.arch }}.arch.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  android-arm64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PULSEFORGE_DISCORD_SDK_ARCHIVE_URL: ${{ secrets.PULSEFORGE_DISCORD_ANDROID_SDK_ARCHIVE_URL || secrets.PULSEFORGE_DISCORD_SDK_ARCHIVE_URL }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Require private Android Discord SDK AAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${PULSEFORGE_DISCORD_SDK_ARCHIVE_URL:-}" ]]; then
+            echo '::error::Configure PULSEFORGE_DISCORD_ANDROID_SDK_ARCHIVE_URL or PULSEFORGE_DISCORD_SDK_ARCHIVE_URL before running this workflow.'
+            exit 1
+          fi
+
+      - name: Hydrate authorized Discord Social SDK
+        shell: bash
+        run: bash scripts/prepare-discord-release-sdk.sh
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Use hosted Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          android_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -d "$android_root"
+          sdkmanager_path="$(find "$android_root/cmdline-tools" -type f -path '*/bin/sdkmanager' -print -quit)"
+          test -n "$sdkmanager_path"
+          test -x "$sdkmanager_path"
+          echo "ANDROID_SDK_ROOT=$android_root" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$android_root" >> "$GITHUB_ENV"
+          echo "$(dirname "$sdkmanager_path")" >> "$GITHUB_PATH"
+          echo "$android_root/platform-tools" >> "$GITHUB_PATH"
+          "$sdkmanager_path" --version
+
+      - name: Install Android SDK, NDK and CMake
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager 'platforms;android-35' 'build-tools;36.0.0' \
+            'ndk;28.2.13676358' 'cmake;3.31.6'
+
+      - name: Build Discord-enabled Android Release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f third_party/discord_social_sdk/android/discord_partner_sdk.aar
+          chmod +x platform/android/gradlew
+          cd platform/android
+          ./gradlew --no-daemon --stacktrace \
+            -PPULSEFORGE_ANDROID_BUILD_ROOT="$RUNNER_TEMP/pulseforge-android-discord" \
+            -PPULSEFORGE_DISCORD_APPLICATION_ID="$PULSEFORGE_DISCORD_APPLICATION_ID" \
+            :app:assembleRelease
+
+      - name: Test-sign and verify Discord-enabled APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          unsigned="$RUNNER_TEMP/pulseforge-android-discord/gradle/outputs/apk/release/app-release-unsigned.apk"
+          aligned="$RUNNER_TEMP/PulseForge-Discord-Android-arm64-aligned.apk"
+          signed="$RUNNER_TEMP/PulseForge-Discord-Android-arm64.apk"
+          keystore="$RUNNER_TEMP/pulseforge-discord-ci.jks"
+          test -f "$unsigned"
+          unzip -l "$unsigned" | tee "$RUNNER_TEMP/PulseForge-Discord-Android-arm64.contents.txt"
+          grep -q 'lib/arm64-v8a/libdiscord_partner_sdk.so' "$RUNNER_TEMP/PulseForge-Discord-Android-arm64.contents.txt"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump xmltree "$unsigned" AndroidManifest.xml \
+            | tee "$RUNNER_TEMP/PulseForge-Discord-Android-arm64.manifest.txt"
+          grep -q 'com.discord.socialsdk.AuthenticationActivity' "$RUNNER_TEMP/PulseForge-Discord-Android-arm64.manifest.txt"
+          grep -q "discord-$PULSEFORGE_DISCORD_APPLICATION_ID" "$RUNNER_TEMP/PulseForge-Discord-Android-arm64.manifest.txt"
+          keytool -genkeypair -noprompt -keystore "$keystore" \
+            -storepass android -keypass android -alias pulseforge-ci \
+            -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname 'CN=PulseForge Discord CI Test Build,OU=CI,O=PulseForge,C=PT'
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/zipalign" -P 16 -f 4 "$unsigned" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
+            --ks "$keystore" --ks-key-alias pulseforge-ci \
+            --ks-pass pass:android --key-pass pass:android \
+            --out "$signed" "$aligned"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$signed"
+
+      - name: Upload Discord-enabled Android build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PulseForge-Discord-Android-arm64
+          path: |
+            ${{ runner.temp }}/PulseForge-Discord-Android-arm64.apk
+            ${{ runner.temp }}/PulseForge-Discord-Android-arm64.contents.txt
+            ${{ runner.temp }}/PulseForge-Discord-Android-arm64.manifest.txt
+          if-no-files-found: error
+          retention-days: 14

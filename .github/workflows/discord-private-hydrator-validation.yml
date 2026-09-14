@@ -1,0 +1,119 @@
+name: PulseForge private Discord SDK hydrator validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/prepare-discord-release-sdk.sh'
+      - 'scripts/prepare-discord-release-sdk.ps1'
+      - 'scripts/prepare-discord-android-sdk.sh'
+      - '.github/workflows/discord-private-hydrator-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-hydrators:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Parse shell hydrators
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/prepare-discord-release-sdk.sh
+          bash -n scripts/prepare-discord-android-sdk.sh
+
+      - name: Parse PowerShell hydrator
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts/prepare-discord-release-sdk.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw 'PowerShell Discord SDK hydrator contains parse errors.'
+          }
+
+      - name: Build synthetic Discord Android Prefab AAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/discord_partner_sdk.aar" <<'PY'
+          import json
+          import pathlib
+          import sys
+          import zipfile
+
+          output = pathlib.Path(sys.argv[1])
+          files = {
+              'AndroidManifest.xml': '<manifest xmlns:android="http://schemas.android.com/apk/res/android" />',
+              'prefab/prefab.json': json.dumps({
+                  'schema_version': 2,
+                  'name': 'discord_partner_sdk',
+                  'version': 'ci-test',
+                  'dependencies': [],
+              }),
+              'prefab/modules/discord_partner_sdk/module.json': json.dumps({
+                  'library_name': 'discord_partner_sdk',
+              }),
+              'prefab/modules/discord_partner_sdk/include/discordpp.h': '#pragma once\n',
+              'prefab/modules/discord_partner_sdk/include/cdiscord.h': '#pragma once\n',
+              'prefab/modules/discord_partner_sdk/libs/android.arm64-v8a/abi.json': json.dumps({
+                  'abi': 'arm64-v8a',
+                  'api': 24,
+                  'ndk': 28,
+                  'stl': 'c++_static',
+                  'static': False,
+              }),
+          }
+          with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+              for name, text in files.items():
+                  archive.writestr(name, text)
+              archive.writestr(
+                  'prefab/modules/discord_partner_sdk/libs/android.arm64-v8a/libdiscord_partner_sdk.so',
+                  b'PulseForge synthetic Discord Android runtime for hydrator validation',
+              )
+          PY
+
+      - name: Hydrate direct synthetic AAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf third_party/discord_social_sdk/android
+          PULSEFORGE_DISCORD_SDK_LOCAL_INPUT="$RUNNER_TEMP/discord_partner_sdk.aar" \
+            bash scripts/prepare-discord-android-sdk.sh
+          test -s third_party/discord_social_sdk/android/discord_partner_sdk.aar
+          cmp "$RUNNER_TEMP/discord_partner_sdk.aar" \
+            third_party/discord_social_sdk/android/discord_partner_sdk.aar
+
+      - name: Hydrate wrapped synthetic AAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/discord_partner_sdk.aar" "$RUNNER_TEMP/discord-android-wrapper.zip" <<'PY'
+          import pathlib
+          import sys
+          import zipfile
+
+          aar = pathlib.Path(sys.argv[1])
+          wrapper = pathlib.Path(sys.argv[2])
+          with zipfile.ZipFile(wrapper, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+              archive.write(aar, 'authorized/android/discord_partner_sdk.aar')
+          PY
+          rm -rf third_party/discord_social_sdk/android
+          PULSEFORGE_DISCORD_SDK_LOCAL_INPUT="$RUNNER_TEMP/discord-android-wrapper.zip" \
+            bash scripts/prepare-discord-android-sdk.sh
+          test -s third_party/discord_social_sdk/android/discord_partner_sdk.aar
+          cmp "$RUNNER_TEMP/discord_partner_sdk.aar" \
+            third_party/discord_social_sdk/android/discord_partner_sdk.aar
