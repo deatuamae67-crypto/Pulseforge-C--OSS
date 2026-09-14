@@ -4621,17 +4621,17 @@ struct SplitChartMergeWorkflowResult final {
             continue;
         }
         if (*selected == 3U) {
-    const auto merged = run_split_chart_merge_workflow(menu, options);
-    if (merged.quit_requested) {
-        result.quit_requested = true;
-        return result;
-    }
-    result.content_changed = result.content_changed
-        || merged.content_changed;
-    continue;
-}
-EditorUiOutcome outcome;
-// Editor timelines and descriptor workspaces must remain silent so
+            const auto merged = run_split_chart_merge_workflow(menu, options);
+            if (merged.quit_requested) {
+                result.quit_requested = true;
+                return result;
+            }
+            result.content_changed = result.content_changed
+                || merged.content_changed;
+            continue;
+        }
+        EditorUiOutcome outcome;
+        // Editor timelines and descriptor workspaces must remain silent so
         // chart audio and precise editing feedback are never masked.
         menu.suspend_music();
         if (*selected == 0U) {
