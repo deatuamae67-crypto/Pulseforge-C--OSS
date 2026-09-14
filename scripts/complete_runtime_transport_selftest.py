@@ -38,12 +38,22 @@ def main() -> int:
     ):
         require(transport, needle)
     for needle in (
-        "Pretende instalar os mods agora?",
+        "Install the mods now?",
+        '"Yes"',
+        '"No"',
         "PULSEFORGE_COMPLETE_MANIFEST",
         "PULSEFORGE_MOD_ROOT",
         "run_progress_window",
     ):
         require(gate, needle)
+    for needle in (
+        "Pretende instalar os mods agora?",
+        '"Sim"',
+        '"Não"',
+        "ficheiros",
+        "a preparar instalação",
+    ):
+        forbid(gate, needle)
     for needle in (
         "HttpURLConnection",
         "CookieManager",
