@@ -1,0 +1,39 @@
+name: PulseForge split chart merger validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/chart_merge/**'
+      - 'tests/split_chart_merger_test.py'
+      - '.github/workflows/split-chart-merger-validation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/chart_merge/**'
+      - 'tests/split_chart_merger_test.py'
+      - '.github/workflows/split-chart-merger-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  self-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          lfs: false
+
+      - name: Compile Python sources
+        run: |
+          python3 -m py_compile tools/chart_merge/merge_split_charts.py tests/split_chart_merger_test.py
+
+      - name: Run bounded merger regression suite
+        run: |
+          python3 tests/split_chart_merger_test.py
