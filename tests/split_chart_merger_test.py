@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import tempfile
 from pathlib import Path
 
@@ -12,6 +13,10 @@ MODULE_PATH = ROOT / "tools/chart_merge/merge_split_charts.py"
 spec = importlib.util.spec_from_file_location("pulseforge_split_chart_merger", MODULE_PATH)
 assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)
+# Python 3.12 dataclasses resolve postponed annotations through sys.modules.
+# Register the dynamically loaded module before executing it, exactly as the
+# regular import machinery would.
+sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
