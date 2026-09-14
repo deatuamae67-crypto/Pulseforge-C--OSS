@@ -142,10 +142,8 @@ void test_choice_discovery() {
             "JSON and static Lua stages are discovered"
         );
         require(
-            choices.note_types == std::vector<std::string>{
-                "3rd Player", "5th Player", "Hurt Note", "the note", "Txt Note",
-            },
-            "bundled compatibility and discovered note types share one selector"
+            choices.note_types == std::vector<std::string>{"Hurt Note", "Txt Note"},
+            "filesystem discovery contributes only mod-provided note types"
         );
         require(
             choices.event_names == std::vector<std::string>{"Camera Flash"},
@@ -168,8 +166,8 @@ void test_choice_discovery() {
         const auto bounded = pulseforge::discover_chart_editor_choices(roots, shallow);
         require(bounded.scripts.empty(), "depth limit bounds recursive discovery");
         require(
-            bounded.note_types.size() == 3U,
-            "bundled native note types do not depend on filesystem discovery"
+            bounded.note_types.empty(),
+            "native note types are core registry entries, not filesystem discoveries"
         );
 
         const auto directory_only_root = root / "directory-budget";
