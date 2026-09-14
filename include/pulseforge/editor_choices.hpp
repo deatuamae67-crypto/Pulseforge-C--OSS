@@ -13,7 +13,16 @@ namespace pulseforge {
 struct ChartEditorChoiceCatalog {
     std::vector<std::string> characters;
     std::vector<std::string> stages;
-    std::vector<std::string> note_types;
+    // These are engine-bundled, replaceable compatibility note-type IDs rather
+    // than immutable NoteTypeRegistry built-ins. Keeping them in the default
+    // editor catalogue makes them selectable even when a packaged platform
+    // cannot synchronously scan the bundled assets (notably Android), while an
+    // active mod can still provide the real definition for the same ID.
+    std::vector<std::string> note_types{
+        "3rd Player",
+        "5th Player",
+        "the note",
+    };
     std::vector<std::string> note_styles;
     std::vector<std::string> event_names;
     std::vector<std::string> scripts;
