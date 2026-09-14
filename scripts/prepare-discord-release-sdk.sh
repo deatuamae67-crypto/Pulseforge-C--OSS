@@ -5,10 +5,18 @@ set -euo pipefail
 # supplied through an authenticated/short-lived URL and never committed or
 # uploaded as a standalone artifact by PulseForge.
 url="${PULSEFORGE_DISCORD_SDK_ARCHIVE_URL:-}"
+require="${PULSEFORGE_DISCORD_SDK_REQUIRE:-all}"
 if [[ -z "$url" ]]; then
   echo 'PULSEFORGE_DISCORD_SDK_ARCHIVE_URL is required for Discord-enabled release builds.' >&2
   exit 1
 fi
+case "$require" in
+  windows|linux|macos|android|all) ;;
+  *)
+    echo 'PULSEFORGE_DISCORD_SDK_REQUIRE must be windows, linux, macos, android or all.' >&2
+    exit 2
+    ;;
+esac
 
 project_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 work_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pulseforge-discord-sdk"
@@ -45,7 +53,7 @@ else
 fi
 
 python3 "$project_root/scripts/inspect-discord-social-sdk.py" \
-  --sdk "$archive" --require all --deep
+  --sdk "$archive" --require "$require" --deep
 
 "$project_root/scripts/setup-discord-social-sdk.sh" \
   --sdk "$archive" \
@@ -53,12 +61,38 @@ python3 "$project_root/scripts/inspect-discord-social-sdk.py" \
   --force
 
 sdk="$project_root/third_party/discord_social_sdk"
-test -f "$sdk/include/discordpp.h"
-test -f "$sdk/include/cdiscord.h"
-test -f "$sdk/lib/release/discord_partner_sdk.lib"
-test -f "$sdk/bin/release/discord_partner_sdk.dll"
-test -f "$sdk/lib/release/libdiscord_partner_sdk.so"
-test -f "$sdk/android/discord_partner_sdk.aar"
-find "$sdk" -type d -name 'discord_partner_sdk.framework' -print -quit | grep -q .
 
-echo 'Discord Social SDK release input staged and validated for Windows, Linux, macOS and Android.'
+# Desktop integrations compile against the public C/C++ headers. Android-only
+# private builds normally use prepare-discord-android-sdk.sh so a direct AAR can
+# be consumed without requiring an unrelated desktop SDK bundle.
+if [[ "$require" != android ]]; then
+  test -f "$sdk/include/discordpp.h"
+  test -f "$sdk/include/cdiscord.h"
+fi
+
+case "$require" in
+  windows)
+    test -f "$sdk/lib/release/discord_partner_sdk.lib"
+    test -f "$sdk/bin/release/discord_partner_sdk.dll"
+    ;;
+  linux)
+    test -f "$sdk/lib/release/libdiscord_partner_sdk.so"
+    ;;
+  macos)
+    find "$sdk" -type d -name 'discord_partner_sdk.framework' -print -quit | grep -q .
+    ;;
+  android)
+    test -f "$sdk/android/discord_partner_sdk.aar"
+    ;;
+  all)
+    test -f "$sdk/include/discordpp.h"
+    test -f "$sdk/include/cdiscord.h"
+    test -f "$sdk/lib/release/discord_partner_sdk.lib"
+    test -f "$sdk/bin/release/discord_partner_sdk.dll"
+    test -f "$sdk/lib/release/libdiscord_partner_sdk.so"
+    test -f "$sdk/android/discord_partner_sdk.aar"
+    find "$sdk" -type d -name 'discord_partner_sdk.framework' -print -quit | grep -q .
+    ;;
+esac
+
+echo "Discord Social SDK release input staged and validated for target: $require."
