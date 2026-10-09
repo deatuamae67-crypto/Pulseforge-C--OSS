@@ -164,7 +164,7 @@ tasks.named('preBuild').configure {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
-    implementation 'dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.7'
+    implementation 'dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9'
     if (discordSdkEnabled) {
         implementation files(discordSdkAar)
         implementation 'androidx.browser:browser:1.10.0'
