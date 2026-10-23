@@ -75,7 +75,7 @@ jobs:
           "$hash  $package.zip" | Set-Content -LiteralPath $checksums -Encoding ascii
           "package=$package" >> $env:GITHUB_OUTPUT
       - name: Upload Windows package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ steps.package.outputs.package }}
           path: |
@@ -137,7 +137,7 @@ jobs:
           (cd "$RUNNER_TEMP" && sha256sum "$package.tar.gz" > "$package.SHA256SUMS.txt")
           echo "package=$package" >> "$GITHUB_OUTPUT"
       - name: Upload Linux package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ steps.package.outputs.package }}
           path: |
@@ -210,7 +210,7 @@ jobs:
           (cd "$RUNNER_TEMP" && shasum -a 256 "$package.tar.gz" > "$package.SHA256SUMS.txt")
           echo "package=$package" >> "$GITHUB_OUTPUT"
       - name: Upload macOS package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ steps.package.outputs.package }}
           path: |
@@ -235,7 +235,7 @@ jobs:
           set -euo pipefail
           bash scripts/prepare-discord-release-sdk.sh
       - name: Set up JDK 17
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
           java-version: '17'
@@ -293,7 +293,7 @@ jobs:
           (cd "$RUNNER_TEMP" && sha256sum "$package.apk" > "$package.SHA256SUMS.txt")
           echo "package=$package" >> "$GITHUB_OUTPUT"
       - name: Upload Android package
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ steps.package.outputs.package }}
           path: |
